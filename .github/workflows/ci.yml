@@ -116,16 +116,18 @@ jobs:
       - name: Test
         run: ctest --preset default
 
-  build-test-macos:
-    name: build and test (macOS)
+  # GitHub's hosted macOS runner does not expose a Metal device to MoltenVK.
+  # This job still verifies the macOS/AppleClang C++23 build and Vulkan linking.
+  build-macos:
+    name: build (macOS)
     runs-on: macos-latest
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ninja and MoltenVK
-        run: brew install ninja molten-vk
+      - name: Install ninja
+        run: brew install ninja
 
       - name: Checkout vcpkg
         uses: actions/checkout@v4
@@ -153,11 +155,6 @@ jobs:
 
       - name: Build
         run: cmake --build --preset default
-
-      - name: Test
-        run: |
-          export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/share/vulkan/icd.d/MoltenVK_icd.json"
-          ctest --preset default
 
   # GitHub's hosted Windows runner has no Vulkan ICD. This job still verifies
   # the Windows/MSVC C++23 build and that the executable links to Vulkan.
