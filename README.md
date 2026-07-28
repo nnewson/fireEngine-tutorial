@@ -1,4 +1,5 @@
 # Fire Engine Tutorial
+[![CI](https://github.com/nnewson/fireEngine-tutorial/actions/workflows/ci.yml/badge.svg)](https://github.com/nnewson/fireEngine-tutorial/actions/workflows/ci.yml)
 
 A tutorial for building a 3D engine step-by-step.
 Based on [FireEngine](https://github.com/nnewson/fireEngine) and documented
