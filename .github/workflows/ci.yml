@@ -116,8 +116,9 @@ jobs:
       - name: Test
         run: ctest --preset default
 
-  # GitHub's hosted macOS runner does not expose a Metal device to MoltenVK.
-  # This job still verifies the macOS/AppleClang C++23 build and Vulkan linking.
+  # KosmicKrisp requires Apple Silicon, macOS 26, and an SDK installation that
+  # includes the preview driver. CI therefore verifies only the macOS/AppleClang
+  # C++23 build and Vulkan-loader linking.
   build-macos:
     name: build (macOS)
     runs-on: macos-latest
