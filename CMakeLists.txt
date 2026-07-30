@@ -18,10 +18,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Locate Vulkan 1.4 headers and the loader supplied by the vcpkg toolchain.
-# REQUIRED makes configuration fail immediately if that dependency is missing
-# or older than Vulkan 1.4.
-find_package(Vulkan 1.4 REQUIRED)
+# Locate the Vulkan 1.4 headers supplied by the vcpkg toolchain. Vulkan-Hpp
+# loads the platform's Vulkan loader dynamically when the executable starts.
+find_package(VulkanHeaders 1.4 CONFIG REQUIRED)
 
 # Strict warnings keep tutorial code honest. The option allows a consumer to
 # disable only the "warnings are errors" policy when experimenting locally.
@@ -45,10 +44,9 @@ target_compile_definitions(fireEngineTutorial PRIVATE
     VULKAN_HPP_NO_CONSTRUCTORS
 )
 
-# Vulkan::Vulkan is CMake's imported target for both the Vulkan include path and
-# the platform's Vulkan loader library.
+# Vulkan::Headers provides the include path without linking a loader library.
 target_link_libraries(fireEngineTutorial PRIVATE
-    Vulkan::Vulkan
+    Vulkan::Headers
 )
 
 # MSVC and Clang/GCC spell equivalent warning options differently. Keep warning
@@ -67,6 +65,6 @@ else()
 endif()
 
 # Register the executable as a CTest smoke test. A successful test proves that
-# it linked to Vulkan and completed the RAII instance create/destroy lifecycle.
+# it loaded Vulkan and completed the RAII instance create/destroy lifecycle.
 enable_testing()
 add_test(NAME fireEngineTutorial COMMAND fireEngineTutorial)

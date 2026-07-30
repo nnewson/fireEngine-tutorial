@@ -24,7 +24,9 @@ Or run the same executable through CTest:
 ctest --preset default
 ```
 
-A Vulkan implementation must be installed at runtime.
+A Vulkan loader and implementation must be installed at runtime. The executable
+loads the platform's Vulkan loader dynamically rather than linking to one
+provided by vcpkg.
 
 On macOS, this tutorial targets the KosmicKrisp technical preview from the
 [LunarG Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/1.4.357.0/mac/getting_started.html).
@@ -37,5 +39,5 @@ export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/libkosmickrisp_icd.json"
 ./build/fireEngineTutorial
 ```
 
-The executable links to the Vulkan loader. It does not directly link
-KosmicKrisp or enable the unsupported Vulkan portability extensions.
+The executable does not directly link KosmicKrisp or enable the unsupported
+Vulkan portability extensions.

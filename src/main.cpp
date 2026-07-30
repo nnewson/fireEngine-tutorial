@@ -9,8 +9,8 @@
 int main()
 try
 {
-    // Context loads the Vulkan entry points exposed by the linked Vulkan
-    // loader. It must outlive every RAII Vulkan object created from it.
+    // Context dynamically loads the Vulkan entry points exposed by the system's
+    // Vulkan loader. It must outlive every RAII Vulkan object created from it.
     vk::raii::Context context;
 
     // Tell the loader that this application targets the Vulkan 1.4 API. This

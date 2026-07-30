@@ -84,7 +84,7 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build cmake mesa-vulkan-drivers
+          sudo apt-get install -y ninja-build cmake libvulkan1 mesa-vulkan-drivers
 
       - name: Checkout vcpkg
         uses: actions/checkout@v4
@@ -118,7 +118,7 @@ jobs:
 
   # KosmicKrisp requires Apple Silicon, macOS 26, and an SDK installation that
   # includes the preview driver. CI therefore verifies only the macOS/AppleClang
-  # C++23 build and Vulkan-loader linking.
+  # C++23 build.
   build-macos:
     name: build (macOS)
     runs-on: macos-latest
@@ -157,8 +157,8 @@ jobs:
       - name: Build
         run: cmake --build --preset default
 
-  # GitHub's hosted Windows runner has no Vulkan ICD. This job still verifies
-  # the Windows/MSVC C++23 build and that the executable links to Vulkan.
+  # GitHub's hosted Windows runner has no Vulkan ICD. This job therefore
+  # verifies only the Windows/MSVC C++23 build.
   build-windows:
     name: build (Windows)
     runs-on: windows-latest
