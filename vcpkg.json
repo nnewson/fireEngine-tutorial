@@ -4,6 +4,18 @@
   "dependencies": [
     "glfw3",
     "vulkan-headers",
-    "vulkan-loader"
+    {
+      "name": "vulkan-loader",
+      "features": [
+        {
+          "name": "xcb",
+          "platform": "linux"
+        },
+        {
+          "name": "xlib",
+          "platform": "linux"
+        }
+      ]
+    }
   ]
 }
