@@ -42,8 +42,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build cmake clang-tidy g++-14 \
-            libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
+            wget lsb-release software-properties-common
+          wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo add-apt-repository \
+            "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main"
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build cmake clang-tidy-22 g++-14 \
+            libxinerama-dev libxcursor-dev libxcb1-dev libx11-xcb-dev \
+            xorg-dev libglu1-mesa-dev pkg-config
 
       - name: Checkout vcpkg
         uses: actions/checkout@v4
@@ -74,7 +81,7 @@ jobs:
         run: cmake --build --preset default
 
       - name: clang-tidy
-        run: find src -name '*.cpp' -print0 | xargs -0 clang-tidy -p build
+        run: find src -name '*.cpp' -print0 | xargs -0 clang-tidy-22 -p build
 
   # -------- Per-platform build + test --------
 
@@ -93,7 +100,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build cmake g++-14 libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb \
-            libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
+            libxinerama-dev libxcursor-dev libxcb1-dev libx11-xcb-dev \
+            xorg-dev libglu1-mesa-dev pkg-config
 
       - name: Select Lavapipe Vulkan driver
         run: |
