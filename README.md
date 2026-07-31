@@ -32,6 +32,26 @@ Or run the same executable through CTest:
 ctest --preset default
 ```
 
+## Documentation
+
+Public API comments and the explanatory notes alongside the Vulkan implementation
+are published as Doxygen HTML. Install Doxygen, then build the pages from the
+repository root:
+
+```sh
+doxygen docs/Doxyfile
+```
+
+Open `build/docs/html/index.html` to browse the result. Documentation warnings
+fail the build, so missing parameter descriptions and invalid references are
+caught by CI. Every CI run uploads the generated site as the `doxygen-html`
+artifact.
+
+GitHub Pages deployment is optional. To publish after each push to `main`, select
+GitHub Actions as the repository's Pages source and set the repository Actions
+variable `PUBLISH_DOXYGEN` to `true`. Generated HTML remains under `build/` and
+is not checked into source control.
+
 The executable links the Vulkan loader supplied by vcpkg and uses GLFW to open a
 window and create its platform surface. A Vulkan driver must still be installed
 on the machine, and must expose Vulkan 1.4, dynamic rendering, synchronization 2,

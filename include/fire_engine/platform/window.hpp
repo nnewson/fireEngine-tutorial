@@ -12,25 +12,48 @@ namespace fire_engine
 {
 /* --- Classes --- */
 
-// Owns the native window while hiding GLFW's platform-specific surface work
-// from the renderer.
+/**
+ * @brief Owns a native window and hides GLFW's platform-specific surface work.
+ */
 class Window final
 {
 public:
+    /**
+     * @brief Creates a window without an OpenGL client context.
+     * @param width Initial width in screen coordinates; must be positive.
+     * @param height Initial height in screen coordinates; must be positive.
+     * @param title Null-terminated title displayed by the window system.
+     * @throws std::invalid_argument if either dimension is not positive.
+     * @throws std::runtime_error if GLFW cannot create the native window.
+     */
     Window(int width, int height, const std::string& title);
+
+    /** @brief Destroys the native GLFW window. */
     ~Window();
 
+    /// @brief Copy construction is disabled because the native window has one owner.
     Window(const Window&) = delete;
+    /// @brief Copy assignment is disabled because the native window has one owner.
     Window& operator=(const Window&) = delete;
+    /// @brief Move construction is disabled so surface lifetime ordering stays explicit.
     Window(Window&&) = delete;
+    /// @brief Move assignment is disabled so surface lifetime ordering stays explicit.
     Window& operator=(Window&&) = delete;
 
-    // The returned RAII surface is owned by Vulkan and must be destroyed before
-    // its instance; it does not own this Window.
+    /**
+     * @brief Creates a Vulkan surface for this window.
+     *
+     * The returned RAII surface is owned by Vulkan and must be destroyed before
+     * its instance. It does not own this Window.
+     *
+     * @param instance Vulkan instance that will own the surface.
+     * @return An exception-safe Vulkan surface wrapper.
+     * @throws std::runtime_error if GLFW cannot create the platform surface.
+     */
     [[nodiscard]] vk::raii::SurfaceKHR
     createVulkanSurface(const vk::raii::Instance& instance) const;
 
 private:
-    GLFWwindow* window_ = nullptr;
+    GLFWwindow* window_ = nullptr; ///< Native window owned by this object.
 };
 } // namespace fire_engine

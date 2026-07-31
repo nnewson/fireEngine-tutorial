@@ -14,39 +14,92 @@ class Window;
 
 /* --- Classes --- */
 
-// Owns the Vulkan objects established by milestone 2. Member declaration order
-// mirrors their lifetime dependencies so RAII destroys them safely in reverse.
+/**
+ * @brief Owns the Vulkan instance, surface, selected device, and queues.
+ *
+ * Member declaration order mirrors the Vulkan lifetime dependencies so RAII
+ * destroys each object safely in reverse.
+ */
 class Device final
 {
 public:
+    /**
+     * @brief Creates the Vulkan objects required by milestone 2.
+     * @param glfw Initialized GLFW owner used to discover platform extensions.
+     * @param window Window for which presentation support and a surface are required.
+     * @param applicationName Null-terminated name reported to the Vulkan runtime.
+     * @throws std::runtime_error if the runtime or available devices are unsuitable.
+     * @throws vk::SystemError if a Vulkan operation fails.
+     */
     Device(const Glfw& glfw, const Window& window, const std::string& applicationName);
+
+    /** @brief Releases every Vulkan resource in dependency-safe reverse order. */
     ~Device() = default;
 
+    /// @brief Copy construction is disabled because Vulkan handles have unique ownership.
     Device(const Device&) = delete;
+    /// @brief Copy assignment is disabled because Vulkan handles have unique ownership.
     Device& operator=(const Device&) = delete;
+    /// @brief Move construction is disabled so dependent handle addresses remain stable.
     Device(Device&&) = delete;
+    /// @brief Move assignment is disabled so dependent handle addresses remain stable.
     Device& operator=(Device&&) = delete;
 
+    /**
+     * @brief Returns the Vulkan-reported name of the selected physical device.
+     * @return A copy of the physical device name.
+     */
     [[nodiscard]] std::string name() const;
+
+    /**
+     * @brief Returns the queue-family index used for graphics commands.
+     * @return Selected graphics queue-family index.
+     */
     [[nodiscard]] std::uint32_t graphicsQueueFamily() const noexcept;
+
+    /**
+     * @brief Returns the queue-family index used for presentation.
+     * @return Selected presentation queue-family index.
+     */
     [[nodiscard]] std::uint32_t presentQueueFamily() const noexcept;
+
+    /**
+     * @brief Returns the logical-device queue used for graphics commands.
+     * @return Reference to the owned graphics queue.
+     */
     [[nodiscard]] const vk::raii::Queue& graphicsQueue() const noexcept;
+
+    /**
+     * @brief Returns the logical-device queue used for presentation.
+     * @return Reference to the owned presentation queue.
+     */
     [[nodiscard]] const vk::raii::Queue& presentQueue() const noexcept;
 
 private:
+    /**
+     * @brief Creates the Vulkan instance and optional validation messenger.
+     * @param glfw Initialized GLFW owner used to obtain platform extensions.
+     * @param applicationName Null-terminated name reported to Vulkan.
+     * @throws std::runtime_error if the Vulkan loader is older than version 1.4.
+     * @throws vk::SystemError if instance or messenger creation fails.
+     */
     void createInstance(const Glfw& glfw, const std::string& applicationName);
 
-    // vcpkg supplies and links the loader. Passing its entry point explicitly
-    // avoids relying on Vulkan-Hpp's optional dlopen helper or SDK environment.
+    /**
+     * @brief Vulkan-Hpp context connected to the loader supplied by vcpkg.
+     *
+     * Passing the loader entry point explicitly avoids Vulkan-Hpp's optional
+     * dlopen helper and any dependency on a Vulkan SDK environment.
+     */
     vk::raii::Context context_{vkGetInstanceProcAddr};
-    vk::raii::Instance instance_{nullptr};
-    vk::raii::DebugUtilsMessengerEXT debugMessenger_{nullptr};
-    vk::raii::SurfaceKHR surface_{nullptr};
-    vk::raii::PhysicalDevice physicalDevice_{nullptr};
-    vk::raii::Device logicalDevice_{nullptr};
-    vk::raii::Queue graphicsQueue_{nullptr};
-    vk::raii::Queue presentQueue_{nullptr};
-    std::uint32_t graphicsQueueFamily_ = 0;
-    std::uint32_t presentQueueFamily_ = 0;
+    vk::raii::Instance instance_{nullptr}; ///< Vulkan instance owned by this device setup.
+    vk::raii::DebugUtilsMessengerEXT debugMessenger_{nullptr}; ///< Optional validation messenger.
+    vk::raii::SurfaceKHR surface_{nullptr}; ///< Presentation surface associated with the window.
+    vk::raii::PhysicalDevice physicalDevice_{nullptr}; ///< Selected physical device.
+    vk::raii::Device logicalDevice_{nullptr}; ///< Logical interface to the selected device.
+    vk::raii::Queue graphicsQueue_{nullptr};  ///< Queue used for graphics commands.
+    vk::raii::Queue presentQueue_{nullptr};   ///< Queue used to present rendered images.
+    std::uint32_t graphicsQueueFamily_ = 0;   ///< Family index of graphicsQueue_.
+    std::uint32_t presentQueueFamily_ = 0;    ///< Family index of presentQueue_.
 };
 } // namespace fire_engine

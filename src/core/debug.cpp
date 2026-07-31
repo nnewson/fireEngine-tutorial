@@ -70,9 +70,16 @@ namespace
 {
 /* --- File-local functions --- */
 
-// Vulkan calls this function synchronously when a selected message is emitted.
-// Returning false tells Vulkan that the callback observed the message but does
-// not want to abort the API call that triggered it.
+/**
+ * @brief Forwards a Vulkan validation message to the engine logger.
+ *
+ * Vulkan calls this function synchronously when a selected message is emitted.
+ * Returning false tells Vulkan that the callback observed the message but does
+ * not want to abort the API call that triggered it.
+ *
+ * @param callbackData Validation message data supplied by Vulkan.
+ * @return VK_FALSE so the API call that produced the message can continue.
+ */
 VKAPI_ATTR vk::Bool32 VKAPI_CALL
 debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT, vk::DebugUtilsMessageTypeFlagsEXT,
               const vk::DebugUtilsMessengerCallbackDataEXT* callbackData, void*) noexcept

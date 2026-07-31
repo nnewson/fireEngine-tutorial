@@ -70,6 +70,11 @@ namespace
 {
 /* --- File-local functions --- */
 
+/**
+ * @brief Sends a GLFW error to the shared logger.
+ * @param errorCode GLFW's platform-independent error code.
+ * @param description Human-readable explanation owned by GLFW.
+ */
 void errorCallback(int errorCode, const char* description) noexcept
 {
     // The shared logger is noexcept because C++ exceptions must not escape
