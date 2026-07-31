@@ -1,0 +1,64 @@
+# Project identity
+PROJECT_NAME           = "Fire Engine Tutorial"
+PROJECT_BRIEF          = "A step-by-step Vulkan 1.4 rendering tutorial"
+
+# Paths are relative to the repository root. Run this file with:
+#   cmake -E make_directory build/docs
+#   doxygen docs/Doxyfile
+OUTPUT_DIRECTORY       = build/docs
+STRIP_FROM_PATH        = .
+INPUT                  = README.md \
+                         include/fire_engine \
+                         src
+FILE_PATTERNS          = *.hpp \
+                         *.cpp \
+                         *.md
+RECURSIVE              = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# Extraction
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_ANON_NSPACES   = YES
+INTERNAL_DOCS          = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+BUILTIN_STL_SUPPORT    = YES
+
+# Source presentation
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+SHOW_FILES             = YES
+SHOW_NAMESPACES        = YES
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+
+# Parsing
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = FIRE_ENGINE_ENABLE_VALIDATION \
+                         VKAPI_ATTR= \
+                         VKAPI_CALL= \
+                         "explicit(value)="
+SKIP_FUNCTION_MACROS   = YES
+
+# Treat incomplete or invalid documentation as a failed build.
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+
+# HTML is the only generated format committed to CI artifacts or Pages.
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+GENERATE_LATEX         = NO
+HAVE_DOT               = NO

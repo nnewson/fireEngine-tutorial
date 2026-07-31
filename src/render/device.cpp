@@ -22,28 +22,38 @@ namespace
 {
 /* --- File-local constants --- */
 
-// Highest scheduler priority within the family. This is a relative Vulkan
-// priority, not an operating-system one. Static storage ensures the pointers
-// retained by queue create infos remain valid until vkCreateDevice reads them.
+/**
+ * @brief Highest relative scheduler priority within a Vulkan queue family.
+ *
+ * This is not an operating-system priority. Static storage ensures the pointers
+ * retained by queue create infos remain valid until vkCreateDevice reads them.
+ */
 constexpr float kQueuePriority = 1.0F;
+
+/** @brief Project version encoded for Vulkan application metadata. */
 constexpr std::uint32_t kVersion = VK_MAKE_API_VERSION(
     0, FIRE_ENGINE_VERSION_MAJOR, FIRE_ENGINE_VERSION_MINOR, FIRE_ENGINE_VERSION_PATCH);
 
 /* --- File-local types --- */
 
-// Graphics work and presentation are capabilities of queue families. They are
-// often the same family, but Vulkan permits a platform to expose them separately.
+/**
+ * @brief Queue-family indices that can perform graphics work and presentation.
+ *
+ * They are often the same family, but Vulkan permits a platform to expose them
+ * separately. An empty member means no suitable family was found.
+ */
 struct QueueFamilies
 {
-    std::optional<std::uint32_t> graphics;
-    std::optional<std::uint32_t> present;
+    std::optional<std::uint32_t> graphics; ///< Graphics-capable family, when available.
+    std::optional<std::uint32_t> present;  ///< Presentation-capable family, when available.
 };
 
+/** @brief Physical device and queue families selected for logical-device creation. */
 struct DeviceSelection
 {
-    vk::raii::PhysicalDevice physicalDevice;
-    std::uint32_t graphicsQueueFamily;
-    std::uint32_t presentQueueFamily;
+    vk::raii::PhysicalDevice physicalDevice; ///< Physical device that passed inspection.
+    std::uint32_t graphicsQueueFamily;       ///< Selected graphics family index.
+    std::uint32_t presentQueueFamily;        ///< Selected presentation family index.
 };
 
 /* --- File-local function declarations --- */
@@ -162,6 +172,13 @@ namespace
 {
 /* --- File-local functions --- */
 
+/**
+ * @brief Finds queue families capable of graphics work and surface presentation.
+ * @param physicalDevice Device whose queue families are inspected.
+ * @param surface Surface used to query presentation support.
+ * @return The best graphics and presentation families found on the device.
+ * @throws vk::SystemError if Vulkan cannot query presentation support.
+ */
 [[nodiscard]] QueueFamilies findQueueFamilies(const vk::raii::PhysicalDevice& physicalDevice,
                                               const vk::raii::SurfaceKHR& surface)
 {
@@ -194,6 +211,12 @@ namespace
     return result;
 }
 
+/**
+ * @brief Tests whether a physical device advertises the swapchain extension.
+ * @param physicalDevice Device whose extension properties are inspected.
+ * @return true when VK_KHR_swapchain is available; otherwise false.
+ * @throws vk::SystemError if Vulkan cannot enumerate device extensions.
+ */
 [[nodiscard]] bool supportsSwapchain(const vk::raii::PhysicalDevice& physicalDevice)
 {
     // Presentation requires VK_KHR_swapchain even though the application and
@@ -207,6 +230,13 @@ namespace
                                });
 }
 
+/**
+ * @brief Inspects whether a physical device satisfies the tutorial requirements.
+ * @param physicalDevice Candidate device to inspect.
+ * @param surface Surface for which presentation support is required.
+ * @return A complete selection on success, or a human-readable rejection reason.
+ * @throws vk::SystemError if a Vulkan capability query fails.
+ */
 [[nodiscard]] std::expected<DeviceSelection, std::string>
 inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::SurfaceKHR& surface)
 {
@@ -275,6 +305,18 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
     };
 }
 
+/**
+ * @brief Chooses the best suitable physical device exposed by an instance.
+ *
+ * Selection is deterministic and prefers a discrete GPU while accepting
+ * integrated and software devices that satisfy the same requirements.
+ *
+ * @param instance Vulkan instance used to enumerate physical devices.
+ * @param surface Surface for which presentation support is required.
+ * @return The selected physical device and queue-family indices.
+ * @throws std::runtime_error if no physical device is present or suitable.
+ * @throws vk::SystemError if a Vulkan enumeration or capability query fails.
+ */
 [[nodiscard]] DeviceSelection choosePhysicalDevice(const vk::raii::Instance& instance,
                                                    const vk::raii::SurfaceKHR& surface)
 {
@@ -323,6 +365,11 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
     return bestDevice.value();
 }
 
+/**
+ * @brief Creates queue requests for the selected graphics and presentation families.
+ * @param selection Device and family indices chosen during physical-device inspection.
+ * @return One queue create info per unique queue family.
+ */
 [[nodiscard]] std::vector<vk::DeviceQueueCreateInfo>
 makeQueueCreateInfos(const DeviceSelection& selection)
 {
@@ -345,6 +392,12 @@ makeQueueCreateInfos(const DeviceSelection& selection)
     return queueCreateInfos;
 }
 
+/**
+ * @brief Creates a logical device with the queues and features used by the tutorial.
+ * @param selection Physical device and queue families to use.
+ * @return The newly created logical device.
+ * @throws vk::SystemError if Vulkan cannot create the logical device.
+ */
 [[nodiscard]] vk::raii::Device createLogicalDeviceFor(const DeviceSelection& selection)
 {
     const std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos = makeQueueCreateInfos(selection);

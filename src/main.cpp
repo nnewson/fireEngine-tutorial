@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Program entry point for the milestone 2 startup smoke test.
+ */
+
 #include <exception>
 #include <print>
 #include <stdexcept>
@@ -10,6 +15,10 @@
 
 /* --- Public functions --- */
 
+/**
+ * @brief Runs the milestone 2 Vulkan startup smoke test.
+ * @return Zero after successful device and queue creation; otherwise one.
+ */
 int main()
 try
 {
