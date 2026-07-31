@@ -35,8 +35,10 @@ ctest --preset default
 ## Documentation
 
 Public API comments and the explanatory notes alongside the Vulkan implementation
-are published as Doxygen HTML. Install Doxygen, then build the pages from the
-repository root:
+are published as Doxygen HTML. The generated API reference is available at
+[nnewson.github.io/fireEngine-tutorial](https://nnewson.github.io/fireEngine-tutorial/).
+
+To build the pages locally, install Doxygen and run this from the repository root:
 
 ```sh
 cmake -E make_directory build/docs
