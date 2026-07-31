@@ -1,7 +1,9 @@
 {
   "name": "fire-engine-tutorial",
-  "version-string": "0.1.0",
+  "version-string": "0.2.0",
   "dependencies": [
-    "vulkan-headers"
+    "glfw3",
+    "vulkan-headers",
+    "vulkan-loader"
   ]
 }

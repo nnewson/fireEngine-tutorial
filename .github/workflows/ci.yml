@@ -24,7 +24,7 @@ jobs:
           sudo apt-get install -y clang-format-22
       - name: Check formatting
         run: |
-          find src -type f \( \
+          find src include -type f \( \
             -name '*.hpp' -o -name '*.cpp' -o -name '*.h' -o -name '*.cxx' \
           \) -print0 | xargs -0 clang-format-22 --dry-run -Werror
 
@@ -39,13 +39,16 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build cmake clang-tidy
+          sudo apt-get install -y \
+            ninja-build cmake clang-tidy \
+            libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
 
       - name: Checkout vcpkg
         uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
           path: vcpkg
+          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -69,28 +72,34 @@ jobs:
         run: cmake --build --preset default
 
       - name: clang-tidy
-        run: clang-tidy -p build src/main.cpp
+        run: find src -name '*.cpp' -print0 | xargs -0 clang-tidy -p build
 
   # -------- Per-platform build + test --------
 
   build-test-linux:
     name: build and test (Linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      # Select Mesa's software Vulkan driver explicitly so this job does not
+      # depend on GPU passthrough or another runner-provided ICD.
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build cmake libvulkan1 mesa-vulkan-drivers
+          sudo apt-get install -y \
+            ninja-build cmake libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb \
+            libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
 
       - name: Checkout vcpkg
         uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
           path: vcpkg
+          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -113,8 +122,11 @@ jobs:
       - name: Build
         run: cmake --build --preset default
 
+      - name: Inspect Vulkan runtime
+        run: xvfb-run --auto-servernum vulkaninfo --summary
+
       - name: Test
-        run: ctest --preset default
+        run: xvfb-run --auto-servernum ctest --preset default
 
   # KosmicKrisp requires Apple Silicon, macOS 26, and an SDK installation that
   # includes the preview driver. CI therefore verifies only the macOS/AppleClang
@@ -135,6 +147,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
+          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -178,6 +191,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
+          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
 
       - name: Bootstrap vcpkg
         run: .\vcpkg\bootstrap-vcpkg.bat

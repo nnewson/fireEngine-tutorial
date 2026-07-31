@@ -1,52 +1,45 @@
 #include <exception>
-#include <iostream>
+#include <print>
+#include <stdexcept>
+#include <string>
 
-#include <vulkan/vulkan_raii.hpp>
+#include <fire_engine/core/log.hpp>
+#include <fire_engine/platform/glfw.hpp>
+#include <fire_engine/platform/window.hpp>
+#include <fire_engine/render/device.hpp>
 
-// This is a function try block: the try applies to the entire function body.
-// For main(), it is a compact way to turn any startup exception into a useful
-// error message and a non-zero process exit code.
+/* --- Public functions --- */
+
 int main()
 try
 {
-    // Context dynamically loads the Vulkan entry points exposed by the system's
-    // Vulkan loader. It must outlive every RAII Vulkan object created from it.
-    vk::raii::Context context;
+    const std::string applicationName = "fireEngine Tutorial";
 
-    // Tell the loader that this application targets the Vulkan 1.4 API. This
-    // does not select or create a physical GPU; it only sets the API version
-    // used when negotiating creation of the instance.
-    constexpr vk::ApplicationInfo applicationInfo{
-        .pApplicationName = "Fire Engine Vulkan Tutorial",
-        .applicationVersion = VK_MAKE_API_VERSION(0, 0, 1, 0),
-        .pEngineName = "No Engine",
-        .engineVersion = VK_MAKE_API_VERSION(0, 0, 1, 0),
-        .apiVersion = vk::ApiVersion14,
-    };
+    // GLFW must outlive the window, and the window must outlive the Vulkan
+    // surface owned by Device. Local declaration order gives us that teardown.
+    fire_engine::Glfw glfw;
+    const fire_engine::Window window{800, 600, applicationName};
+    const fire_engine::Device device{glfw, window, applicationName};
 
-    // KosmicKrisp is a conformant Vulkan implementation, so it neither needs
-    // nor supports the portability-enumeration extension used by MoltenVK.
-    // Selecting KosmicKrisp is left to the Vulkan loader configuration.
-    const vk::InstanceCreateInfo instanceCreateInfo{
-        .pApplicationInfo = &applicationInfo,
-    };
-
+    // Vulkan guarantees a valid handle for a queue family and index that were
+    // already validated during logical-device creation, so this cannot fail in
+    // practice. It is here so the smoke test exercises the accessors rather than
+    // printing a claim about the queues that nothing checks.
+    if (!*device.graphicsQueue() || !*device.presentQueue())
     {
-        // Constructing the RAII object calls vkCreateInstance. The variable is
-        // intentionally never queried: owning the instance for this scope is
-        // its entire purpose, hence [[maybe_unused]]. When the scope ends, its
-        // destructor calls vkDestroyInstance automatically.
-        [[maybe_unused]] const vk::raii::Instance instance{context, instanceCreateInfo};
-        std::cout << "Vulkan 1.4 instance created.\n";
+        throw std::runtime_error("Vulkan returned a null device queue");
     }
 
-    std::cout << "Vulkan instance destroyed.\n";
+    std::println("Selected Vulkan 1.4 device: {}", device.name());
+    std::println("Graphics queue family: {}", device.graphicsQueueFamily());
+    std::println("Present queue family: {}", device.presentQueueFamily());
+    std::println("Logical device and queues created.");
     return 0;
 }
 catch (const std::exception& error)
 {
-    // Vulkan-Hpp reports loader and Vulkan failures as C++ exceptions. Keep
-    // those from escaping main and make the smoke test fail clearly instead.
-    std::cerr << "Vulkan instance creation failed: " << error.what() << '\n';
+    // The logger catches formatting failures and falls back to allocation-free
+    // C stdio, preserving the original startup error.
+    fire_engine::log("Vulkan startup failed: {}", error.what());
     return 1;
 }
