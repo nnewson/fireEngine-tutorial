@@ -85,9 +85,6 @@ jobs:
       CC: gcc-14
       CXX: g++-14
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-      # Select Mesa's software Vulkan driver explicitly so this job does not
-      # depend on GPU passthrough or another runner-provided ICD.
-      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
     steps:
       - uses: actions/checkout@v4
 
@@ -97,6 +94,21 @@ jobs:
           sudo apt-get install -y \
             ninja-build cmake g++-14 libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb \
             libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
+
+      - name: Select Lavapipe Vulkan driver
+        run: |
+          # Mesa's manifest name has changed between package versions. Discover
+          # the installed Lavapipe ICD instead of depending on a particular name.
+          lavapipe_manifest="$(find /usr/share/vulkan/icd.d \
+            -maxdepth 1 -type f -name 'lvp_icd*.json' -print -quit)"
+
+          if [[ -z "${lavapipe_manifest}" ]]; then
+            echo "The mesa-vulkan-drivers package did not install a Lavapipe ICD." >&2
+            exit 1
+          fi
+
+          echo "Using Lavapipe ICD: ${lavapipe_manifest}"
+          echo "VK_DRIVER_FILES=${lavapipe_manifest}" >> "${GITHUB_ENV}"
 
       - name: Checkout vcpkg
         uses: actions/checkout@v4
