@@ -3,6 +3,7 @@ PROJECT_NAME           = "Fire Engine Tutorial"
 PROJECT_BRIEF          = "A step-by-step Vulkan 1.4 rendering tutorial"
 
 # Paths are relative to the repository root. Run this file with:
+#   cmake -E make_directory build/docs
 #   doxygen docs/Doxyfile
 OUTPUT_DIRECTORY       = build/docs
 STRIP_FROM_PATH        = .

@@ -39,6 +39,7 @@ are published as Doxygen HTML. Install Doxygen, then build the pages from the
 repository root:
 
 ```sh
+cmake -E make_directory build/docs
 doxygen docs/Doxyfile
 ```
 

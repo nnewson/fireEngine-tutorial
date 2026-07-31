@@ -95,7 +95,9 @@ jobs:
           sudo apt-get install -y doxygen
 
       - name: Build documentation
-        run: doxygen docs/Doxyfile
+        run: |
+          cmake -E make_directory build/docs
+          doxygen docs/Doxyfile
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
