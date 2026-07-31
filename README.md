@@ -12,6 +12,9 @@ vcpkg is used to manage dependencies. Install it from
 pins a registry baseline so local and CI builds resolve the same dependency
 versions.
 
+All platforms require a C++23 compiler and standard library. This tutorial uses
+C++23 library facilities including `std::print` and `std::println`.
+
 Set `VCPKG_ROOT` to a vcpkg checkout, then configure and build:
 
 ```sh

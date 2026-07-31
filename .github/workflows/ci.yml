@@ -30,8 +30,10 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
+      CC: gcc-14
+      CXX: g++-14
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +42,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build cmake clang-tidy \
+            ninja-build cmake clang-tidy g++-14 \
             libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
 
       - name: Checkout vcpkg
@@ -80,6 +82,8 @@ jobs:
     name: build and test (Linux)
     runs-on: ubuntu-24.04
     env:
+      CC: gcc-14
+      CXX: g++-14
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       # Select Mesa's software Vulkan driver explicitly so this job does not
       # depend on GPU passthrough or another runner-provided ICD.
@@ -91,7 +95,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build cmake libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb \
+            ninja-build cmake g++-14 libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb \
             libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config
 
       - name: Checkout vcpkg
