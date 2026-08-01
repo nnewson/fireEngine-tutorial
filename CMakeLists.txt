@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 # Declare the project metadata and tell CMake that this repository contains
 # C++ sources. No C compiler is needed for this tutorial.
 project(fire_engine_tutorial
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "A development tutorial to building your own fireEngine"
     LANGUAGES CXX
 )
@@ -18,11 +18,12 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Locate the window-system integration, Vulkan 1.4 headers, and the loader
-# supplied by the vcpkg toolchain.
+# Locate the window-system integration, memory allocator, Vulkan 1.4 headers,
+# and loader supplied by the vcpkg toolchain.
 find_package(glfw3 CONFIG REQUIRED)
 find_package(VulkanHeaders 1.4 CONFIG REQUIRED)
 find_package(VulkanLoader 1.4 CONFIG REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 
 # Strict warnings keep tutorial code honest. The option allows a consumer to
 # disable only the "warnings are errors" policy when experimenting locally.
@@ -37,7 +38,9 @@ add_executable(fireEngineTutorial
     src/main.cpp
     src/platform/glfw.cpp
     src/platform/window.cpp
+    src/render/allocator.cpp
     src/render/device.cpp
+    src/render/swapchain.cpp
 )
 
 target_include_directories(fireEngineTutorial PRIVATE include)
@@ -71,8 +74,10 @@ target_compile_definitions(fireEngineTutorial PRIVATE
 )
 
 # GLFW creates the platform surface; Vulkan::Loader supplies the dispatching
-# library that discovers the machine's installed Vulkan drivers.
+# library that discovers the machine's installed Vulkan drivers. VMA manages
+# the memory allocations that later render resources will use.
 target_link_libraries(fireEngineTutorial PRIVATE
+    GPUOpen::VulkanMemoryAllocator
     glfw
     Vulkan::Headers
     Vulkan::Loader
@@ -82,7 +87,9 @@ target_link_libraries(fireEngineTutorial PRIVATE
 # levels consistent across platforms and add the appropriate error flag when
 # the option above is enabled.
 if(MSVC)
-    target_compile_options(fireEngineTutorial PRIVATE /W4)
+    # Imported dependency headers are marked external. Lower their warning level
+    # so VMA's implementation is not held to first-party /W4 /WX policy.
+    target_compile_options(fireEngineTutorial PRIVATE /W4 /external:W0)
     if(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS)
         target_compile_options(fireEngineTutorial PRIVATE /WX)
     endif()
@@ -94,7 +101,7 @@ else()
 endif()
 
 # Register the executable as a CTest smoke test. A successful test proves that
-# it created a window surface, selected a Vulkan 1.4 GPU, and created its queues.
+# it created a Vulkan 1.4 device, VMA allocator, and window swapchain with views.
 enable_testing()
 add_test(NAME fireEngineTutorial COMMAND fireEngineTutorial)
 set_tests_properties(fireEngineTutorial PROPERTIES TIMEOUT 30)

@@ -52,6 +52,30 @@ public:
     [[nodiscard]] std::string name() const;
 
     /**
+     * @brief Returns the Vulkan instance used by this device setup.
+     * @return Reference to the owned instance.
+     */
+    [[nodiscard]] const vk::raii::Instance& instance() const noexcept;
+
+    /**
+     * @brief Returns the presentation surface associated with the window.
+     * @return Reference to the owned surface.
+     */
+    [[nodiscard]] const vk::raii::SurfaceKHR& surface() const noexcept;
+
+    /**
+     * @brief Returns the selected physical device.
+     * @return Reference to the selected physical device.
+     */
+    [[nodiscard]] const vk::raii::PhysicalDevice& physicalDevice() const noexcept;
+
+    /**
+     * @brief Returns the logical device used to create render resources.
+     * @return Reference to the owned logical device.
+     */
+    [[nodiscard]] const vk::raii::Device& logicalDevice() const noexcept;
+
+    /**
      * @brief Returns the queue-family index used for graphics commands.
      * @return Selected graphics queue-family index.
      */
