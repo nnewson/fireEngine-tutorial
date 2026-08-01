@@ -53,6 +53,12 @@ public:
     [[nodiscard]] vk::raii::SurfaceKHR
     createVulkanSurface(const vk::raii::Instance& instance) const;
 
+    /**
+     * @brief Returns the drawable framebuffer size in physical pixels.
+     * @return Current framebuffer extent; either dimension may be zero while minimized.
+     */
+    [[nodiscard]] vk::Extent2D framebufferExtent() const noexcept;
+
 private:
     GLFWwindow* window_ = nullptr; ///< Native window owned by this object.
 };

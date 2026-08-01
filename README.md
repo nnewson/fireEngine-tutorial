@@ -3,7 +3,7 @@
 
 A tutorial for building a 3D engine step-by-step.
 Based on [FireEngine](https://github.com/nnewson/fireEngine) and documented
-under the development blog at [nnewson.github.io](https://nnewson.github.io)
+under the development blog at [nnewson.dev](https://nnewson.dev)
 
 ## Build and run
 
@@ -36,7 +36,7 @@ ctest --preset default
 
 Public API comments and the explanatory notes alongside the Vulkan implementation
 are published as Doxygen HTML. The generated API reference is available at
-[nnewson.github.io/fireEngine-tutorial](https://nnewson.github.io/fireEngine-tutorial/).
+[nnewson.dev/fireEngine-tutorial](https://nnewson.dev/fireEngine-tutorial/).
 
 To build the pages locally, install Doxygen and run this from the repository root:
 
@@ -55,10 +55,12 @@ GitHub Actions as the repository's Pages source and set the repository Actions
 variable `PUBLISH_DOXYGEN` to `true`. Generated HTML remains under `build/` and
 is not checked into source control.
 
-The executable links the Vulkan loader supplied by vcpkg and uses GLFW to open a
-window and create its platform surface. A Vulkan driver must still be installed
-on the machine, and must expose Vulkan 1.4, dynamic rendering, synchronization 2,
-and swapchain presentation support.
+The executable links the Vulkan loader supplied by vcpkg, uses GLFW to create
+its window surface, and initializes Vulkan Memory Allocator for future render
+resources. It selects a suitable presentation format and mode, then creates a
+swapchain and one image view per swapchain image. A Vulkan driver must still be
+installed on the machine, and must expose Vulkan 1.4, dynamic rendering,
+synchronization 2, and swapchain presentation support.
 
 On macOS, this tutorial targets the KosmicKrisp technical preview from the
 [LunarG Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/1.4.357.0/mac/getting_started.html).
@@ -69,4 +71,5 @@ optional override when selecting among multiple installed drivers.
 
 The executable does not directly link KosmicKrisp or enable the unsupported
 Vulkan portability extensions. At this milestone the GLFW window closes as soon
-as device selection and logical-device creation have completed successfully.
+as allocator, swapchain, and image-view creation have completed successfully;
+command recording and rendering follow in later milestones.

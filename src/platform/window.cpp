@@ -1,5 +1,6 @@
 #include <fire_engine/platform/window.hpp>
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -48,5 +49,18 @@ vk::raii::SurfaceKHR Window::createVulkanSurface(const vk::raii::Instance& insta
                                  vk::to_string(static_cast<vk::Result>(result)));
     }
     return {instance, surface};
+}
+
+vk::Extent2D Window::framebufferExtent() const noexcept
+{
+    // Framebuffer pixels, rather than logical window coordinates, match the
+    // resolution required by Vulkan on high-DPI displays.
+    int width = 0;
+    int height = 0;
+    glfwGetFramebufferSize(window_, &width, &height);
+    return {
+        .width = width > 0 ? static_cast<std::uint32_t>(width) : 0U,
+        .height = height > 0 ? static_cast<std::uint32_t>(height) : 0U,
+    };
 }
 } // namespace fire_engine

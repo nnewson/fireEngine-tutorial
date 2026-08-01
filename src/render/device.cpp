@@ -95,6 +95,26 @@ std::string Device::name() const
     return physicalDevice_.getProperties().deviceName.data();
 }
 
+const vk::raii::Instance& Device::instance() const noexcept
+{
+    return instance_;
+}
+
+const vk::raii::SurfaceKHR& Device::surface() const noexcept
+{
+    return surface_;
+}
+
+const vk::raii::PhysicalDevice& Device::physicalDevice() const noexcept
+{
+    return physicalDevice_;
+}
+
+const vk::raii::Device& Device::logicalDevice() const noexcept
+{
+    return logicalDevice_;
+}
+
 std::uint32_t Device::graphicsQueueFamily() const noexcept
 {
     return graphicsQueueFamily_;
