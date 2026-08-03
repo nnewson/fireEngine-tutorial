@@ -86,7 +86,7 @@ static_assert(std::is_standard_layout_v<Vertex>,
               "Vertex must remain standard-layout for Vulkan attribute offsets");
 
 // The binding stride and the attribute offsets above describe the same struct to
-// Vulkan twice. Padding introduced by a future member would silently desynchronise
+// Vulkan twice. Padding introduced by a future member would silently desynchronize
 // them, so pin the expected size: two floats of position and three of color.
 static_assert(sizeof(Vertex) == 5 * sizeof(float),
               "Vertex must stay tightly packed to match kVertexBinding.stride");
