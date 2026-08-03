@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 # Declare the project metadata and tell CMake that this repository contains
 # C++ sources. No C compiler is needed for this tutorial.
 project(fire_engine_tutorial
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "A development tutorial to building your own fireEngine"
     LANGUAGES CXX
 )
@@ -18,9 +18,16 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Locate the window-system integration, memory allocator, Vulkan 1.4 headers,
-# and loader supplied by the vcpkg toolchain.
+# Locate the window-system integration, memory allocator, shader compiler,
+# Vulkan 1.4 headers, and loader supplied by the vcpkg toolchain.
+#
+# The slang package exports slang::slangc as an imported executable target, so
+# the shader command below names that target rather than searching for a binary.
+# This uses the compiler pinned by the "shader-slang" entry in vcpkg.json instead
+# of whichever slangc happens to be installed on the machine, and needs no
+# knowledge of where vcpkg lays out its tools directory.
 find_package(glfw3 CONFIG REQUIRED)
+find_package(slang CONFIG REQUIRED)
 find_package(VulkanHeaders 1.4 CONFIG REQUIRED)
 find_package(VulkanLoader 1.4 CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
@@ -40,6 +47,7 @@ add_executable(fireEngineTutorial
     src/platform/window.cpp
     src/render/allocator.cpp
     src/render/device.cpp
+    src/render/pipeline.cpp
     src/render/swapchain.cpp
 )
 
@@ -65,6 +73,13 @@ target_compile_definitions(fireEngineTutorial PRIVATE
     VULKAN_HPP_NO_CONSTRUCTORS
 )
 
+# Pipeline creation loads build-time-compiled SPIR-V from this directory. An
+# absolute path keeps direct runs and CTest independent of their working folder.
+set(FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+target_compile_definitions(fireEngineTutorial PRIVATE
+    FIRE_ENGINE_SHADER_DIRECTORY="${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}"
+)
+
 # Validation is most useful while developing and has a runtime cost, so it is
 # tied to the Debug configuration. A generator expression is used rather than a
 # CMAKE_BUILD_TYPE test because multi-configuration generators such as Visual
@@ -82,6 +97,46 @@ target_link_libraries(fireEngineTutorial PRIVATE
     Vulkan::Headers
     Vulkan::Loader
 )
+
+# Compile the shader once into a single SPIR-V module. Slang finds every
+# [shader(...)] entry point in the file, and SPIR-V permits any number of entry
+# points per module, so both stages come from one compiler invocation and one
+# file that src/render/pipeline.cpp reads once.
+#
+# Slang emits SPIR-V 1.6 directly, which Vulkan 1.4 accepts, and every shader
+# warning is treated as a build failure.
+#
+# -fvk-use-entrypoint-name preserves "vertexMain" and "fragmentMain" in the
+# output. Those names must match the pName values in src/render/pipeline.cpp.
+# Slang only collapses an entry point to "main" when it emits exactly one, so
+# this flag is what keeps the names stable if the shader is ever split up.
+#
+# DEPENDS lists the shader source and the compiler itself, so upgrading slangc
+# through vcpkg forces a recompile. It does not track Slang `import`ed or
+# `#include`d modules; add `-depfile` and DEPFILE once the shader spans more
+# than this one file.
+set(FIRE_ENGINE_SHADER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/triangle.slang")
+set(FIRE_ENGINE_SHADER_BINARY "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}/triangle.spv")
+
+add_custom_command(
+    OUTPUT "${FIRE_ENGINE_SHADER_BINARY}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}"
+    COMMAND slang::slangc
+        "${FIRE_ENGINE_SHADER_SOURCE}"
+        -target spirv
+        -profile spirv_1_6
+        -matrix-layout-column-major
+        -fvk-use-entrypoint-name
+        -restrictive-capability-check
+        -warnings-as-errors all
+        -o "${FIRE_ENGINE_SHADER_BINARY}"
+    DEPENDS "${FIRE_ENGINE_SHADER_SOURCE}" slang::slangc
+    COMMENT "Compiling Slang shader to SPIR-V"
+    VERBATIM
+)
+
+add_custom_target(fireEngineShaders ALL DEPENDS "${FIRE_ENGINE_SHADER_BINARY}")
+add_dependencies(fireEngineTutorial fireEngineShaders)
 
 # MSVC and Clang/GCC spell equivalent warning options differently. Keep warning
 # levels consistent across platforms and add the appropriate error flag when
@@ -101,7 +156,7 @@ else()
 endif()
 
 # Register the executable as a CTest smoke test. A successful test proves that
-# it created a Vulkan 1.4 device, VMA allocator, and window swapchain with views.
+# it created a Vulkan 1.4 device, VMA allocator, swapchain, and graphics pipeline.
 enable_testing()
 add_test(NAME fireEngineTutorial COMMAND fireEngineTutorial)
 set_tests_properties(fireEngineTutorial PROPERTIES TIMEOUT 30)

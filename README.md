@@ -57,19 +57,26 @@ is not checked into source control.
 
 The executable links the Vulkan loader supplied by vcpkg, uses GLFW to create
 its window surface, and initializes Vulkan Memory Allocator for future render
-resources. It selects a suitable presentation format and mode, then creates a
-swapchain and one image view per swapchain image. A Vulkan driver must still be
-installed on the machine, and must expose Vulkan 1.4, dynamic rendering,
-synchronization 2, and swapchain presentation support.
+resources. It selects a suitable presentation format and mode, creates a
+swapchain and one image view per swapchain image, then builds a push-descriptor
+layout and dynamic-rendering graphics pipeline from build-time-compiled Slang.
+A Vulkan driver must still be installed on the machine, and must expose Vulkan
+1.4, dynamic rendering, synchronization 2, push descriptors, maintenance5, and
+swapchain presentation support. Because Vulkan 1.4 folded maintenance5 into the
+core API, pipeline creation reads the compiled SPIR-V directly and no
+`VkShaderModule` is ever created.
 
 On macOS, this tutorial targets the KosmicKrisp technical preview from the
 [LunarG Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/1.4.357.0/mac/getting_started.html).
 It requires Apple Silicon and macOS 26. Once the SDK installer has registered
 its driver manifest in the standard Vulkan search path, the executable runs
 without sourcing the SDK environment. `VK_DRIVER_FILES` remains available as an
-optional override when selecting among multiple installed drivers.
+optional override when selecting among multiple installed drivers. Shader
+compilation likewise uses `slangc` supplied by vcpkg rather than an SDK tool in
+the environment.
 
 The executable does not directly link KosmicKrisp or enable the unsupported
 Vulkan portability extensions. At this milestone the GLFW window closes as soon
-as allocator, swapchain, and image-view creation have completed successfully;
-command recording and rendering follow in later milestones.
+as allocator, swapchain, image-view, and graphics-pipeline creation have
+completed successfully; command recording and rendering follow in later
+milestones.

@@ -24,7 +24,7 @@ class Device final
 {
 public:
     /**
-     * @brief Creates the Vulkan objects required by milestone 2.
+     * @brief Creates the Vulkan instance, surface, selected device, and queues.
      * @param glfw Initialized GLFW owner used to discover platform extensions.
      * @param window Window for which presentation support and a surface are required.
      * @param applicationName Null-terminated name reported to the Vulkan runtime.

@@ -277,8 +277,8 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
     // preview drivers and to show that querying support is separate from enabling
     // the features during logical-device creation.
     const auto features =
-        physicalDevice
-            .getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features>();
+        physicalDevice.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features,
+                                    vk::PhysicalDeviceVulkan14Features>();
     const auto& features13 = features.get<vk::PhysicalDeviceVulkan13Features>();
     if (features13.dynamicRendering != vk::True)
     {
@@ -289,8 +289,28 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
         return std::unexpected(std::format("{}: synchronization2 is unavailable", deviceName));
     }
 
-    // Finish the suitability check with the WSI capabilities needed by the next
-    // swapchain milestone.
+    // Vulkan 1.4 mandates these two features as well, so the checks exist for the
+    // same defensive reason as the Vulkan 1.3 checks above. Note the distinction:
+    // the specification requires a 1.4 driver to *support* them, but an
+    // application must still explicitly *enable* what it intends to use.
+    //
+    // Query the core features rather than requiring VK_KHR_push_descriptor or
+    // VK_KHR_maintenance5. Both were promoted into Vulkan 1.4, and a conformant
+    // 1.4 driver need not advertise the original extensions at all.
+    const auto& features14 = features.get<vk::PhysicalDeviceVulkan14Features>();
+    if (features14.pushDescriptor != vk::True)
+    {
+        return std::unexpected(std::format("{}: push descriptors are unavailable", deviceName));
+    }
+    // maintenance5 lets pipeline creation consume SPIR-V directly, so the
+    // pipeline milestone never creates a VkShaderModule.
+    if (features14.maintenance5 != vk::True)
+    {
+        return std::unexpected(std::format("{}: maintenance5 is unavailable", deviceName));
+    }
+
+    // Finish the suitability check with the WSI capabilities required by
+    // swapchain creation.
     const QueueFamilies queueFamilies = findQueueFamilies(physicalDevice, surface);
     if (!queueFamilies.graphics)
     {
@@ -423,9 +443,27 @@ makeQueueCreateInfos(const DeviceSelection& selection)
     const std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos = makeQueueCreateInfos(selection);
     constexpr std::array kRequiredDeviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-    // Querying support does not enable features. Enable only the Vulkan 1.3
-    // features that the first rendering milestones will use.
-    constexpr vk::PhysicalDeviceVulkan13Features enabledFeatures13{
+    // Querying support does not enable features. Enable exactly the Vulkan 1.3
+    // and 1.4 features the tutorial uses, and no others.
+    //
+    // Each structure is linked into the next one's pNext chain. Note that these
+    // two locals cannot be const: pNext is a void*, so a structure that another
+    // structure points at must be mutable even though nothing here modifies it.
+    //
+    // Vulkan-Hpp offers vk::StructureChain to build such a chain with the links
+    // and const-correctness handled for you, and inspectDevice above uses it via
+    // getFeatures2. It is not used here because vk::DeviceCreateInfo still
+    // carries the deprecated enabledLayerCount and ppEnabledLayerNames members,
+    // and storing it inside a chain copies them, which this build rejects under
+    // -Werror. Chaining onto vk::DeviceCreateInfo therefore stays manual.
+    vk::PhysicalDeviceVulkan14Features enabledFeatures14{
+        // Designated initializers must follow declaration order, and
+        // maintenance5 is declared before pushDescriptor.
+        .maintenance5 = vk::True,
+        .pushDescriptor = vk::True,
+    };
+    vk::PhysicalDeviceVulkan13Features enabledFeatures13{
+        .pNext = &enabledFeatures14,
         .synchronization2 = vk::True,
         .dynamicRendering = vk::True,
     };
