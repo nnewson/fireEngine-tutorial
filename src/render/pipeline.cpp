@@ -46,7 +46,7 @@ constexpr vk::DescriptorSetLayoutBinding kFrameUniformBinding{
     .stageFlags = vk::ShaderStageFlagBits::eVertex,
 };
 
-/** @brief Interleaved vertex-buffer layout shared with the future upload milestone. */
+/** @brief Interleaved vertex-buffer layout shared with the future upload stage. */
 constexpr vk::VertexInputBindingDescription kVertexBinding{
     .binding = 0,
     .stride = static_cast<std::uint32_t>(sizeof(Vertex)),
@@ -324,7 +324,7 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
     };
 
     // The null argument is the pipeline cache. One pipeline compiled once at
-    // startup gains nothing from a cache; a later milestone with many pipelines
+    // startup gains nothing from a cache; a later stage with many pipelines
     // can add one to shorten subsequent runs.
     return {device, nullptr, pipelineCreateChain.get<vk::GraphicsPipelineCreateInfo>()};
 }

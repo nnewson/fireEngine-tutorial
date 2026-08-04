@@ -58,13 +58,27 @@ is not checked into source control.
 The executable links the Vulkan loader supplied by vcpkg, uses GLFW to create
 its window surface, and initializes Vulkan Memory Allocator for future render
 resources. It selects a suitable presentation format and mode, creates a
-swapchain and one image view per swapchain image, then builds a push-descriptor
-layout and dynamic-rendering graphics pipeline from build-time-compiled Slang.
-A Vulkan driver must still be installed on the machine, and must expose Vulkan
-1.4, dynamic rendering, synchronization 2, push descriptors, maintenance5, and
-swapchain presentation support. Because Vulkan 1.4 folded maintenance5 into the
-core API, pipeline creation reads the compiled SPIR-V directly and no
-`VkShaderModule` is ever created.
+swapchain with one image view and one render-finished semaphore per swapchain
+image, then builds a push-descriptor layout and dynamic-rendering graphics
+pipeline from build-time-compiled Slang. Finally, it creates one command pool,
+one primary command buffer, an image-available semaphore, and an initially
+signaled fence for a single frame in flight. A Vulkan driver must still be
+installed on the machine, and must expose Vulkan 1.4, dynamic rendering,
+synchronization 2, push descriptors, maintenance5, and swapchain presentation
+support. Because Vulkan 1.4 folded maintenance5 into the core API, pipeline
+creation reads the compiled SPIR-V directly and no `VkShaderModule` is ever
+created.
+
+Synchronization objects are split by what indexes them, which is the boundary
+that makes both swapchain recreation and multiple frames in flight tractable
+later. `FrameInFlight` owns what belongs to a frame: the image-available
+semaphore that orders acquisition before rendering, and the fence that tells the
+CPU when the frame's submitted work has finished executing. `Swapchain` owns what
+belongs to an image: one render-finished semaphore each, so presentation cannot
+still be waiting on a semaphore when a later frame signals it again. The frame
+fence cannot cover that case, because presentation runs after the submission the
+fence tracks. This checkpoint creates that state but does not use it until
+command recording and submission are introduced.
 
 On macOS, this tutorial targets the KosmicKrisp technical preview from the
 [LunarG Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/1.4.357.0/mac/getting_started.html).
@@ -76,7 +90,7 @@ compilation likewise uses `slangc` supplied by vcpkg rather than an SDK tool in
 the environment.
 
 The executable does not directly link KosmicKrisp or enable the unsupported
-Vulkan portability extensions. At this milestone the GLFW window closes as soon
-as allocator, swapchain, image-view, and graphics-pipeline creation have
-completed successfully; command recording and rendering follow in later
-milestones.
+Vulkan portability extensions. At this checkpoint the GLFW window closes as soon
+as allocator, swapchain, pipeline, command, and synchronization resource creation
+has completed successfully; command recording and rendering follow in later
+tutorial stages.

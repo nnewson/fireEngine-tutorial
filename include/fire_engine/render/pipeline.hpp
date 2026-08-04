@@ -17,9 +17,9 @@ class Device;
  * pass. Its set-zero layout accepts a uniform buffer through Vulkan 1.4 push
  * descriptors, so no descriptor pool or allocated descriptor set is needed.
  *
- * This milestone builds the pipeline but cannot yet draw with it. The vertex
+ * This checkpoint builds the pipeline but cannot yet draw with it. The vertex
  * input state and the set-zero binding describe a vertex buffer and a per-frame
- * uniform buffer that later milestones allocate, upload, and bind.
+ * uniform buffer that later stages allocate, upload, and bind.
  */
 class Pipeline final
 {

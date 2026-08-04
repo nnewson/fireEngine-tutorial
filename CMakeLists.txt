@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 # Declare the project metadata and tell CMake that this repository contains
 # C++ sources. No C compiler is needed for this tutorial.
 project(fire_engine_tutorial
-    VERSION 0.4.0
+    VERSION 0.5.0
     DESCRIPTION "A development tutorial to building your own fireEngine"
     LANGUAGES CXX
 )
@@ -47,6 +47,7 @@ add_executable(fireEngineTutorial
     src/platform/window.cpp
     src/render/allocator.cpp
     src/render/device.cpp
+    src/render/frame_in_flight.cpp
     src/render/pipeline.cpp
     src/render/swapchain.cpp
 )
@@ -156,7 +157,8 @@ else()
 endif()
 
 # Register the executable as a CTest smoke test. A successful test proves that
-# it created a Vulkan 1.4 device, VMA allocator, swapchain, and graphics pipeline.
+# it created a Vulkan 1.4 device, allocator, swapchain, graphics pipeline,
+# command buffer, and the per-image and per-frame synchronization objects.
 enable_testing()
 add_test(NAME fireEngineTutorial COMMAND fireEngineTutorial)
 set_tests_properties(fireEngineTutorial PROPERTIES TIMEOUT 30)

@@ -30,7 +30,7 @@ MemoryAllocator::MemoryAllocator(const Device& device)
     // VmaAllocatorCreateInfo is a versioned C structure with many optional
     // fields. A partial designated initializer makes Clang diagnose every
     // intentionally omitted field. Value-initialize the complete structure
-    // instead, then assign only the settings this milestone uses. That keeps
+    // instead, then assign only the settings this tutorial stage uses. That keeps
     // optional values, including flags, at zero until they are actually needed.
     VmaAllocatorCreateInfo createInfo{};
     createInfo.physicalDevice = static_cast<VkPhysicalDevice>(*device.physicalDevice());

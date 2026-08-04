@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -47,6 +48,8 @@ chooseCompositeAlpha(const vk::SurfaceCapabilitiesKHR& capabilities);
 [[nodiscard]] std::vector<vk::raii::ImageView>
 createImageViews(const vk::raii::Device& device, const std::vector<vk::Image>& images,
                  vk::Format format);
+[[nodiscard]] std::vector<vk::raii::Semaphore>
+createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t imageCount);
 } // namespace
 
 /* --- Public member functions --- */
@@ -94,6 +97,7 @@ Swapchain::Swapchain(const Device& device, const Window& window)
     swapchain_ = vk::raii::SwapchainKHR{device.logicalDevice(), createInfo};
     images_ = swapchain_.getImages();
     imageViews_ = createImageViews(device.logicalDevice(), images_, surfaceFormat.format);
+    renderFinished_ = createRenderFinishedSemaphores(device.logicalDevice(), images_.size());
     imageFormat_ = surfaceFormat.format;
     presentMode_ = presentMode;
     extent_ = imageExtent;
@@ -127,6 +131,11 @@ const std::vector<vk::Image>& Swapchain::images() const noexcept
 const std::vector<vk::raii::ImageView>& Swapchain::imageViews() const noexcept
 {
     return imageViews_;
+}
+
+const std::vector<vk::raii::Semaphore>& Swapchain::renderFinished() const noexcept
+{
+    return renderFinished_;
 }
 
 namespace
@@ -271,6 +280,29 @@ createImageViews(const vk::raii::Device& device, const std::vector<vk::Image>& i
         imageViews.emplace_back(device, createInfo);
     }
     return imageViews;
+}
+
+/**
+ * @brief Creates one render-finished semaphore for every swapchain image.
+ * @param device Logical device that owns the semaphore objects.
+ * @param imageCount Number of presentable images supplied by the swapchain.
+ * @return Owned binary semaphores in swapchain-image order.
+ * @throws vk::SystemError if Vulkan cannot create a semaphore.
+ */
+[[nodiscard]] std::vector<vk::raii::Semaphore>
+createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t imageCount)
+{
+    // With no VkSemaphoreTypeCreateInfo in its pNext chain, Vulkan creates a
+    // binary semaphore, which is what queue presentation accepts.
+    constexpr vk::SemaphoreCreateInfo createInfo{};
+
+    std::vector<vk::raii::Semaphore> semaphores;
+    semaphores.reserve(imageCount);
+    for (std::size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex)
+    {
+        semaphores.emplace_back(device, createInfo);
+    }
+    return semaphores;
 }
 } // namespace
 } // namespace fire_engine

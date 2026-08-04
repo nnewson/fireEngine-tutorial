@@ -303,7 +303,7 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
         return std::unexpected(std::format("{}: push descriptors are unavailable", deviceName));
     }
     // maintenance5 lets pipeline creation consume SPIR-V directly, so the
-    // pipeline milestone never creates a VkShaderModule.
+    // pipeline implementation never creates a VkShaderModule.
     if (features14.maintenance5 != vk::True)
     {
         return std::unexpected(std::format("{}: maintenance5 is unavailable", deviceName));
