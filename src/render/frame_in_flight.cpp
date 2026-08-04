@@ -1,13 +1,42 @@
 #include <fire_engine/render/frame_in_flight.hpp>
 
+#include <fire_engine/render/allocator.hpp>
 #include <fire_engine/render/device.hpp>
+
+#include <span>
 
 namespace fire_engine
 {
 /* --- Public member functions --- */
 
-FrameInFlight::FrameInFlight(const Device& device)
+FrameInFlight::FrameInFlight(const Device& device, const MemoryAllocator& allocator)
+    : uniformBuffer_{allocator, sizeof(FrameUniforms), vk::BufferUsageFlagBits::eUniformBuffer}
 {
+    constexpr FrameUniforms initialUniforms{
+        // Identity is the same in row-major and column-major notation; grouping
+        // these values by column documents the layout expected by Slang.
+        .transform =
+            {
+                1.0F,
+                0.0F,
+                0.0F,
+                0.0F,
+                0.0F,
+                1.0F,
+                0.0F,
+                0.0F,
+                0.0F,
+                0.0F,
+                1.0F,
+                0.0F,
+                0.0F,
+                0.0F,
+                0.0F,
+                1.0F,
+            },
+    };
+    uniformBuffer_.write(std::as_bytes(std::span{&initialUniforms, 1}));
+
     // No creation flags. eResetCommandBuffer would still allow resetting the
     // whole pool, but it obliges the driver to make every buffer independently
     // resettable, typically its own allocation, rather than bump-allocating the
@@ -30,8 +59,8 @@ FrameInFlight::FrameInFlight(const Device& device)
     commandBuffers_ = vk::raii::CommandBuffers{device.logicalDevice(), commandBufferInfo};
 
     // With no VkSemaphoreTypeCreateInfo in its pNext chain, Vulkan creates a
-    // binary semaphore. Swapchain acquisition and presentation both use binary
-    // semaphores in the frame loop introduced by the next tutorial stage.
+    // binary semaphore. Swapchain acquisition and presentation both require
+    // binary semaphores in the render loop.
     constexpr vk::SemaphoreCreateInfo semaphoreInfo{};
     imageAvailable_ = vk::raii::Semaphore{device.logicalDevice(), semaphoreInfo};
 
@@ -70,5 +99,10 @@ const vk::raii::Semaphore& FrameInFlight::imageAvailable() const noexcept
 const vk::raii::Fence& FrameInFlight::frameFinished() const noexcept
 {
     return frameFinished_;
+}
+
+const AllocatedBuffer& FrameInFlight::uniformBuffer() const noexcept
+{
+    return uniformBuffer_;
 }
 } // namespace fire_engine

@@ -59,6 +59,15 @@ public:
      */
     [[nodiscard]] vk::Extent2D framebufferExtent() const noexcept;
 
+    /**
+     * @brief Reports whether the user or window system has requested closure.
+     * @return True when the application event loop should finish.
+     */
+    [[nodiscard]] bool shouldClose() const noexcept;
+
+    /** @brief Processes pending events for all GLFW windows on the current thread. */
+    void pollEvents() const noexcept;
+
 private:
     GLFWwindow* window_ = nullptr; ///< Native window owned by this object.
 };

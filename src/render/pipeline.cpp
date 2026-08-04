@@ -38,7 +38,7 @@ constexpr const char* kVertexEntryPoint = "vertexMain";
 /** @brief SPIR-V entry point name of the fragment stage. */
 constexpr const char* kFragmentEntryPoint = "fragmentMain";
 
-/** @brief Uniform-buffer binding written inline with a future push-descriptor command. */
+/** @brief Uniform-buffer binding written inline with each push-descriptor command. */
 constexpr vk::DescriptorSetLayoutBinding kFrameUniformBinding{
     .binding = 0,
     .descriptorType = vk::DescriptorType::eUniformBuffer,
@@ -46,7 +46,7 @@ constexpr vk::DescriptorSetLayoutBinding kFrameUniformBinding{
     .stageFlags = vk::ShaderStageFlagBits::eVertex,
 };
 
-/** @brief Interleaved vertex-buffer layout shared with the future upload stage. */
+/** @brief Interleaved vertex-buffer layout shared with Renderer uploads. */
 constexpr vk::VertexInputBindingDescription kVertexBinding{
     .binding = 0,
     .stride = static_cast<std::uint32_t>(sizeof(Vertex)),
@@ -109,16 +109,12 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
 
 Pipeline::Pipeline(const Device& device, vk::Format colorFormat)
 {
-    // Push descriptors still use a descriptor-set layout, but the flagged layout
-    // cannot allocate descriptor sets from a pool. Future commands copy each
-    // descriptor write directly into the command buffer instead.
-    //
-    // Because no descriptor set is ever allocated from it, this layout is needed
-    // only while the pipeline layout is created. It is deliberately a local, and
-    // its handle is released at the end of this constructor.
-    const vk::raii::DescriptorSetLayout descriptorSetLayout =
-        createPushDescriptorLayout(device.logicalDevice());
-    pipelineLayout_ = createPipelineLayout(device.logicalDevice(), descriptorSetLayout);
+    // Push descriptors allocate no descriptor sets. Vulkan no longer requires
+    // this handle after pipeline-layout creation, but retaining it keeps the
+    // construction relationship explicit and avoids the validation behavior
+    // described by Pipeline.
+    descriptorSetLayout_ = createPushDescriptorLayout(device.logicalDevice());
+    pipelineLayout_ = createPipelineLayout(device.logicalDevice(), descriptorSetLayout_);
 
     // Dynamic rendering replaces the render-pass compatibility object with the
     // attachment format chained into graphics-pipeline creation.
@@ -191,7 +187,7 @@ createPushDescriptorLayout(const vk::raii::Device& device)
 }
 
 /**
- * @brief Creates the layout shared by the pipeline and future descriptor writes.
+ * @brief Creates the layout shared by the pipeline and per-frame descriptor writes.
  * @param device Logical device that creates the pipeline layout.
  * @param descriptorSetLayout Push-descriptor layout installed at set zero.
  * @return RAII pipeline layout containing the one descriptor-set layout.
@@ -213,7 +209,7 @@ createPipelineLayout(const vk::raii::Device& device,
  * @brief Creates the triangle pipeline without a render pass or shader modules.
  * @param device Logical device that owns the pipeline.
  * @param pipelineLayout Layout containing the push-descriptor set zero.
- * @param colorFormat Format of the future dynamic-rendering color attachment.
+ * @param colorFormat Format of the dynamic-rendering color attachment.
  * @return RAII graphics pipeline compatible with the swapchain format.
  * @throws std::runtime_error if the compiled shader cannot be loaded.
  * @throws vk::SystemError if Vulkan cannot create the pipeline.

@@ -108,6 +108,11 @@ std::size_t Swapchain::imageCount() const noexcept
     return images_.size();
 }
 
+const vk::raii::SwapchainKHR& Swapchain::handle() const noexcept
+{
+    return swapchain_;
+}
+
 vk::Format Swapchain::imageFormat() const noexcept
 {
     return imageFormat_;
@@ -128,14 +133,29 @@ const std::vector<vk::Image>& Swapchain::images() const noexcept
     return images_;
 }
 
+vk::Image Swapchain::image(std::size_t imageIndex) const
+{
+    return images_.at(imageIndex);
+}
+
 const std::vector<vk::raii::ImageView>& Swapchain::imageViews() const noexcept
 {
     return imageViews_;
 }
 
+const vk::raii::ImageView& Swapchain::imageView(std::size_t imageIndex) const
+{
+    return imageViews_.at(imageIndex);
+}
+
 const std::vector<vk::raii::Semaphore>& Swapchain::renderFinished() const noexcept
 {
     return renderFinished_;
+}
+
+const vk::raii::Semaphore& Swapchain::renderFinished(std::size_t imageIndex) const
+{
+    return renderFinished_.at(imageIndex);
 }
 
 namespace

@@ -1,12 +1,33 @@
 #pragma once
 
+#include <array>
+
 #include <vulkan/vulkan_raii.hpp>
+
+#include <fire_engine/render/buffer.hpp>
 
 namespace fire_engine
 {
 /* --- Forward declarations --- */
 
 class Device;
+class MemoryAllocator;
+
+/* --- POD structs --- */
+
+/**
+ * @brief Per-frame values read by the tutorial vertex shader.
+ *
+ * Slang declares the matching constant buffer with Std140DataLayout. A 4x4
+ * float matrix occupies 64 bytes and has 16-byte base alignment in that layout.
+ */
+struct alignas(16) FrameUniforms
+{
+    std::array<float, 16> transform; ///< Column-major transform applied to each vertex.
+};
+
+static_assert(sizeof(FrameUniforms) == 16 * sizeof(float));
+static_assert(alignof(FrameUniforms) == 16);
 
 /* --- Classes --- */
 
@@ -15,8 +36,9 @@ class Device;
  *
  * Everything here is indexed by frame rather than by swapchain image: one
  * primary command buffer that is recorded again for each frame, the semaphore
- * that orders image acquisition before rendering, and the fence that tells the
- * CPU when the frame's submitted work has finished. Going from one frame in
+ * that orders image acquisition before rendering, the fence that tells the CPU
+ * when the frame's submitted work has finished, and the uniform buffer whose
+ * contents may be changed once that fence signals. Going from one frame in
  * flight to several means creating one instance per frame slot and cycling
  * through them, with nothing here needing to change. A std::array holds them
  * well: the count is known at compile time, and guaranteed copy elision
@@ -32,11 +54,13 @@ public:
     /**
      * @brief Creates one command buffer and this frame's synchronization state.
      * @param device Logical device and graphics queue family used by this frame.
+     * @param allocator VMA owner used for the frame's uniform buffer.
      * @throws vk::SystemError if Vulkan cannot create or allocate an object.
+     * @throws std::runtime_error if VMA cannot create or populate the uniform buffer.
      */
-    explicit FrameInFlight(const Device& device);
+    FrameInFlight(const Device& device, const MemoryAllocator& allocator);
 
-    /** @brief Releases synchronization objects, the command buffer, and its pool. */
+    /** @brief Releases the uniform, synchronization objects, command buffer, and pool. */
     ~FrameInFlight() = default;
 
     /// @brief Copy construction is disabled because Vulkan handles have unique ownership.
@@ -64,8 +88,6 @@ public:
      * this object, the same reason Vulkan-Hpp declares the underlying pool reset
      * const. That carries no thread-safety promise: Vulkan requires a command
      * pool to be externally synchronized against reset and recording alike.
-     *
-     * Nothing calls this until command recording arrives in the next stage.
      *
      * @throws vk::SystemError if the device cannot reset the pool.
      */
@@ -96,7 +118,15 @@ public:
      */
     [[nodiscard]] const vk::raii::Fence& frameFinished() const noexcept;
 
+    /**
+     * @brief Returns the uniform buffer pushed into descriptor set zero for this frame.
+     * @return Host-populated buffer containing one FrameUniforms value.
+     */
+    [[nodiscard]] const AllocatedBuffer& uniformBuffer() const noexcept;
+
 private:
+    AllocatedBuffer uniformBuffer_; ///< Shader data kept separate for each frame slot.
+
     // Members are destroyed in reverse declaration order. Command buffers must
     // therefore follow the pool from which they were allocated so they are
     // freed before that pool is destroyed.

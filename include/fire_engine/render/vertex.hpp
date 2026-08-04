@@ -9,8 +9,8 @@ namespace fire_engine
 /**
  * @brief Vertex attributes consumed by the tutorial graphics pipeline.
  *
- * The buffer upload stage will upload instances of this standard-layout
- * type. The pipeline can define the interface before any buffer is allocated.
+ * Renderer uploads instances of this standard-layout type, and Pipeline uses
+ * the same type to describe their binding stride and attribute offsets.
  */
 struct Vertex
 {

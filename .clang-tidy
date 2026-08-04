@@ -30,7 +30,10 @@ Checks: >
   readability-implicit-bool-conversion,
   cppcoreguidelines-special-member-functions
 WarningsAsErrors: '*'
-HeaderFilterRegex: '^(include/fire_engine|src)/.*'
+# clang-tidy matches this against the path it reports a diagnostic against, which is
+# absolute. An anchored '^include/...' pattern therefore never matches and silently
+# skips every first-party header, so the leading '.*/' is load-bearing.
+HeaderFilterRegex: '.*/(include/fire_engine|src)/.*'
 FormatStyle: file
 CheckOptions:
   - key: readability-implicit-bool-conversion.AllowIntegerConditions

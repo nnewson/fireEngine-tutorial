@@ -17,9 +17,9 @@ class Device;
  * pass. Its set-zero layout accepts a uniform buffer through Vulkan 1.4 push
  * descriptors, so no descriptor pool or allocated descriptor set is needed.
  *
- * This checkpoint builds the pipeline but cannot yet draw with it. The vertex
- * input state and the set-zero binding describe a vertex buffer and a per-frame
- * uniform buffer that later stages allocate, upload, and bind.
+ * The vertex input state describes the interleaved triangle buffer, while the
+ * set-zero binding accepts the per-frame transform that Renderer pushes while
+ * recording each frame.
  */
 class Pipeline final
 {
@@ -34,7 +34,7 @@ public:
      */
     Pipeline(const Device& device, vk::Format colorFormat);
 
-    /** @brief Releases the pipeline and then the layout that recording still needs. */
+    /** @brief Releases the pipeline, pipeline layout, and retained set layout in order. */
     ~Pipeline() = default;
 
     /// @brief Copy construction is disabled because Vulkan handles have unique ownership.
@@ -47,28 +47,24 @@ public:
     Pipeline& operator=(Pipeline&&) = delete;
 
     /**
-     * @brief Returns the layout required by future push-descriptor writes.
+     * @brief Returns the layout required by each push-descriptor write.
      * @return Reference to the owned pipeline layout.
      */
     [[nodiscard]] const vk::raii::PipelineLayout& pipelineLayout() const noexcept;
 
     /**
-     * @brief Returns the graphics pipeline used by future draw commands.
+     * @brief Returns the graphics pipeline used by each draw command.
      * @return Reference to the owned graphics pipeline.
      */
     [[nodiscard]] const vk::raii::Pipeline& pipeline() const noexcept;
 
-    // Only two of the three objects created by the constructor are kept. The
-    // descriptor-set layout describing set zero is consumed by pipeline-layout
-    // creation and never referenced again, so the constructor lets it go. Push
-    // descriptors allocate no descriptor sets, which is what would otherwise
-    // require that layout to stay alive.
-    //
-    // The pipeline layout is different: pushDescriptorSet takes it on every
-    // recorded frame, so it must outlive construction. Vulkan would allow it to
-    // be destroyed once the pipeline exists, so the declaration order below
-    // reflects that use, not a creation dependency.
 private:
+    // Vulkan permits the original descriptor-set-layout handle to be destroyed
+    // after pipeline-layout creation. Retaining it makes that construction
+    // relationship explicit for the tutorial and avoids a validation-layer
+    // lifetime diagnostic when push descriptors are recorded. Reverse member
+    // destruction releases these objects in dependency order.
+    vk::raii::DescriptorSetLayout descriptorSetLayout_{nullptr}; ///< Set-zero push layout.
     vk::raii::PipelineLayout pipelineLayout_{nullptr}; ///< Supplied to each push-descriptor write.
     vk::raii::Pipeline pipeline_{nullptr};             ///< Dynamic-rendering graphics pipeline.
 };
