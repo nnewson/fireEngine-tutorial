@@ -44,13 +44,20 @@ public:
     /**
      * @brief Releases image views before the swapchain that supplied their images.
      *
-     * That is the only ordering member layout has to enforce. The semaphores are
-     * owned by the device rather than the swapchain, so their position is free.
-     * What they require instead is a precondition no member order can express:
-     * no presentation may still be using one when it is destroyed. That applies
-     * equally to shutdown and to swapchain recreation, since recreation destroys
-     * the old semaphores too. A device wait before the old swapchain goes away
-     * satisfies both.
+     * That is the only ordering member layout has to enforce. The semaphores'
+     * Vulkan parent is the device rather than the swapchain, so their position
+     * is free. What they require instead is a precondition no member order can
+     * express: no presentation operation may still be using one when it is
+     * destroyed. A failed presentation does not lift that requirement, because
+     * an out-of-date result still enqueues the queue operation and its
+     * semaphore wait.
+     *
+     * This tutorial destroys the swapchain only at shutdown, after a device
+     * wait. That is the conventional fallback rather than a strict guarantee
+     * that the presentation engine has released its references. Recreation must
+     * keep the retired swapchain and its semaphores alive until their
+     * presentation use is known to have finished, or use presentation fences
+     * supplied by VK_KHR_swapchain_maintenance1.
      */
     ~Swapchain() = default;
 
@@ -68,6 +75,12 @@ public:
      * @return Number of swapchain images and corresponding image views.
      */
     [[nodiscard]] std::size_t imageCount() const noexcept;
+
+    /**
+     * @brief Returns the swapchain used for image acquisition and presentation.
+     * @return Reference to the owned Vulkan swapchain.
+     */
+    [[nodiscard]] const vk::raii::SwapchainKHR& handle() const noexcept;
 
     /**
      * @brief Returns the pixel format shared by every swapchain image.
@@ -94,10 +107,26 @@ public:
     [[nodiscard]] const std::vector<vk::Image>& images() const noexcept;
 
     /**
+     * @brief Returns one presentable image by its acquired index.
+     * @param imageIndex Index returned by Vulkan image acquisition.
+     * @return Non-owning swapchain image handle.
+     * @throws std::out_of_range if imageIndex is not present in this swapchain.
+     */
+    [[nodiscard]] vk::Image image(std::size_t imageIndex) const;
+
+    /**
      * @brief Returns one owned color view for each swapchain image.
      * @return Image views in the same order as images().
      */
     [[nodiscard]] const std::vector<vk::raii::ImageView>& imageViews() const noexcept;
+
+    /**
+     * @brief Returns the color view belonging to one presentable image.
+     * @param imageIndex Index returned by Vulkan image acquisition.
+     * @return Owned image view associated with that image.
+     * @throws std::out_of_range if imageIndex is not present in this swapchain.
+     */
+    [[nodiscard]] const vk::raii::ImageView& imageView(std::size_t imageIndex) const;
 
     /**
      * @brief Returns presentation semaphores in swapchain-image order.
@@ -109,6 +138,14 @@ public:
      * @return One render-finished binary semaphore for each swapchain image.
      */
     [[nodiscard]] const std::vector<vk::raii::Semaphore>& renderFinished() const noexcept;
+
+    /**
+     * @brief Returns the presentation semaphore belonging to one swapchain image.
+     * @param imageIndex Index returned by Vulkan image acquisition.
+     * @return Binary semaphore signaled before that image is presented.
+     * @throws std::out_of_range if imageIndex is not present in this swapchain.
+     */
+    [[nodiscard]] const vk::raii::Semaphore& renderFinished(std::size_t imageIndex) const;
 
 private:
     vk::raii::SwapchainKHR swapchain_{nullptr};   ///< Presentation swapchain owned by this object.

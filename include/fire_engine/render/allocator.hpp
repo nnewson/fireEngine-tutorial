@@ -16,8 +16,8 @@ class Device;
  * @brief Owns the Vulkan Memory Allocator associated with one logical device.
  *
  * The allocator does not own the Vulkan handles supplied by Device, so it must
- * be destroyed before that Device. Future VMA allocations must also be released
- * before this owner. Creation targets Vulkan 1.4 and leaves optional VMA feature
+ * be destroyed before that Device. VMA allocations must also be released before
+ * this owner. Creation targets Vulkan 1.4 and leaves optional VMA feature
  * flags disabled until a resource requires one.
  */
 class MemoryAllocator final

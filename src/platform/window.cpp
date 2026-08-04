@@ -63,4 +63,16 @@ vk::Extent2D Window::framebufferExtent() const noexcept
         .height = height > 0 ? static_cast<std::uint32_t>(height) : 0U,
     };
 }
+
+bool Window::shouldClose() const noexcept
+{
+    return glfwWindowShouldClose(window_) == GLFW_TRUE;
+}
+
+void Window::pollEvents() const noexcept
+{
+    // GLFW owns the process-wide event queue, but keeping this call on Window
+    // prevents its C API and native handle from leaking into the application loop.
+    glfwPollEvents();
+}
 } // namespace fire_engine

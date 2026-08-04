@@ -1,31 +1,72 @@
 /**
  * @file
- * @brief Program entry point for the version 0.5 startup smoke test.
+ * @brief Program entry point and event loop for the triangle renderer.
  */
 
+#include <charconv>
+#include <cstdint>
 #include <exception>
+#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include <fire_engine/core/log.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/allocator.hpp>
 #include <fire_engine/render/device.hpp>
-#include <fire_engine/render/frame_in_flight.hpp>
 #include <fire_engine/render/pipeline.hpp>
+#include <fire_engine/render/renderer.hpp>
 #include <fire_engine/render/swapchain.hpp>
+
+namespace
+{
+/* --- File-local functions --- */
+
+/**
+ * @brief Reads the optional frame limit used by the automated smoke test.
+ * @param argumentCount Number of command-line arguments including the executable.
+ * @param arguments Null-terminated argument strings supplied by the host environment.
+ * @return Requested positive frame count, or no limit for an interactive run.
+ * @throws std::invalid_argument if the command line is not `--frames N`.
+ */
+[[nodiscard]] std::optional<std::uint64_t> parseFrameLimit(int argumentCount, char* arguments[])
+{
+    if (argumentCount == 1)
+    {
+        return std::nullopt;
+    }
+    if (argumentCount != 3 || std::string_view{arguments[1]} != "--frames")
+    {
+        throw std::invalid_argument("Usage: fireEngineTutorial [--frames positive-count]");
+    }
+
+    const std::string_view valueText{arguments[2]};
+    std::uint64_t value = 0;
+    const auto [end, error] =
+        std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
+    if (error != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
+    {
+        throw std::invalid_argument("--frames requires a positive integer");
+    }
+    return value;
+}
+} // namespace
 
 /* --- Public functions --- */
 
 /**
- * @brief Runs the version 0.5 Vulkan startup smoke test.
- * @return Zero after successful render-resource creation; otherwise one.
+ * @brief Runs the Vulkan application and owns its platform event loop.
+ * @param argumentCount Number of command-line arguments including the executable.
+ * @param arguments Null-terminated argument strings supplied by the host environment.
+ * @return Zero after a clean shutdown; otherwise one.
  */
-int main()
+int main(int argumentCount, char* arguments[])
 try
 {
+    const std::optional<std::uint64_t> frameLimit = parseFrameLimit(argumentCount, arguments);
     const std::string applicationName = "fireEngine Tutorial";
 
     // Local declaration order mirrors the complete ownership chain: GLFW
@@ -37,7 +78,7 @@ try
     const fire_engine::MemoryAllocator allocator{device};
     const fire_engine::Swapchain swapchain{device, window};
     const fire_engine::Pipeline pipeline{device, swapchain.imageFormat()};
-    const fire_engine::FrameInFlight frame{device};
+    fire_engine::Renderer renderer{device, allocator, swapchain, pipeline};
 
     // Vulkan guarantees a valid handle for a queue family and index that were
     // already validated during logical-device creation, so this cannot fail in
@@ -57,17 +98,6 @@ try
         throw std::runtime_error("Vulkan returned an incomplete swapchain");
     }
 
-    // Individual handles are not checked. Every vk::raii constructor throws on
-    // failure, so reaching this line already proves each handle these objects
-    // own is valid. What is worth checking is what construction does not prove:
-    // that the pieces relate to each other as intended, as the per-image
-    // semaphore count above does, and that requested state actually took
-    // effect, as the initially signaled fence does below.
-    if (frame.frameFinished().getStatus() != vk::Result::eSuccess)
-    {
-        throw std::runtime_error("The frame-finished fence was not initially signaled");
-    }
-
     std::println("Selected Vulkan 1.4 device: {}", device.name());
     std::println("Graphics queue family: {}", device.graphicsQueueFamily());
     std::println("Present queue family: {}", device.presentQueueFamily());
@@ -78,13 +108,52 @@ try
                  vk::to_string(swapchain.imageFormat()), vk::to_string(swapchain.presentMode()),
                  swapchain.renderFinished().size());
     std::println("Pipeline layout and dynamic-rendering pipeline created.");
-    std::println("Primary command buffer and one-frame synchronization created.");
+    std::println("Triangle buffers and one frame in flight created.");
+
+    std::uint64_t renderedFrameCount = 0;
+    bool swapchainNeedsRecreation = false;
+    while (!window.shouldClose() && (!frameLimit.has_value() || renderedFrameCount < *frameLimit))
+    {
+        window.pollEvents();
+        if (window.shouldClose())
+        {
+            break;
+        }
+
+        const fire_engine::RenderResult result = renderer.renderFrame();
+        if (result != fire_engine::RenderResult::eNotPresented)
+        {
+            ++renderedFrameCount;
+        }
+        if (result != fire_engine::RenderResult::ePresented)
+        {
+            swapchainNeedsRecreation = true;
+            break;
+        }
+    }
+
+    // Presentation is not covered by the per-frame fence. Waiting for the whole
+    // device covers the submitted work the VMA buffers depend on. For presentation
+    // resources it is the conventional shutdown fallback rather than a
+    // specification guarantee; deferred destruction or presentation fences are
+    // the specification-backed solutions once recreation exists.
+    renderer.waitIdle();
+
+    if (swapchainNeedsRecreation)
+    {
+        std::println("The surface changed; swapchain recreation is left to a later tutorial.");
+    }
+    if (frameLimit.has_value() && renderedFrameCount != *frameLimit)
+    {
+        throw std::runtime_error("The smoke test ended before presenting every requested frame");
+    }
+    std::println("Presented {} frame{}.", renderedFrameCount, renderedFrameCount == 1 ? "" : "s");
     return 0;
 }
 catch (const std::exception& error)
 {
     // The logger catches formatting failures and falls back to allocation-free
-    // C stdio, preserving the original startup error.
-    fire_engine::log("Vulkan startup failed: {}", error.what());
+    // C stdio, preserving the original application error.
+    fire_engine::log("fireEngine Tutorial failed: {}", error.what());
     return 1;
 }
