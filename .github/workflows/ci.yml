@@ -99,7 +99,12 @@ jobs:
       - name: Build documentation
         run: |
           cmake -E make_directory build/docs
+          cmake -E make_directory build/docs-internal
           doxygen docs/Doxyfile
+          doxygen docs/Doxyfile.internal
+          cmake -E copy_directory \
+            build/docs-internal/html \
+            build/docs/html/internals
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4

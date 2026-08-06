@@ -20,6 +20,7 @@ namespace fire_engine
 {
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local constants --- */
 
 /**
@@ -68,6 +69,7 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
 [[nodiscard]] std::vector<vk::DeviceQueueCreateInfo>
 makeQueueCreateInfos(const DeviceSelection& selection);
 [[nodiscard]] vk::raii::Device createLogicalDeviceFor(const DeviceSelection& selection);
+/** @endcond */
 } // namespace
 
 /* --- Public member functions --- */
@@ -190,6 +192,7 @@ void Device::createInstance(const Glfw& glfw, const std::string& applicationName
 
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local functions --- */
 
 /**
@@ -477,5 +480,6 @@ makeQueueCreateInfos(const DeviceSelection& selection)
     };
     return {selection.physicalDevice, deviceCreateInfo};
 }
+/** @endcond */
 } // namespace
 } // namespace fire_engine

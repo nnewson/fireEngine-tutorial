@@ -18,6 +18,7 @@ namespace fire_engine
 {
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local constants --- */
 
 /**
@@ -104,6 +105,7 @@ createPipelineLayout(const vk::raii::Device& device,
 createDynamicRenderingPipeline(const vk::raii::Device& device,
                                const vk::raii::PipelineLayout& pipelineLayout,
                                vk::Format colorFormat);
+/** @endcond */
 } // namespace
 
 /* --- Public member functions --- */
@@ -135,6 +137,7 @@ const vk::raii::Pipeline& Pipeline::pipeline() const noexcept
 
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local functions --- */
 
 /**
@@ -332,5 +335,6 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
     // can add one to shorten subsequent runs.
     return {device, nullptr, pipelineCreateChain.get<vk::GraphicsPipelineCreateInfo>()};
 }
+/** @endcond */
 } // namespace
 } // namespace fire_engine

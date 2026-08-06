@@ -43,20 +43,26 @@ ctest --preset default
 ## Documentation
 
 Public API comments and the explanatory notes alongside the Vulkan implementation
-are published as Doxygen HTML. The generated API reference is available at
-[nnewson.dev/fireEngine-tutorial](https://nnewson.dev/fireEngine-tutorial/).
+are published as independent Doxygen views. The generated references are available
+at:
+
+- [Public API](https://nnewson.dev/fireEngine-tutorial/)
+- [Internal implementation](https://nnewson.dev/fireEngine-tutorial/internals/)
 
 To build the pages locally, install Doxygen and run this from the repository root:
 
 ```sh
 cmake -E make_directory build/docs
+cmake -E make_directory build/docs-internal
 doxygen docs/Doxyfile
+doxygen docs/Doxyfile.internal
 ```
 
-Open `build/docs/html/index.html` to browse the result. Documentation warnings
-fail the build, so missing parameter descriptions and invalid references are
-caught by CI. Every CI run uploads the generated site as the `doxygen-html`
-artifact.
+Open `build/docs/html/index.html` for the public API or
+`build/docs-internal/html/index.html` for the internal implementation.
+Documentation warnings fail the build, so missing parameter descriptions and
+invalid references are caught by CI. Every CI run uploads both views together as
+the `doxygen-html` artifact, with the internal view nested under `internals/`.
 
 GitHub Pages deployment is optional. To publish after each push to `main`, select
 GitHub Actions as the repository's Pages source and set the repository Actions

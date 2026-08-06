@@ -27,6 +27,7 @@
 
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local structs --- */
 
 /** @brief Vulkan-free render descriptions and the hierarchy that instances them. */
@@ -36,7 +37,7 @@ struct TutorialContent
     fire_engine::Scene scene;         ///< Transform hierarchy referencing those descriptions.
 };
 
-/* --- File-local functions --- */
+/* --- File-local function declarations --- */
 
 /**
  * @brief Reads the optional frame limit used by the automated smoke test.
@@ -45,68 +46,14 @@ struct TutorialContent
  * @return Requested positive frame count, or no limit for an interactive run.
  * @throws std::invalid_argument if the command line is not `--frames N`.
  */
-[[nodiscard]] std::optional<std::uint64_t> parseFrameLimit(int argumentCount, char* arguments[])
-{
-    if (argumentCount == 1)
-    {
-        return std::nullopt;
-    }
-    if (argumentCount != 3 || std::string_view{arguments[1]} != "--frames")
-    {
-        throw std::invalid_argument("Usage: fireEngineTutorial [--frames positive-count]");
-    }
-
-    const std::string_view valueText{arguments[2]};
-    std::uint64_t value = 0;
-    const auto [end, error] =
-        std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
-    if (error != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
-    {
-        throw std::invalid_argument("--frames requires a positive integer");
-    }
-    return value;
-}
+[[nodiscard]] std::optional<std::uint64_t> parseFrameLimit(int argumentCount, char* arguments[]);
 
 /**
  * @brief Builds the tutorial triangle entirely from Vulkan-free descriptions.
  * @return Separate render descriptions and scene hierarchy exercising the public path.
  */
-[[nodiscard]] TutorialContent makeTriangleScene()
-{
-    TutorialContent content;
-    const fire_engine::MeshId mesh = content.assets.addMesh({
-        .vertices =
-            {
-                fire_engine::Vertex{
-                    .position = {.x = 0.0f, .y = -0.6f, .z = 0.0f},
-                    .colour = {.r = 1.0f, .g = 0.2f, .b = 0.1f, .a = 1.0f},
-                },
-                fire_engine::Vertex{
-                    .position = {.x = 0.6f, .y = 0.6f, .z = 0.0f},
-                    .colour = {.r = 0.1f, .g = 1.0f, .b = 0.2f, .a = 1.0f},
-                },
-                fire_engine::Vertex{
-                    .position = {.x = -0.6f, .y = 0.6f, .z = 0.0f},
-                    .colour = {.r = 0.2f, .g = 0.3f, .b = 1.0f, .a = 1.0f},
-                },
-            },
-        .indices = {0, 1, 2},
-    });
-    const fire_engine::MaterialId material = content.assets.addMaterial({
-        .baseColour = {.r = 0.9f, .g = 0.95f, .b = 1.0f, .a = 1.0f},
-    });
-    const fire_engine::RenderObjectId triangle = content.assets.addRenderObject({
-        .mesh = mesh,
-        .material = material,
-    });
-
-    fire_engine::SceneNode& node = content.scene.addRoot("Tutorial triangle");
-    node.localTransform(fire_engine::Mat4::translation({.x = 0.12f, .y = 0.0f, .z = 0.0f}) *
-                        fire_engine::Mat4::scale({.x = 0.9f, .y = 0.9f, .z = 1.0f}));
-    node.renderObject(triangle);
-    content.scene.updateWorldTransforms();
-    return content;
-}
+[[nodiscard]] TutorialContent makeTriangleScene();
+/** @endcond */
 } // namespace
 
 /* --- Public functions --- */
@@ -186,3 +133,69 @@ catch (const std::exception& error)
     fire_engine::log("fireEngine Tutorial failed: {}", error.what());
     return 1;
 }
+
+namespace
+{
+/** @cond INTERNAL */
+/* --- File-local functions --- */
+
+[[nodiscard]] std::optional<std::uint64_t> parseFrameLimit(int argumentCount, char* arguments[])
+{
+    if (argumentCount == 1)
+    {
+        return std::nullopt;
+    }
+    if (argumentCount != 3 || std::string_view{arguments[1]} != "--frames")
+    {
+        throw std::invalid_argument("Usage: fireEngineTutorial [--frames positive-count]");
+    }
+
+    const std::string_view valueText{arguments[2]};
+    std::uint64_t value = 0;
+    const auto [end, error] =
+        std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
+    if (error != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
+    {
+        throw std::invalid_argument("--frames requires a positive integer");
+    }
+    return value;
+}
+
+[[nodiscard]] TutorialContent makeTriangleScene()
+{
+    TutorialContent content;
+    const fire_engine::MeshId mesh = content.assets.addMesh({
+        .vertices =
+            {
+                fire_engine::Vertex{
+                    .position = {.x = 0.0f, .y = -0.6f, .z = 0.0f},
+                    .colour = {.r = 1.0f, .g = 0.2f, .b = 0.1f, .a = 1.0f},
+                },
+                fire_engine::Vertex{
+                    .position = {.x = 0.6f, .y = 0.6f, .z = 0.0f},
+                    .colour = {.r = 0.1f, .g = 1.0f, .b = 0.2f, .a = 1.0f},
+                },
+                fire_engine::Vertex{
+                    .position = {.x = -0.6f, .y = 0.6f, .z = 0.0f},
+                    .colour = {.r = 0.2f, .g = 0.3f, .b = 1.0f, .a = 1.0f},
+                },
+            },
+        .indices = {0, 1, 2},
+    });
+    const fire_engine::MaterialId material = content.assets.addMaterial({
+        .baseColour = {.r = 0.9f, .g = 0.95f, .b = 1.0f, .a = 1.0f},
+    });
+    const fire_engine::RenderObjectId triangle = content.assets.addRenderObject({
+        .mesh = mesh,
+        .material = material,
+    });
+
+    fire_engine::SceneNode& node = content.scene.addRoot("Tutorial triangle");
+    node.localTransform(fire_engine::Mat4::translation({.x = 0.12f, .y = 0.0f, .z = 0.0f}) *
+                        fire_engine::Mat4::scale({.x = 0.9f, .y = 0.9f, .z = 1.0f}));
+    node.renderObject(triangle);
+    content.scene.updateWorldTransforms();
+    return content;
+}
+/** @endcond */
+} // namespace

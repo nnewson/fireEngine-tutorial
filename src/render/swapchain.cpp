@@ -15,6 +15,7 @@ namespace fire_engine
 {
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local constants --- */
 
 /** @brief Preferred color format for presenting gamma-correct color values. */
@@ -50,6 +51,7 @@ createImageViews(const vk::raii::Device& device, const std::vector<vk::Image>& i
                  vk::Format format);
 [[nodiscard]] std::vector<vk::raii::Semaphore>
 createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t imageCount);
+/** @endcond */
 } // namespace
 
 /* --- Public member functions --- */
@@ -160,6 +162,7 @@ const vk::raii::Semaphore& Swapchain::renderFinished(std::size_t imageIndex) con
 
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local functions --- */
 
 /**
@@ -324,5 +327,6 @@ createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t image
     }
     return semaphores;
 }
+/** @endcond */
 } // namespace
 } // namespace fire_engine
