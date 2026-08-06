@@ -1,7 +1,8 @@
 #include <fire_engine/render/pipeline.hpp>
 
+#include <fire_engine/graphics/vertex.hpp>
 #include <fire_engine/render/device.hpp>
-#include <fire_engine/render/vertex.hpp>
+#include <fire_engine/render/draw_constants.hpp>
 
 #include <array>
 #include <cstddef>
@@ -53,19 +54,19 @@ constexpr vk::VertexInputBindingDescription kVertexBinding{
     .inputRate = vk::VertexInputRate::eVertex,
 };
 
-/** @brief Position and color attributes consumed by the vertex shader. */
+/** @brief Position and colour attributes consumed by the vertex shader. */
 constexpr std::array kVertexAttributes = {
     vk::VertexInputAttributeDescription{
         .location = 0,
         .binding = 0,
-        .format = vk::Format::eR32G32Sfloat,
+        .format = vk::Format::eR32G32B32Sfloat,
         .offset = static_cast<std::uint32_t>(offsetof(Vertex, position)),
     },
     vk::VertexInputAttributeDescription{
         .location = 1,
         .binding = 0,
-        .format = vk::Format::eR32G32B32Sfloat,
-        .offset = static_cast<std::uint32_t>(offsetof(Vertex, color)),
+        .format = vk::Format::eR32G32B32A32Sfloat,
+        .offset = static_cast<std::uint32_t>(offsetof(Vertex, colour)),
     },
 };
 
@@ -87,8 +88,8 @@ static_assert(std::is_standard_layout_v<Vertex>,
 
 // The binding stride and the attribute offsets above describe the same struct to
 // Vulkan twice. Padding introduced by a future member would silently desynchronize
-// them, so pin the expected size: two floats of position and three of color.
-static_assert(sizeof(Vertex) == 5 * sizeof(float),
+// them, so pin the expected size: three floats of position and four of colour.
+static_assert(sizeof(Vertex) == 7 * sizeof(float),
               "Vertex must stay tightly packed to match kVertexBinding.stride");
 
 /* --- File-local function declarations --- */
@@ -198,9 +199,16 @@ createPipelineLayout(const vk::raii::Device& device,
                      const vk::raii::DescriptorSetLayout& descriptorSetLayout)
 {
     const vk::DescriptorSetLayout layout = *descriptorSetLayout;
+    constexpr vk::PushConstantRange drawConstants{
+        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+        .offset = 0,
+        .size = sizeof(DrawConstants),
+    };
     const vk::PipelineLayoutCreateInfo createInfo{
         .setLayoutCount = 1,
         .pSetLayouts = &layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &drawConstants,
     };
     return {device, createInfo};
 }
@@ -278,7 +286,7 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
         // The first triangle focuses on the rendering path rather than a
         // framebuffer-space winding convention. A later 3D pipeline can cull.
         .cullMode = vk::CullModeFlagBits::eNone,
-        .lineWidth = 1.0F,
+        .lineWidth = 1.0f,
     };
     const vk::PipelineMultisampleStateCreateInfo multisampling{
         .rasterizationSamples = vk::SampleCountFlagBits::e1,

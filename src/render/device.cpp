@@ -28,7 +28,7 @@ namespace
  * This is not an operating-system priority. Static storage ensures the pointers
  * retained by queue create infos remain valid until vkCreateDevice reads them.
  */
-constexpr float kQueuePriority = 1.0F;
+constexpr float kQueuePriority = 1.0f;
 
 /** @brief Project version encoded for Vulkan application metadata. */
 constexpr std::uint32_t kVersion = VK_MAKE_API_VERSION(

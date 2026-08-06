@@ -12,29 +12,7 @@ namespace fire_engine
 FrameInFlight::FrameInFlight(const Device& device, const MemoryAllocator& allocator)
     : uniformBuffer_{allocator, sizeof(FrameUniforms), vk::BufferUsageFlagBits::eUniformBuffer}
 {
-    constexpr FrameUniforms initialUniforms{
-        // Identity is the same in row-major and column-major notation; grouping
-        // these values by column documents the layout expected by Slang.
-        .transform =
-            {
-                1.0F,
-                0.0F,
-                0.0F,
-                0.0F,
-                0.0F,
-                1.0F,
-                0.0F,
-                0.0F,
-                0.0F,
-                0.0F,
-                1.0F,
-                0.0F,
-                0.0F,
-                0.0F,
-                0.0F,
-                1.0F,
-            },
-    };
+    constexpr FrameUniforms initialUniforms{};
     uniformBuffer_.write(std::as_bytes(std::span{&initialUniforms, 1}));
 
     // No creation flags. eResetCommandBuffer would still allow resetting the

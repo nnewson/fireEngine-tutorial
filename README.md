@@ -33,8 +33,8 @@ limit is available for automation and quick validation:
 ./build/fireEngineTutorial --frames 1
 ```
 
-CTest uses that bounded mode so it verifies one complete frame without waiting
-for user input:
+CTest runs the Vulkan-free Catch2 unit tests and uses that bounded mode for a
+one-frame integration test without waiting for user input:
 
 ```sh
 ctest --preset default
@@ -63,23 +63,39 @@ GitHub Actions as the repository's Pages source and set the repository Actions
 variable `PUBLISH_DOXYGEN` to `true`. Generated HTML remains under `build/` and
 is not checked into source control.
 
+The project builds a reusable engine library, a small event-loop executable, and
+a Catch2 test executable. `RenderAssets` owns the application's Vulkan-free
+`Mesh`, `Material`, and `RenderObject` descriptions; `Scene` owns only the
+`SceneNode` hierarchy that instances them. `Renderer::prepare()` validates those
+relationships through a cached `RenderPreparation` compiler and uploads each
+distinct indexed mesh required by the current `SceneDrawList`. Scene traversal
+hashes only ordered render-object dependencies, so transform changes reuse the
+same preparation plan while still producing current per-frame draws. Meanwhile,
+`Renderer::drawFrame()` traverses the current scene transforms and records the
+resulting draws. Device, allocator, swapchain, pipeline, and frame resources all
+remain hidden behind the renderer facade.
+
+Mathematical coordinates use `Vec3` and `Vec4`, while graphics colours use the
+separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain
+the tightly packed float layout required by the shader interface without giving
+colour values unrelated vector operations.
+
 The executable links the Vulkan loader supplied by vcpkg and uses GLFW to create
-its window surface. Vulkan Memory Allocator owns a host-writable triangle vertex
-buffer and one uniform buffer for the current frame slot. A Vulkan driver must
-still be installed on the machine, and must expose Vulkan 1.4, dynamic rendering,
-synchronization 2, push descriptors, maintenance5, and swapchain presentation
-support. Because Vulkan 1.4 folded maintenance5 into the core API, pipeline
-creation reads the compiled SPIR-V directly and no `VkShaderModule` is ever
-created.
+its window surface. Vulkan Memory Allocator owns host-writable vertex, index, and
+frame-uniform buffers. A Vulkan driver must still be installed on the machine,
+and must expose Vulkan 1.4, dynamic rendering, synchronization 2, push
+descriptors, maintenance5, and swapchain presentation support. Because Vulkan
+1.4 folded maintenance5 into the core API, pipeline creation reads the compiled
+SPIR-V directly and no `VkShaderModule` is ever created.
 
 Each event-loop iteration waits for the previous frame, acquires a swapchain
-image, recycles the command pool, and records a dynamic-rendering draw. The
-command buffer uses synchronization-2 barriers to discard the previous image
-contents, clear the color attachment, bind the pipeline and triangle buffer,
-push the frame uniform through the core Vulkan 1.4 command, and transition the
-completed image for presentation. `submit2` orders rendering after acquisition,
-then the presentation queue waits for the semaphore belonging to that acquired
-image.
+image, recycles the command pool, and records dynamic-rendering draws from the
+scene. The command buffer uses synchronization-2 barriers to discard the
+previous image contents, clear the colour attachment, bind each compiled mesh's
+vertex and index buffers, push the node transform and material colour, and
+transition the completed image for presentation. `submit2` orders rendering
+after acquisition, then the presentation queue waits for the semaphore belonging
+to that acquired image.
 
 Synchronization objects are split by what indexes them, which is the boundary
 that makes both swapchain recreation and multiple frames in flight tractable
@@ -102,7 +118,7 @@ compilation likewise uses `slangc` supplied by vcpkg rather than an SDK tool in
 the environment.
 
 The executable does not directly link KosmicKrisp or enable the unsupported
-Vulkan portability extensions. It displays the colored triangle until the user
+Vulkan portability extensions. It displays the coloured triangle until the user
 closes the window. Swapchain recreation remains deliberately separate: if the
 surface becomes out of date or suboptimal, the loop waits for the device to
 become idle and exits cleanly so a later tutorial can introduce replacement of

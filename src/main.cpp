@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Program entry point and event loop for the triangle renderer.
+ * @brief Program entry point, tutorial scene construction, and platform event loop.
  */
 
 #include <charconv>
@@ -13,16 +13,29 @@
 #include <string_view>
 
 #include <fire_engine/core/log.hpp>
+#include <fire_engine/graphics/material.hpp>
+#include <fire_engine/graphics/mesh.hpp>
+#include <fire_engine/graphics/render_assets.hpp>
+#include <fire_engine/graphics/render_object.hpp>
+#include <fire_engine/math/mat4.hpp>
+#include <fire_engine/math/vec3.hpp>
+#include <fire_engine/math/vec4.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
-#include <fire_engine/render/allocator.hpp>
-#include <fire_engine/render/device.hpp>
-#include <fire_engine/render/pipeline.hpp>
 #include <fire_engine/render/renderer.hpp>
-#include <fire_engine/render/swapchain.hpp>
+#include <fire_engine/scene/scene.hpp>
 
 namespace
 {
+/* --- File-local structs --- */
+
+/** @brief Vulkan-free render descriptions and the hierarchy that instances them. */
+struct TutorialContent
+{
+    fire_engine::RenderAssets assets; ///< Mesh, material, and render-object descriptions.
+    fire_engine::Scene scene;         ///< Transform hierarchy referencing those descriptions.
+};
+
 /* --- File-local functions --- */
 
 /**
@@ -53,6 +66,47 @@ namespace
     }
     return value;
 }
+
+/**
+ * @brief Builds the tutorial triangle entirely from Vulkan-free descriptions.
+ * @return Separate render descriptions and scene hierarchy exercising the public path.
+ */
+[[nodiscard]] TutorialContent makeTriangleScene()
+{
+    TutorialContent content;
+    const fire_engine::MeshId mesh = content.assets.addMesh({
+        .vertices =
+            {
+                fire_engine::Vertex{
+                    .position = {.x = 0.0f, .y = -0.6f, .z = 0.0f},
+                    .colour = {.r = 1.0f, .g = 0.2f, .b = 0.1f, .a = 1.0f},
+                },
+                fire_engine::Vertex{
+                    .position = {.x = 0.6f, .y = 0.6f, .z = 0.0f},
+                    .colour = {.r = 0.1f, .g = 1.0f, .b = 0.2f, .a = 1.0f},
+                },
+                fire_engine::Vertex{
+                    .position = {.x = -0.6f, .y = 0.6f, .z = 0.0f},
+                    .colour = {.r = 0.2f, .g = 0.3f, .b = 1.0f, .a = 1.0f},
+                },
+            },
+        .indices = {0, 1, 2},
+    });
+    const fire_engine::MaterialId material = content.assets.addMaterial({
+        .baseColour = {.r = 0.9f, .g = 0.95f, .b = 1.0f, .a = 1.0f},
+    });
+    const fire_engine::RenderObjectId triangle = content.assets.addRenderObject({
+        .mesh = mesh,
+        .material = material,
+    });
+
+    fire_engine::SceneNode& node = content.scene.addRoot("Tutorial triangle");
+    node.localTransform(fire_engine::Mat4::translation({.x = 0.12f, .y = 0.0f, .z = 0.0f}) *
+                        fire_engine::Mat4::scale({.x = 0.9f, .y = 0.9f, .z = 1.0f}));
+    node.renderObject(triangle);
+    content.scene.updateWorldTransforms();
+    return content;
+}
 } // namespace
 
 /* --- Public functions --- */
@@ -69,46 +123,22 @@ try
     const std::optional<std::uint64_t> frameLimit = parseFrameLimit(argumentCount, arguments);
     const std::string applicationName = "fireEngine Tutorial";
 
-    // Local declaration order mirrors the complete ownership chain: GLFW
-    // outlives the window, Device owns the surface, and each later render
-    // resource is released before the Vulkan objects on which it depends.
     fire_engine::Glfw glfw;
     const fire_engine::Window window{800, 600, applicationName};
-    const fire_engine::Device device{glfw, window, applicationName};
-    const fire_engine::MemoryAllocator allocator{device};
-    const fire_engine::Swapchain swapchain{device, window};
-    const fire_engine::Pipeline pipeline{device, swapchain.imageFormat()};
-    fire_engine::Renderer renderer{device, allocator, swapchain, pipeline};
+    fire_engine::Renderer renderer{glfw, window, applicationName};
+    TutorialContent content = makeTriangleScene();
+    renderer.prepare(content.assets, content.scene);
 
-    // Vulkan guarantees a valid handle for a queue family and index that were
-    // already validated during logical-device creation, so this cannot fail in
-    // practice. It is here so the smoke test exercises the accessors rather than
-    // printing a claim about the queues that nothing checks.
-    if (!*device.graphicsQueue() || !*device.presentQueue())
-    {
-        throw std::runtime_error("Vulkan returned a null device queue");
-    }
-    if (allocator.handle() == nullptr)
-    {
-        throw std::runtime_error("VMA returned a null allocator");
-    }
-    if (swapchain.imageCount() == 0 || swapchain.imageViews().size() != swapchain.images().size() ||
-        swapchain.renderFinished().size() != swapchain.imageCount())
-    {
-        throw std::runtime_error("Vulkan returned an incomplete swapchain");
-    }
-
-    std::println("Selected Vulkan 1.4 device: {}", device.name());
-    std::println("Graphics queue family: {}", device.graphicsQueueFamily());
-    std::println("Present queue family: {}", device.presentQueueFamily());
-    std::println("Logical device and queues created.");
-    std::println("VMA allocator created.");
+    const fire_engine::RendererInfo rendererInfo = renderer.info();
+    std::println("Selected Vulkan 1.4 device: {}", rendererInfo.deviceName);
+    std::println("Graphics queue family: {}", rendererInfo.graphicsQueueFamily);
+    std::println("Present queue family: {}", rendererInfo.presentQueueFamily);
+    std::println("Logical device, queues, and VMA allocator created.");
     std::println("Swapchain created: {} images at {}x{} ({}, {}), {} presentation semaphores.",
-                 swapchain.imageCount(), swapchain.extent().width, swapchain.extent().height,
-                 vk::to_string(swapchain.imageFormat()), vk::to_string(swapchain.presentMode()),
-                 swapchain.renderFinished().size());
-    std::println("Pipeline layout and dynamic-rendering pipeline created.");
-    std::println("Triangle buffers and one frame in flight created.");
+                 rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,
+                 rendererInfo.imageFormat, rendererInfo.presentMode,
+                 rendererInfo.presentationSemaphoreCount);
+    std::println("Scene prepared: one indexed mesh, material, render object, and node.");
 
     std::uint64_t renderedFrameCount = 0;
     bool swapchainNeedsRecreation = false;
@@ -120,7 +150,8 @@ try
             break;
         }
 
-        const fire_engine::RenderResult result = renderer.renderFrame();
+        content.scene.updateWorldTransforms();
+        const fire_engine::RenderResult result = renderer.drawFrame(content.scene);
         if (result != fire_engine::RenderResult::eNotPresented)
         {
             ++renderedFrameCount;
@@ -152,8 +183,6 @@ try
 }
 catch (const std::exception& error)
 {
-    // The logger catches formatting failures and falls back to allocation-free
-    // C stdio, preserving the original application error.
     fire_engine::log("fireEngine Tutorial failed: {}", error.what());
     return 1;
 }

@@ -1,9 +1,8 @@
 #pragma once
 
-#include <array>
-
 #include <vulkan/vulkan_raii.hpp>
 
+#include <fire_engine/math/mat4.hpp>
 #include <fire_engine/render/buffer.hpp>
 
 namespace fire_engine
@@ -23,7 +22,7 @@ class MemoryAllocator;
  */
 struct alignas(16) FrameUniforms
 {
-    std::array<float, 16> transform; ///< Column-major transform applied to each vertex.
+    Mat4 viewProjection = Mat4::identity(); ///< World-to-clip transform shared by every draw.
 };
 
 static_assert(sizeof(FrameUniforms) == 16 * sizeof(float));

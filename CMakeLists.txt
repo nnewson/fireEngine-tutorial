@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 # Declare the project metadata and tell CMake that this repository contains
 # C++ sources. No C compiler is needed for this tutorial.
 project(fire_engine_tutorial
-    VERSION 0.6.0
+    VERSION 0.7.0
     DESCRIPTION "A development tutorial to building your own fireEngine"
     LANGUAGES CXX
 )
@@ -27,6 +27,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # of whichever slangc happens to be installed on the machine, and needs no
 # knowledge of where vcpkg lays out its tools directory.
 find_package(glfw3 CONFIG REQUIRED)
+find_package(Catch2 3 CONFIG REQUIRED)
 find_package(slang CONFIG REQUIRED)
 find_package(VulkanHeaders 1.4 CONFIG REQUIRED)
 find_package(VulkanLoader 1.4 CONFIG REQUIRED)
@@ -39,10 +40,13 @@ option(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS
     ON
 )
 
-# Build the tutorial application as an executable.
-add_executable(fireEngineTutorial
+# Build the reusable engine separately from the application entry point. This
+# lets CPU-only unit tests exercise maths, scene traversal, and render planning
+# without creating a window or Vulkan device.
+add_library(fireEngineTutorialEngine STATIC
     src/core/debug.cpp
-    src/main.cpp
+    src/graphics/render_assets.cpp
+    src/graphics/render_preparation.cpp
     src/platform/glfw.cpp
     src/platform/window.cpp
     src/render/allocator.cpp
@@ -52,17 +56,24 @@ add_executable(fireEngineTutorial
     src/render/pipeline.cpp
     src/render/renderer.cpp
     src/render/swapchain.cpp
+    src/scene/scene.cpp
+    src/scene/scene_node.cpp
 )
 
-target_include_directories(fireEngineTutorial PRIVATE include)
+target_include_directories(fireEngineTutorialEngine PUBLIC include)
 
-# State the language requirement on the target as well, so it remains explicit
-# if this executable is later moved into a larger parent CMake project.
+# The application owns only its event loop and high-level scene construction.
+add_executable(fireEngineTutorial src/main.cpp)
+target_link_libraries(fireEngineTutorial PRIVATE fireEngineTutorialEngine)
+
+# State the language requirement on every first-party target so each remains
+# explicit if it is later moved into a larger parent CMake project.
+target_compile_features(fireEngineTutorialEngine PUBLIC cxx_std_23)
 target_compile_features(fireEngineTutorial PRIVATE cxx_std_23)
 
 # Pass the project version to the Vulkan application metadata so the version
 # reported to the driver always matches the one declared by project() above.
-target_compile_definitions(fireEngineTutorial PRIVATE
+target_compile_definitions(fireEngineTutorialEngine PRIVATE
     FIRE_ENGINE_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     FIRE_ENGINE_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     FIRE_ENGINE_VERSION_PATCH=${PROJECT_VERSION_PATCH}
@@ -71,7 +82,7 @@ target_compile_definitions(fireEngineTutorial PRIVATE
 # Removing Vulkan-Hpp's convenience constructors makes Vulkan structures
 # aggregates. The context uses the linked loader's vkGetInstanceProcAddr rather
 # than Vulkan-Hpp's optional dlopen-based loader discovery helper.
-target_compile_definitions(fireEngineTutorial PRIVATE
+target_compile_definitions(fireEngineTutorialEngine PUBLIC
     VULKAN_HPP_ENABLE_DYNAMIC_LOADER_TOOL=0
     VULKAN_HPP_NO_CONSTRUCTORS
 )
@@ -79,7 +90,7 @@ target_compile_definitions(fireEngineTutorial PRIVATE
 # Pipeline creation loads build-time-compiled SPIR-V from this directory. An
 # absolute path keeps direct runs and CTest independent of their working folder.
 set(FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders")
-target_compile_definitions(fireEngineTutorial PRIVATE
+target_compile_definitions(fireEngineTutorialEngine PRIVATE
     FIRE_ENGINE_SHADER_DIRECTORY="${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}"
 )
 
@@ -87,18 +98,20 @@ target_compile_definitions(fireEngineTutorial PRIVATE
 # tied to the Debug configuration. A generator expression is used rather than a
 # CMAKE_BUILD_TYPE test because multi-configuration generators such as Visual
 # Studio choose the configuration at build time rather than at configure time.
-target_compile_definitions(fireEngineTutorial PRIVATE
+target_compile_definitions(fireEngineTutorialEngine PRIVATE
     $<$<CONFIG:Debug>:FIRE_ENGINE_ENABLE_VALIDATION>
 )
 
 # GLFW creates the platform surface; Vulkan::Loader supplies the dispatching
 # library that discovers the machine's installed Vulkan drivers. VMA manages
-# the vertex and uniform-buffer allocations used by the renderer.
-target_link_libraries(fireEngineTutorial PRIVATE
-    GPUOpen::VulkanMemoryAllocator
-    glfw
-    Vulkan::Headers
-    Vulkan::Loader
+# the prepared mesh buffers and per-frame uniform allocation used by the renderer.
+target_link_libraries(fireEngineTutorialEngine
+    PUBLIC
+        Vulkan::Headers
+    PRIVATE
+        GPUOpen::VulkanMemoryAllocator
+        glfw
+        Vulkan::Loader
 )
 
 # Compile the shader once into a single SPIR-V module. Slang finds every
@@ -141,26 +154,45 @@ add_custom_command(
 add_custom_target(fireEngineShaders ALL DEPENDS "${FIRE_ENGINE_SHADER_BINARY}")
 add_dependencies(fireEngineTutorial fireEngineShaders)
 
-# MSVC and Clang/GCC spell equivalent warning options differently. Keep warning
-# levels consistent across platforms and add the appropriate error flag when
-# the option above is enabled.
-if(MSVC)
-    # Imported dependency headers are marked external. Lower their warning level
-    # so VMA's implementation is not held to first-party /W4 /WX policy.
-    target_compile_options(fireEngineTutorial PRIVATE /W4 /external:W0)
-    if(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS)
-        target_compile_options(fireEngineTutorial PRIVATE /WX)
+# MSVC and Clang/GCC spell equivalent warning options differently. Apply one
+# strict policy to the library, executable, and unit tests.
+function(fire_engine_enable_warnings target)
+    if(MSVC)
+        # Imported dependency headers are marked external. Lower their warning
+        # level so dependencies are not held to first-party /W4 /WX policy.
+        target_compile_options(${target} PRIVATE /W4 /external:W0)
+        if(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        if(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
     endif()
-else()
-    target_compile_options(fireEngineTutorial PRIVATE -Wall -Wextra -Wpedantic)
-    if(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS)
-        target_compile_options(fireEngineTutorial PRIVATE -Werror)
-    endif()
-endif()
+endfunction()
 
-# Register a bounded run as the CTest smoke test. The normal executable keeps
-# rendering until its window closes; the test exits after one successful image
-# acquisition, command submission, and presentation.
+fire_engine_enable_warnings(fireEngineTutorialEngine)
+fire_engine_enable_warnings(fireEngineTutorial)
+
+# Catch2 covers the Vulkan-free layers. The bounded application run remains a
+# separate integration test for actual acquisition, rendering, and presentation.
 enable_testing()
-add_test(NAME fireEngineTutorial COMMAND fireEngineTutorial --frames 1)
-set_tests_properties(fireEngineTutorial PROPERTIES TIMEOUT 30)
+
+add_executable(fireEngineTutorialTests
+    tests/graphics/test_render_preparation.cpp
+    tests/math/test_mat4.cpp
+    tests/scene/test_scene.cpp
+)
+target_link_libraries(fireEngineTutorialTests
+    PRIVATE
+        Catch2::Catch2WithMain
+        fireEngineTutorialEngine
+)
+fire_engine_enable_warnings(fireEngineTutorialTests)
+
+include(Catch)
+catch_discover_tests(fireEngineTutorialTests)
+
+add_test(NAME fireEngineTutorialSmoke COMMAND fireEngineTutorial --frames 1)
+set_tests_properties(fireEngineTutorialSmoke PROPERTIES TIMEOUT 30)
