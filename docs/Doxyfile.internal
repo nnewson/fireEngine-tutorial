@@ -1,0 +1,9 @@
+# Reuse every warning, input, and presentation setting from the public build.
+@INCLUDE_PATH          = docs
+@INCLUDE               = Doxyfile
+
+# Give the standalone implementation view its own visible identity and output.
+PROJECT_NAME           = "Fire Engine Tutorial — Internal Implementation"
+PROJECT_BRIEF          = "The implementation details behind the tutorial renderer"
+OUTPUT_DIRECTORY       = build/docs-internal
+ENABLED_SECTIONS       = INTERNAL

@@ -14,9 +14,11 @@ namespace fire_engine
 {
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local function declarations --- */
 
 void errorCallback(int errorCode, const char* description) noexcept;
+/** @endcond */
 } // namespace
 
 /* --- Public member functions --- */
@@ -68,6 +70,7 @@ std::vector<const char*> Glfw::requiredVulkanExtensions() const
 
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local functions --- */
 
 /**
@@ -81,5 +84,6 @@ void errorCallback(int errorCode, const char* description) noexcept
     // through GLFW's C callback boundary.
     log("GLFW error {}: {}", errorCode, description);
 }
+/** @endcond */
 } // namespace
 } // namespace fire_engine

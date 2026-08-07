@@ -1,18 +1,34 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
-
-#include <fire_engine/render/buffer.hpp>
-#include <fire_engine/render/frame_in_flight.hpp>
+#include <memory>
+#include <string>
 
 namespace fire_engine
 {
 /* --- Forward declarations --- */
 
-class Device;
-class MemoryAllocator;
-class Pipeline;
-class Swapchain;
+class Glfw;
+class RenderAssets;
+class Scene;
+class Window;
+
+/* --- POD structs --- */
+
+/** @brief Vulkan-free summary of the renderer selected for this window. */
+struct RendererInfo
+{
+    std::string deviceName;                 ///< Vulkan-reported physical-device name.
+    std::uint32_t graphicsQueueFamily;      ///< Queue family used for graphics work.
+    std::uint32_t presentQueueFamily;       ///< Queue family used for presentation.
+    std::size_t swapchainImageCount;        ///< Number of presentable images.
+    std::size_t presentationSemaphoreCount; ///< One render-finished semaphore per image.
+    std::uint32_t width;                    ///< Swapchain width in physical pixels.
+    std::uint32_t height;                   ///< Swapchain height in physical pixels.
+    std::string imageFormat;                ///< Human-readable Vulkan image format.
+    std::string presentMode;                ///< Human-readable Vulkan presentation mode.
+};
 
 /* --- Enums --- */
 
@@ -27,72 +43,64 @@ enum class RenderResult : std::uint8_t
 /* --- Classes --- */
 
 /**
- * @brief Records, submits, and presents the tutorial's single triangle.
+ * @brief Owns Vulkan and compiles Vulkan-free scene descriptions for drawing.
  *
- * The application owns its event loop. This class owns the resources used by
- * one frame in flight and hides the Vulkan operation sequence performed during
- * each iteration of that loop. Device, allocator, swapchain, and pipeline are
- * borrowed and must all outlive this object.
+ * The public surface intentionally contains no Vulkan types. Stable mesh and
+ * material descriptions are uploaded explicitly by prepare(), while drawFrame()
+ * consumes current scene transforms and records a fresh command buffer.
  */
 class Renderer final
 {
 public:
     /**
-     * @brief Creates and uploads the triangle and initializes one frame slot.
-     * @param device Logical device and queues used to execute and present work.
-     * @param allocator VMA owner used for vertex and uniform buffers.
-     * @param swapchain Presentable images targeted by the pipeline.
-     * @param pipeline Dynamic-rendering graphics pipeline used for the draw.
-     * @throws std::runtime_error if a buffer cannot be created or populated.
-     * @throws vk::SystemError if a frame resource cannot be created.
+     * @brief Creates the complete Vulkan renderer for one window.
+     * @param glfw Initialized GLFW lifetime owner.
+     * @param window Window used to create and size the presentation surface.
+     * @param applicationName Name reported to the Vulkan runtime.
+     * @throws std::runtime_error if no suitable Vulkan configuration can be created.
      */
-    Renderer(const Device& device, const MemoryAllocator& allocator, const Swapchain& swapchain,
-             const Pipeline& pipeline);
+    Renderer(const Glfw& glfw, const Window& window, const std::string& applicationName);
 
-    /**
-     * @brief Waits without throwing if submitted work may remain during unwinding.
-     *
-     * Normal shutdown should call waitIdle() so an error can be reported. If an
-     * exception leaves the event loop, this fallback waits before Renderer-owned
-     * buffers and frame resources are destroyed. Presentation-resource lifetime
-     * remains the separate precondition documented by Swapchain.
-     */
+    /** @brief Releases prepared resources and the Vulkan ownership tree. */
     ~Renderer() noexcept;
 
-    /// @brief Copy construction is disabled because render resources have one owner.
     Renderer(const Renderer&) = delete;
-    /// @brief Copy assignment is disabled because render resources have one owner.
     Renderer& operator=(const Renderer&) = delete;
-    /// @brief Move construction is disabled because this object borrows stable owners.
     Renderer(Renderer&&) = delete;
-    /// @brief Move assignment is disabled because this object borrows stable owners.
     Renderer& operator=(Renderer&&) = delete;
 
     /**
-     * @brief Acquires, records, submits, and presents one swapchain image.
-     * @return Whether an image was presented and whether the swapchain remains suitable.
-     * @throws vk::SystemError if an unexpected Vulkan operation fails.
+     * @brief Validates and uploads the stable assets belonging to a scene.
+     * @param assets Vulkan-free render descriptions to compile.
+     * @param scene Hierarchy whose render-object references are validated.
+     * Repeating the same asset revision and scene dependencies reuses the
+     * cached plan and GPU resources. Changed inputs replace the compiled subset.
+     *
+     * @throws std::invalid_argument if the scene contains invalid data or references.
+     * @throws std::runtime_error if a GPU allocation or upload fails.
      */
-    [[nodiscard]] RenderResult renderFrame();
+    void prepare(const RenderAssets& assets, const Scene& scene);
 
     /**
-     * @brief Waits for all device work before dependent render resources are destroyed.
-     * @throws vk::SystemError if the device reports that the wait failed.
+     * @brief Records current scene draws, submits them, and presents one image.
+     * @param scene Prepared scene whose world transforms have been updated.
+     * @return Whether an image was presented and whether the swapchain remains suitable.
+     * @throws std::logic_error if prepare() has not run or a scene reference was not prepared.
+     * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */
+    [[nodiscard]] RenderResult drawFrame(const Scene& scene);
+
+    /** @brief Waits for device work before renderer-dependent resources are destroyed. */
     void waitIdle();
 
-private:
     /**
-     * @brief Records the dynamic-rendering commands for one acquired image.
-     * @param imageIndex Index returned by swapchain image acquisition.
+     * @brief Returns a Vulkan-free description of the initialized renderer.
+     * @return Device, queues, swapchain, and presentation choices made at construction.
      */
-    void recordCommands(std::uint32_t imageIndex) const;
+    [[nodiscard]] RendererInfo info() const;
 
-    const Device& device_;       ///< Device and queues borrowed by every frame.
-    const Swapchain& swapchain_; ///< Images and per-image synchronization borrowed by every frame.
-    const Pipeline& pipeline_;   ///< Pipeline and layout borrowed by command recording.
-    AllocatedBuffer vertexBuffer_;  ///< Immutable triangle vertices owned by this renderer.
-    FrameInFlight frame_;           ///< Command and per-frame synchronization state.
-    bool workMayBePending_ = false; ///< Whether destruction needs a defensive device wait.
+private:
+    class Impl;
+    std::unique_ptr<Impl> implementation_; ///< Hides Vulkan types and their lifetime ordering.
 };
 } // namespace fire_engine

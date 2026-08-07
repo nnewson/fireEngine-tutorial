@@ -11,11 +11,13 @@ namespace fire_engine::debug
 {
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local function declarations --- */
 
 VKAPI_ATTR vk::Bool32 VKAPI_CALL
 debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT, vk::DebugUtilsMessageTypeFlagsEXT,
               const vk::DebugUtilsMessengerCallbackDataEXT* callbackData, void*) noexcept;
+/** @endcond */
 } // namespace
 
 /* --- Public functions --- */
@@ -68,6 +70,7 @@ vk::DebugUtilsMessengerCreateInfoEXT makeMessengerCreateInfo()
 
 namespace
 {
+/** @cond INTERNAL */
 /* --- File-local functions --- */
 
 /**
@@ -89,5 +92,6 @@ debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT, vk::DebugUtilsMessageTyp
     fire_engine::log("Vulkan validation: {}", callbackData->pMessage);
     return VK_FALSE;
 }
+/** @endcond */
 } // namespace
 } // namespace fire_engine::debug

@@ -17,9 +17,9 @@ class Device;
  * pass. Its set-zero layout accepts a uniform buffer through Vulkan 1.4 push
  * descriptors, so no descriptor pool or allocated descriptor set is needed.
  *
- * The vertex input state describes the interleaved triangle buffer, while the
- * set-zero binding accepts the per-frame transform that Renderer pushes while
- * recording each frame.
+ * The vertex input state describes interleaved mesh data. Set zero accepts the
+ * frame's view-projection matrix, while push constants carry each draw's world
+ * transform and material colour.
  */
 class Pipeline final
 {

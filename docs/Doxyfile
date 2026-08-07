@@ -1,6 +1,6 @@
 # Project identity
-PROJECT_NAME           = "Fire Engine Tutorial"
-PROJECT_BRIEF          = "A step-by-step Vulkan 1.4 rendering tutorial"
+PROJECT_NAME           = "Fire Engine Tutorial — Public API"
+PROJECT_BRIEF          = "The supported types and interfaces used to build the tutorial renderer"
 
 # Paths are relative to the repository root. Run this file with:
 #   cmake -E make_directory build/docs

@@ -24,7 +24,7 @@ jobs:
           sudo apt-get install -y clang-format-22
       - name: Check formatting
         run: |
-          find src include -type f \( \
+          find src include tests -type f \( \
             -name '*.hpp' -o -name '*.cpp' -o -name '*.h' -o -name '*.cxx' \
           \) -print0 | xargs -0 clang-format-22 --dry-run -Werror
 
@@ -81,6 +81,8 @@ jobs:
         run: cmake --build --preset default
 
       - name: clang-tidy
+        # Catch2's generated macros need a test-specific configuration. Keep the
+        # production checks strict until that configuration is introduced.
         run: find src -name '*.cpp' -print0 | xargs -0 clang-tidy-22 -p build
 
   documentation:
@@ -97,7 +99,12 @@ jobs:
       - name: Build documentation
         run: |
           cmake -E make_directory build/docs
+          cmake -E make_directory build/docs-internal
           doxygen docs/Doxyfile
+          doxygen docs/Doxyfile.internal
+          cmake -E copy_directory \
+            build/docs-internal/html \
+            build/docs/html/internals
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4

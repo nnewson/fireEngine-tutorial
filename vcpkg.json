@@ -1,13 +1,18 @@
 {
   "name": "fire-engine-tutorial",
-  "version-string": "0.6.0",
+  "version-string": "0.7.0",
   "dependencies": [
+    "catch2",
     "glfw3",
     "shader-slang",
     "vulkan-memory-allocator",
-    "vulkan-headers",
+    {
+      "name": "vulkan-headers",
+      "version>=": "1.4.357.0"
+    },
     {
       "name": "vulkan-loader",
+      "version>=": "1.4.357.0",
       "features": [
         {
           "name": "xcb",
