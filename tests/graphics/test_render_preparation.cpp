@@ -91,7 +91,7 @@ TEST_CASE("Render preparation rejects incomplete mesh data")
     {
         RenderAssets assets;
         Scene scene;
-        const auto mesh = assets.addMesh(Mesh{.indices = {0, 1, 2}});
+        const auto mesh = assets.addMesh(Mesh{.vertices = {}, .indices = {0, 1, 2}});
         const auto material = assets.addMaterial(Material{});
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = material}));
 
