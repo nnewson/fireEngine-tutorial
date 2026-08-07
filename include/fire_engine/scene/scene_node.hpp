@@ -13,6 +13,14 @@ namespace fire_engine
 {
 /* --- Classes --- */
 
+#if defined(_MSC_VER)
+// The two Mat4 members deliberately carry 16-byte shader-compatible alignment.
+// SceneNode combines them with smaller standard-library members, so its final
+// size requires intentional padding that MSVC reports as C4324.
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
 /** @brief Owns one transformable node in the tutorial scene hierarchy. */
 class SceneNode final
 {
@@ -99,4 +107,8 @@ private:
     std::optional<RenderObjectId> renderObject_;       ///< Optional visual attached to this node.
     std::vector<std::unique_ptr<SceneNode>> children_; ///< Owned child hierarchy.
 };
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 } // namespace fire_engine
