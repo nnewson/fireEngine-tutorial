@@ -1,12 +1,9 @@
 #include <fire_engine/graphics/render_preparation.hpp>
 
+#include <fire_engine/graphics/detail/asset_validation.hpp>
 #include <fire_engine/graphics/render_assets.hpp>
 #include <fire_engine/scene/scene_draw_list.hpp>
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -17,13 +14,6 @@ namespace
 {
 /** @cond INTERNAL */
 /* --- File-local function declarations --- */
-
-/**
- * @brief Validates every description in one asset revision.
- * @param assets Complete asset collection to validate before planning.
- * @throws std::invalid_argument if any mesh, material, or relationship is invalid.
- */
-void validateAssets(const RenderAssets& assets);
 
 /**
  * @brief Extracts the exact ordered dependency key retained beside its hash.
@@ -43,7 +33,7 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
                                *validatedRevision_ != assets.revision();
     if (assetsChanged)
     {
-        validateAssets(assets);
+        detail::validateAssets(assets);
         validatedAssets_ = &assets;
         validatedRevision_ = assets.revision();
     }
@@ -119,53 +109,6 @@ namespace
 {
 /** @cond INTERNAL */
 /* --- File-local functions --- */
-
-void validateAssets(const RenderAssets& assets)
-{
-    for (const Mesh& mesh : assets.meshes())
-    {
-        if (mesh.vertices.empty())
-        {
-            throw std::invalid_argument("A prepared mesh must contain vertices");
-        }
-        if (mesh.indices.empty() || mesh.indices.size() % 3 != 0)
-        {
-            throw std::invalid_argument("A prepared mesh must contain complete indexed triangles");
-        }
-        if (mesh.indices.size() > std::numeric_limits<std::uint32_t>::max())
-        {
-            throw std::invalid_argument("A prepared mesh has too many indices for one draw");
-        }
-        if (std::ranges::any_of(mesh.indices, [&mesh](std::uint32_t index)
-                                { return index >= mesh.vertices.size(); }))
-        {
-            throw std::invalid_argument("A mesh index refers beyond its vertex array");
-        }
-    }
-
-    for (const Material& material : assets.materials())
-    {
-        const Color4 colour = material.baseColour;
-        if (!std::isfinite(colour.r) || !std::isfinite(colour.g) || !std::isfinite(colour.b) ||
-            !std::isfinite(colour.a))
-        {
-            throw std::invalid_argument("A material base colour must be finite");
-        }
-    }
-
-    for (const RenderObject& renderObject : assets.renderObjects())
-    {
-        if (!renderObject.mesh.valid() || renderObject.mesh.value >= assets.meshes().size())
-        {
-            throw std::invalid_argument("A render object refers to a missing mesh");
-        }
-        if (!renderObject.material.valid() ||
-            renderObject.material.value >= assets.materials().size())
-        {
-            throw std::invalid_argument("A render object refers to a missing material");
-        }
-    }
-}
 
 std::vector<RenderObjectId> dependencies(const SceneDrawList& drawList)
 {

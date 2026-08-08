@@ -45,6 +45,7 @@ option(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS
 # without creating a window or Vulkan device.
 add_library(fireEngineTutorialEngine STATIC
     src/core/debug.cpp
+    src/graphics/asset_validation.cpp
     src/graphics/render_assets.cpp
     src/graphics/render_preparation.cpp
     src/platform/glfw.cpp
@@ -55,7 +56,9 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/frame_in_flight.cpp
     src/render/pipeline.cpp
     src/render/renderer.cpp
+    src/render/spirv_loader.cpp
     src/render/swapchain.cpp
+    src/render/swapchain_selection.cpp
     src/scene/scene.cpp
     src/scene/scene_node.cpp
 )
@@ -180,8 +183,11 @@ fire_engine_enable_warnings(fireEngineTutorial)
 enable_testing()
 
 add_executable(fireEngineTutorialTests
+    tests/graphics/test_asset_validation.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
+    tests/render/test_spirv_loader.cpp
+    tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
 )
 target_link_libraries(fireEngineTutorialTests
