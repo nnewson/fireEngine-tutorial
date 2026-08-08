@@ -26,9 +26,9 @@ using fire_engine::Vertex;
     return {
         .vertices =
             {
-                Vertex{.position = Vec3{.x = -0.5f}},
-                Vertex{.position = Vec3{.x = 0.5f}},
-                Vertex{.position = Vec3{.y = 0.5f}},
+                Vertex{.position = Vec3{.x = -0.5f}, .colour = {}},
+                Vertex{.position = Vec3{.x = 0.5f}, .colour = {}},
+                Vertex{.position = Vec3{.y = 0.5f}, .colour = {}},
             },
         .indices = {0, 1, 2},
     };
