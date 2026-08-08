@@ -19,7 +19,7 @@ class Device;
  *
  * The vertex input state describes interleaved mesh data. Set zero accepts the
  * frame's view-projection matrix, while push constants carry each draw's world
- * transform and material colour.
+ * transform and material color.
  */
 class Pipeline final
 {

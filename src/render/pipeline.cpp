@@ -53,7 +53,7 @@ constexpr vk::VertexInputBindingDescription kVertexBinding{
     .inputRate = vk::VertexInputRate::eVertex,
 };
 
-/** @brief Position and colour attributes consumed by the vertex shader. */
+/** @brief Position and color attributes consumed by the vertex shader. */
 constexpr std::array kVertexAttributes = {
     vk::VertexInputAttributeDescription{
         .location = 0,
@@ -65,7 +65,7 @@ constexpr std::array kVertexAttributes = {
         .location = 1,
         .binding = 0,
         .format = vk::Format::eR32G32B32A32Sfloat,
-        .offset = static_cast<std::uint32_t>(offsetof(Vertex, colour)),
+        .offset = static_cast<std::uint32_t>(offsetof(Vertex, color)),
     },
 };
 
@@ -87,7 +87,7 @@ static_assert(std::is_standard_layout_v<Vertex>,
 
 // The binding stride and the attribute offsets above describe the same struct to
 // Vulkan twice. Padding introduced by a future member would silently desynchronize
-// them, so pin the expected size: three floats of position and four of colour.
+// them, so pin the expected size: three floats of position and four of color.
 static_assert(sizeof(Vertex) == 7 * sizeof(float),
               "Vertex must stay tightly packed to match kVertexBinding.stride");
 

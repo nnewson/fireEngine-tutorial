@@ -81,10 +81,10 @@ same preparation plan while still producing current per-frame draws. Meanwhile,
 resulting draws. Device, allocator, swapchain, pipeline, and frame resources all
 remain hidden behind the renderer facade.
 
-Mathematical coordinates use `Vec3` and `Vec4`, while graphics colours use the
+Mathematical coordinates use `Vec3` and `Vec4`, while graphics colors use the
 separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain
 the tightly packed float layout required by the shader interface without giving
-colour values unrelated vector operations.
+color values unrelated vector operations.
 
 The executable links the Vulkan loader supplied by vcpkg and uses GLFW to create
 its window surface. Vulkan Memory Allocator owns host-writable vertex, index, and
@@ -97,8 +97,8 @@ SPIR-V directly and no `VkShaderModule` is ever created.
 Each event-loop iteration waits for the previous frame, acquires a swapchain
 image, recycles the command pool, and records dynamic-rendering draws from the
 scene. The command buffer uses synchronization-2 barriers to discard the
-previous image contents, clear the colour attachment, bind each compiled mesh's
-vertex and index buffers, push the node transform and material colour, and
+previous image contents, clear the color attachment, bind each compiled mesh's
+vertex and index buffers, push the node transform and material color, and
 transition the completed image for presentation. `submit2` orders rendering
 after acquisition, then the presentation queue waits for the semaphore belonging
 to that acquired image.
@@ -124,7 +124,7 @@ compilation likewise uses `slangc` supplied by vcpkg rather than an SDK tool in
 the environment.
 
 The executable does not directly link KosmicKrisp or enable the unsupported
-Vulkan portability extensions. It displays the coloured triangle until the user
+Vulkan portability extensions. It displays the colored triangle until the user
 closes the window. Swapchain recreation remains deliberately separate: if the
 surface becomes out of date or suboptimal, the loop waits for the device to
 become idle and exits cleanly so a later tutorial can introduce replacement of

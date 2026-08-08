@@ -29,15 +29,15 @@ Mesh makeTriangle()
             {
                 Vertex{
                     .position = Vec3{.x = 0.0f, .y = -0.5f, .z = 0.0f},
-                    .colour = Color4{.r = 1.0f, .a = 1.0f},
+                    .color = Color4{.r = 1.0f, .a = 1.0f},
                 },
                 Vertex{
                     .position = Vec3{.x = 0.5f, .y = 0.5f, .z = 0.0f},
-                    .colour = Color4{.g = 1.0f, .a = 1.0f},
+                    .color = Color4{.g = 1.0f, .a = 1.0f},
                 },
                 Vertex{
                     .position = Vec3{.x = -0.5f, .y = 0.5f, .z = 0.0f},
-                    .colour = Color4{.b = 1.0f, .a = 1.0f},
+                    .color = Color4{.b = 1.0f, .a = 1.0f},
                 },
             },
         .indices = {0, 1, 2},
@@ -45,14 +45,14 @@ Mesh makeTriangle()
 }
 } // namespace
 
-TEST_CASE("Color4 exposes colour-domain component names")
+TEST_CASE("Color4 exposes color-domain component names")
 {
-    const Color4 colour{.r = 0.1f, .g = 0.2f, .b = 0.3f, .a = 0.4f};
+    const Color4 color{.r = 0.1f, .g = 0.2f, .b = 0.3f, .a = 0.4f};
 
-    REQUIRE(colour.r == 0.1f);
-    REQUIRE(colour.g == 0.2f);
-    REQUIRE(colour.b == 0.3f);
-    REQUIRE(colour.a == 0.4f);
+    REQUIRE(color.r == 0.1f);
+    REQUIRE(color.g == 0.2f);
+    REQUIRE(color.b == 0.3f);
+    REQUIRE(color.a == 0.4f);
 }
 
 TEST_CASE("Render preparation shares mesh and material resources")

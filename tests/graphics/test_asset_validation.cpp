@@ -26,9 +26,9 @@ using fire_engine::Vertex;
     return {
         .vertices =
             {
-                Vertex{.position = Vec3{.x = -0.5f}, .colour = {}},
-                Vertex{.position = Vec3{.x = 0.5f}, .colour = {}},
-                Vertex{.position = Vec3{.y = 0.5f}, .colour = {}},
+                Vertex{.position = Vec3{.x = -0.5f}, .color = {}},
+                Vertex{.position = Vec3{.x = 0.5f}, .color = {}},
+                Vertex{.position = Vec3{.y = 0.5f}, .color = {}},
             },
         .indices = {0, 1, 2},
     };
@@ -71,20 +71,20 @@ TEST_CASE("Asset validation rejects incomplete geometry")
     REQUIRE_THROWS_AS(fire_engine::detail::validateAssets(assets), std::invalid_argument);
 }
 
-TEST_CASE("Asset validation rejects non-finite material colours")
+TEST_CASE("Asset validation rejects non-finite material colors")
 {
     constexpr float kNotFinite = std::numeric_limits<float>::infinity();
-    constexpr std::array invalidColours = {
+    constexpr std::array invalidColors = {
         Color4{.r = kNotFinite},
         Color4{.g = kNotFinite},
         Color4{.b = kNotFinite},
         Color4{.a = kNotFinite},
     };
 
-    for (const Color4 colour : invalidColours)
+    for (const Color4 color : invalidColors)
     {
         RenderAssets assets;
-        static_cast<void>(assets.addMaterial(Material{.baseColour = colour}));
+        static_cast<void>(assets.addMaterial(Material{.baseColor = color}));
         REQUIRE_THROWS_AS(fire_engine::detail::validateAssets(assets), std::invalid_argument);
     }
 }
