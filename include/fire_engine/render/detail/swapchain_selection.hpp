@@ -10,7 +10,7 @@ namespace fire_engine::detail
 /** @cond INTERNAL */
 /**
  * @brief Chooses an sRGB surface format when available.
- * @param formats Non-empty format and colour-space pairs reported by the surface.
+ * @param formats Non-empty format and color-space pairs reported by the surface.
  * @return Preferred sRGB pair, or the first supported pair as a fallback.
  */
 [[nodiscard]] vk::SurfaceFormatKHR
@@ -43,7 +43,7 @@ choosePresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
 
 /**
  * @brief Chooses the first conventional alpha-compositing mode supported by the surface.
- * @param capabilities Surface flags describing supported alpha behaviour.
+ * @param capabilities Surface flags describing supported alpha behavior.
  * @return A supported composite-alpha mode, preferring opaque output.
  * @throws std::runtime_error if the surface reports no recognized mode.
  */

@@ -32,7 +32,7 @@ namespace
 /** @cond INTERNAL */
 /* --- File-local constants --- */
 
-/** @brief The sole colour mip and array layer used by every image barrier. */
+/** @brief The sole color mip and array layer used by every image barrier. */
 constexpr vk::ImageSubresourceRange kColorSubresourceRange{
     .aspectMask = vk::ImageAspectFlagBits::eColor,
     .baseMipLevel = 0,
@@ -71,7 +71,7 @@ private:
 struct CompiledRenderObject
 {
     const CompiledMesh* mesh = nullptr; ///< Shared compiled geometry.
-    Color4 baseColour{};                ///< Material factor pushed for each draw.
+    Color4 baseColor{};                 ///< Material factor pushed for each draw.
 };
 } // namespace
 
@@ -99,7 +99,7 @@ public:
 
     /**
      * @brief Compiles the asset subset referenced by the current scene.
-     * @param assets Complete Vulkan-free asset catalogue.
+     * @param assets Complete Vulkan-free asset catalog.
      * @param scene Scene whose draw dependencies select the compiled subset.
      */
     void prepare(const RenderAssets& assets, const Scene& scene);
@@ -126,7 +126,7 @@ private:
     void recordCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems) const;
 
     /**
-     * @brief Orders acquisition before the transition to colour-attachment use.
+     * @brief Orders acquisition before the transition to color-attachment use.
      * @param commandBuffer Command buffer receiving the image barrier.
      * @param imageIndex Acquired swapchain-image index.
      */
@@ -136,21 +136,21 @@ private:
     /**
      * @brief Begins dynamic rendering and binds state shared by every draw.
      * @param commandBuffer Command buffer receiving rendering and binding commands.
-     * @param imageIndex Acquired swapchain-image index used as the colour attachment.
+     * @param imageIndex Acquired swapchain-image index used as the color attachment.
      */
-    void beginColourPass(const vk::raii::CommandBuffer& commandBuffer,
-                         std::uint32_t imageIndex) const;
+    void beginColorPass(const vk::raii::CommandBuffer& commandBuffer,
+                        std::uint32_t imageIndex) const;
 
     /**
      * @brief Records the mesh bindings, constants, and indexed draw for each item.
-     * @param commandBuffer Command buffer inside the active colour pass.
+     * @param commandBuffer Command buffer inside the active color pass.
      * @param drawItems Current ordered scene draws.
      */
     void recordDraws(const vk::raii::CommandBuffer& commandBuffer,
                      const std::vector<DrawItem>& drawItems) const;
 
     /**
-     * @brief Orders colour writes before the transition to presentation.
+     * @brief Orders color writes before the transition to presentation.
      * @param commandBuffer Command buffer receiving the image barrier.
      * @param imageIndex Acquired swapchain-image index.
      */
@@ -287,7 +287,7 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
     {
         compiledObjects[object.id.value] = {
             .mesh = compiledMeshes[object.mesh.value].get(),
-            .baseColour = assets.materials()[object.material.value].baseColour,
+            .baseColor = assets.materials()[object.material.value].baseColor,
         };
     }
 
@@ -423,7 +423,7 @@ void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
     commandBuffer.begin(beginInfo);
 
     transitionToAttachment(commandBuffer, imageIndex);
-    beginColourPass(commandBuffer, imageIndex);
+    beginColorPass(commandBuffer, imageIndex);
     recordDraws(commandBuffer, drawItems);
     commandBuffer.endRendering();
     transitionToPresent(commandBuffer, imageIndex);
@@ -454,13 +454,13 @@ void Renderer::Impl::transitionToAttachment(const vk::raii::CommandBuffer& comma
     commandBuffer.pipelineBarrier2(beginDependency);
 }
 
-void Renderer::Impl::beginColourPass(const vk::raii::CommandBuffer& commandBuffer,
-                                     std::uint32_t imageIndex) const
+void Renderer::Impl::beginColorPass(const vk::raii::CommandBuffer& commandBuffer,
+                                    std::uint32_t imageIndex) const
 {
     const vk::ClearValue clearValue{
         .color = {.float32 = std::array{0.015f, 0.02f, 0.03f, 1.0f}},
     };
-    const vk::RenderingAttachmentInfo colourAttachment{
+    const vk::RenderingAttachmentInfo colorAttachment{
         .imageView = *swapchain_.imageView(imageIndex),
         .imageLayout = vk::ImageLayout::eAttachmentOptimal,
         .loadOp = vk::AttachmentLoadOp::eClear,
@@ -475,7 +475,7 @@ void Renderer::Impl::beginColourPass(const vk::raii::CommandBuffer& commandBuffe
             },
         .layerCount = 1,
         .colorAttachmentCount = 1,
-        .pColorAttachments = &colourAttachment,
+        .pColorAttachments = &colorAttachment,
     };
     commandBuffer.beginRendering(renderingInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline_.pipeline());
@@ -524,7 +524,7 @@ void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
 
         const DrawConstants constants{
             .model = item.world,
-            .baseColour = object.baseColour,
+            .baseColor = object.baseColor,
         };
         commandBuffer.pushConstants<DrawConstants>(*pipeline_.pipelineLayout(),
                                                    vk::ShaderStageFlagBits::eVertex, 0, constants);

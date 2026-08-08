@@ -169,21 +169,21 @@ namespace
             {
                 fire_engine::Vertex{
                     .position = {.x = 0.0f, .y = -0.6f, .z = 0.0f},
-                    .colour = {.r = 1.0f, .g = 0.2f, .b = 0.1f, .a = 1.0f},
+                    .color = {.r = 1.0f, .g = 0.2f, .b = 0.1f, .a = 1.0f},
                 },
                 fire_engine::Vertex{
                     .position = {.x = 0.6f, .y = 0.6f, .z = 0.0f},
-                    .colour = {.r = 0.1f, .g = 1.0f, .b = 0.2f, .a = 1.0f},
+                    .color = {.r = 0.1f, .g = 1.0f, .b = 0.2f, .a = 1.0f},
                 },
                 fire_engine::Vertex{
                     .position = {.x = -0.6f, .y = 0.6f, .z = 0.0f},
-                    .colour = {.r = 0.2f, .g = 0.3f, .b = 1.0f, .a = 1.0f},
+                    .color = {.r = 0.2f, .g = 0.3f, .b = 1.0f, .a = 1.0f},
                 },
             },
         .indices = {0, 1, 2},
     });
     const fire_engine::MaterialId material = content.assets.addMaterial({
-        .baseColour = {.r = 0.9f, .g = 0.95f, .b = 1.0f, .a = 1.0f},
+        .baseColor = {.r = 0.9f, .g = 0.95f, .b = 1.0f, .a = 1.0f},
     });
     const fire_engine::RenderObjectId triangle = content.assets.addRenderObject({
         .mesh = mesh,

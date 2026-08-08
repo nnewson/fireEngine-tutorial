@@ -9,7 +9,7 @@ namespace detail
 /** @cond INTERNAL */
 /**
  * @brief Validates every description and relationship in an asset collection.
- * @param assets Complete Vulkan-free asset catalogue to validate.
+ * @param assets Complete Vulkan-free asset catalog to validate.
  * @throws std::invalid_argument if any mesh, material, or relationship is invalid.
  */
 void validateAssets(const RenderAssets& assets);

@@ -7,11 +7,11 @@ namespace fire_engine
 /* --- POD structs --- */
 
 /**
- * @brief Linear red, green, blue, and alpha colour components.
+ * @brief Linear red, green, blue, and alpha color components.
  *
  * Color4 is deliberately separate from Vec4: it shares the same four-float
  * storage shape for shader interfaces without exposing mathematical vector
- * operations that do not describe colour-domain behaviour.
+ * operations that do not describe color-domain behavior.
  */
 struct Color4
 {

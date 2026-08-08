@@ -9,6 +9,6 @@ namespace fire_engine
 /** @brief CPU-side unlit material compiled by the tutorial renderer. */
 struct Material
 {
-    Color4 baseColour{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f}; ///< Vertex colour factor.
+    Color4 baseColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f}; ///< Vertex color factor.
 };
 } // namespace fire_engine

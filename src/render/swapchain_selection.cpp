@@ -12,7 +12,7 @@ namespace fire_engine::detail
 /** @cond INTERNAL */
 /* --- File-local constants --- */
 
-/** @brief Preferred colour format for presenting gamma-correct colour values. */
+/** @brief Preferred color format for presenting gamma-correct color values. */
 constexpr vk::SurfaceFormatKHR kPreferredSurfaceFormat{
     .format = vk::Format::eB8G8R8A8Srgb,
     .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,

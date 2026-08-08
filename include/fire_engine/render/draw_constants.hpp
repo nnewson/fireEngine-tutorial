@@ -13,10 +13,10 @@ namespace fire_engine
 struct alignas(16) DrawConstants
 {
     Mat4 model = Mat4::identity(); ///< Object-to-world transform for one scene node.
-    Color4 baseColour{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f}; ///< Material tint.
+    Color4 baseColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f}; ///< Material tint.
 };
 
 static_assert(sizeof(DrawConstants) == 20 * sizeof(float));
 static_assert(alignof(DrawConstants) == 16);
-static_assert(offsetof(DrawConstants, baseColour) == 16 * sizeof(float));
+static_assert(offsetof(DrawConstants, baseColor) == 16 * sizeof(float));
 } // namespace fire_engine
