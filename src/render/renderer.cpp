@@ -99,7 +99,7 @@ public:
 
     /**
      * @brief Compiles the asset subset referenced by the current scene.
-     * @param assets Complete Vulkan-free asset catalogue.
+     * @param assets Complete Vulkan-free asset catalog.
      * @param scene Scene whose draw dependencies select the compiled subset.
      */
     void prepare(const RenderAssets& assets, const Scene& scene);

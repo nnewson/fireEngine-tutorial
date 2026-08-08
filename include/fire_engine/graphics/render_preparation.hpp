@@ -62,7 +62,7 @@ public:
 
     /**
      * @brief Returns a cached plan or compiles one for the supplied dependencies.
-     * @param assets Complete catalogue of Vulkan-free render descriptions.
+     * @param assets Complete catalog of Vulkan-free render descriptions.
      * @param drawList Current scene instances and dependency hash.
      * @return Reference valid until the next build() call that changes the plan.
      * @throws std::invalid_argument if an asset or draw dependency is invalid.

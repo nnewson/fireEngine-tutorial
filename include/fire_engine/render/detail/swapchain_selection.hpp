@@ -43,7 +43,7 @@ choosePresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
 
 /**
  * @brief Chooses the first conventional alpha-compositing mode supported by the surface.
- * @param capabilities Surface flags describing supported alpha behaviour.
+ * @param capabilities Surface flags describing supported alpha behavior.
  * @return A supported composite-alpha mode, preferring opaque output.
  * @throws std::runtime_error if the surface reports no recognized mode.
  */

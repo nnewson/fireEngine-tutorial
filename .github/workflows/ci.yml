@@ -9,6 +9,26 @@ on:
 jobs:
   # -------- Platform-independent lint gates (run once) --------
 
+  terminology:
+    name: US English terminology
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for UK English spellings
+        run: |
+          # grep exits 0 when it matches, 1 when it does not, and above 1 on
+          # error. Capturing the status keeps a missing path or unreadable file
+          # from being reported as a clean tree.
+          status=0
+          grep -rInE --color=never \
+            '(colour|behaviour|catalogue|initialis|normalis|rasteris|synchronis|optimis|organis|recognis|analys|serialis|artefact|centre|licence|grey)' \
+            include src shaders tests README.md CMakeLists.txt || status=$?
+          case "$status" in
+            0) echo 'Use US English spelling in first-party code and comments.' >&2; exit 1 ;;
+            1) ;;
+            *) echo "grep failed with exit $status" >&2; exit "$status" ;;
+          esac
+
   clang-format:
     name: clang-format
     runs-on: ubuntu-latest
