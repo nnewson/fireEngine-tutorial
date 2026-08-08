@@ -1,13 +1,12 @@
 #include <fire_engine/render/swapchain.hpp>
 
 #include <fire_engine/platform/window.hpp>
+#include <fire_engine/render/detail/swapchain_selection.hpp>
 #include <fire_engine/render/device.hpp>
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -16,14 +15,6 @@ namespace fire_engine
 namespace
 {
 /** @cond INTERNAL */
-/* --- File-local constants --- */
-
-/** @brief Preferred color format for presenting gamma-correct color values. */
-constexpr vk::SurfaceFormatKHR kPreferredSurfaceFormat{
-    .format = vk::Format::eB8G8R8A8Srgb,
-    .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
-};
-
 /* --- File-local types --- */
 
 /** @brief Surface properties that determine valid swapchain configuration. */
@@ -37,15 +28,6 @@ struct SurfaceSupport
 /* --- File-local function declarations --- */
 
 [[nodiscard]] SurfaceSupport querySurfaceSupport(const Device& device);
-[[nodiscard]] vk::SurfaceFormatKHR
-chooseSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& formats);
-[[nodiscard]] vk::PresentModeKHR
-choosePresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
-[[nodiscard]] vk::Extent2D chooseExtent(const vk::SurfaceCapabilitiesKHR& capabilities,
-                                        const Window& window);
-[[nodiscard]] std::uint32_t chooseImageCount(const vk::SurfaceCapabilitiesKHR& capabilities);
-[[nodiscard]] vk::CompositeAlphaFlagBitsKHR
-chooseCompositeAlpha(const vk::SurfaceCapabilitiesKHR& capabilities);
 [[nodiscard]] std::vector<vk::raii::ImageView>
 createImageViews(const vk::raii::Device& device, const std::vector<vk::Image>& images,
                  vk::Format format);
@@ -68,9 +50,10 @@ Swapchain::Swapchain(const Device& device, const Window& window)
     {
         throw std::runtime_error("The presentation surface does not support color attachments");
     }
-    const vk::SurfaceFormatKHR surfaceFormat = chooseSurfaceFormat(support.formats);
-    const vk::PresentModeKHR presentMode = choosePresentMode(support.presentModes);
-    const vk::Extent2D imageExtent = chooseExtent(support.capabilities, window);
+    const vk::SurfaceFormatKHR surfaceFormat = detail::chooseSurfaceFormat(support.formats);
+    const vk::PresentModeKHR presentMode = detail::choosePresentMode(support.presentModes);
+    const vk::Extent2D imageExtent =
+        detail::chooseExtent(support.capabilities, window.framebufferExtent());
     const std::array queueFamilies = {device.graphicsQueueFamily(), device.presentQueueFamily()};
     const bool usesSeparateQueueFamilies = queueFamilies[0] != queueFamilies[1];
 
@@ -79,7 +62,7 @@ Swapchain::Swapchain(const Device& device, const Window& window)
     // more efficient exclusive mode.
     const vk::SwapchainCreateInfoKHR createInfo{
         .surface = *device.surface(),
-        .minImageCount = chooseImageCount(support.capabilities),
+        .minImageCount = detail::chooseImageCount(support.capabilities),
         .imageFormat = surfaceFormat.format,
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = imageExtent,
@@ -91,7 +74,7 @@ Swapchain::Swapchain(const Device& device, const Window& window)
             usesSeparateQueueFamilies ? static_cast<std::uint32_t>(queueFamilies.size()) : 0U,
         .pQueueFamilyIndices = usesSeparateQueueFamilies ? queueFamilies.data() : nullptr,
         .preTransform = support.capabilities.currentTransform,
-        .compositeAlpha = chooseCompositeAlpha(support.capabilities),
+        .compositeAlpha = detail::chooseCompositeAlpha(support.capabilities),
         .presentMode = presentMode,
         .clipped = vk::True,
     };
@@ -178,97 +161,6 @@ namespace
         .formats = device.physicalDevice().getSurfaceFormatsKHR(*device.surface()),
         .presentModes = device.physicalDevice().getSurfacePresentModesKHR(*device.surface()),
     };
-}
-
-/**
- * @brief Chooses an sRGB surface format when available.
- * @param formats Non-empty format and color-space pairs reported by the surface.
- * Device selection rejects any device reporting none, so this is never empty.
- * @return Preferred sRGB pair, or the first supported pair as a fallback.
- */
-[[nodiscard]] vk::SurfaceFormatKHR
-chooseSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& formats)
-{
-    const auto preferred = std::ranges::find(formats, kPreferredSurfaceFormat);
-    return preferred != formats.end() ? *preferred : formats.front();
-}
-
-/**
- * @brief Chooses low-latency mailbox presentation when supported.
- * @param presentModes Presentation modes reported by the surface.
- * @return Mailbox when available, otherwise Vulkan's guaranteed FIFO mode.
- */
-[[nodiscard]] vk::PresentModeKHR
-choosePresentMode(const std::vector<vk::PresentModeKHR>& presentModes)
-{
-    return std::ranges::find(presentModes, vk::PresentModeKHR::eMailbox) != presentModes.end()
-               ? vk::PresentModeKHR::eMailbox
-               : vk::PresentModeKHR::eFifo;
-}
-
-/**
- * @brief Chooses a swapchain extent compatible with the surface and framebuffer.
- * @param capabilities Surface extent limits and any platform-defined fixed extent.
- * @param window Window whose framebuffer supplies the desired pixel dimensions.
- * @return Fixed surface extent or clamped framebuffer extent.
- * @throws std::runtime_error if the window framebuffer currently has zero area.
- */
-[[nodiscard]] vk::Extent2D chooseExtent(const vk::SurfaceCapabilitiesKHR& capabilities,
-                                        const Window& window)
-{
-    if (capabilities.currentExtent.width != std::numeric_limits<std::uint32_t>::max())
-    {
-        return capabilities.currentExtent;
-    }
-
-    const vk::Extent2D framebufferExtent = window.framebufferExtent();
-    if (framebufferExtent.width == 0 || framebufferExtent.height == 0)
-    {
-        throw std::runtime_error("The window framebuffer has zero area");
-    }
-    return {
-        .width = std::clamp(framebufferExtent.width, capabilities.minImageExtent.width,
-                            capabilities.maxImageExtent.width),
-        .height = std::clamp(framebufferExtent.height, capabilities.minImageExtent.height,
-                             capabilities.maxImageExtent.height),
-    };
-}
-
-/**
- * @brief Requests one image beyond the surface minimum to reduce pipeline stalls.
- * @param capabilities Surface-supported image-count range.
- * @return Desired image count capped by a finite surface maximum.
- */
-[[nodiscard]] std::uint32_t chooseImageCount(const vk::SurfaceCapabilitiesKHR& capabilities)
-{
-    const std::uint32_t desiredCount = capabilities.minImageCount + 1;
-    return capabilities.maxImageCount > 0 ? std::min(desiredCount, capabilities.maxImageCount)
-                                          : desiredCount;
-}
-
-/**
- * @brief Chooses the first conventional alpha-compositing mode supported by the surface.
- * @param capabilities Surface flags describing supported alpha behavior.
- * @return A supported composite-alpha mode, preferring opaque output.
- * @throws std::runtime_error if the surface reports no recognized mode.
- */
-[[nodiscard]] vk::CompositeAlphaFlagBitsKHR
-chooseCompositeAlpha(const vk::SurfaceCapabilitiesKHR& capabilities)
-{
-    constexpr std::array kPreferredModes = {
-        vk::CompositeAlphaFlagBitsKHR::eOpaque,
-        vk::CompositeAlphaFlagBitsKHR::ePreMultiplied,
-        vk::CompositeAlphaFlagBitsKHR::ePostMultiplied,
-        vk::CompositeAlphaFlagBitsKHR::eInherit,
-    };
-    for (const vk::CompositeAlphaFlagBitsKHR mode : kPreferredModes)
-    {
-        if (static_cast<bool>(capabilities.supportedCompositeAlpha & mode))
-        {
-            return mode;
-        }
-    }
-    throw std::runtime_error("The presentation surface has no supported composite-alpha mode");
 }
 
 /**
