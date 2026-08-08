@@ -1,8 +1,13 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <expected>
+#include <numbers>
+#include <stdexcept>
 
+#include <fire_engine/math/quaternion.hpp>
 #include <fire_engine/math/vec3.hpp>
 #include <fire_engine/math/vec4.hpp>
 
@@ -61,6 +66,116 @@ public:
         result[0, 0] = scaleValue.x;
         result[1, 1] = scaleValue.y;
         result[2, 2] = scaleValue.z;
+        return result;
+    }
+
+    /**
+     * @brief Builds a rotation matrix from a unit quaternion.
+     * @param rotationValue Normalized quaternion rotation.
+     * @return Matrix that applies the supplied rotation.
+     */
+    [[nodiscard]] static constexpr Mat4 rotation(Quaternion rotationValue) noexcept
+    {
+        const float xx = rotationValue.x * rotationValue.x;
+        const float yy = rotationValue.y * rotationValue.y;
+        const float zz = rotationValue.z * rotationValue.z;
+        const float xy = rotationValue.x * rotationValue.y;
+        const float xz = rotationValue.x * rotationValue.z;
+        const float yz = rotationValue.y * rotationValue.z;
+        const float xw = rotationValue.x * rotationValue.w;
+        const float yw = rotationValue.y * rotationValue.w;
+        const float zw = rotationValue.z * rotationValue.w;
+
+        Mat4 result = identity();
+        result[0, 0] = 1.0f - 2.0f * (yy + zz);
+        result[0, 1] = 2.0f * (xy - zw);
+        result[0, 2] = 2.0f * (xz + yw);
+        result[1, 0] = 2.0f * (xy + zw);
+        result[1, 1] = 1.0f - 2.0f * (xx + zz);
+        result[1, 2] = 2.0f * (yz - xw);
+        result[2, 0] = 2.0f * (xz - yw);
+        result[2, 1] = 2.0f * (yz + xw);
+        result[2, 2] = 1.0f - 2.0f * (xx + yy);
+        return result;
+    }
+
+    /**
+     * @brief Builds a right-handed Vulkan perspective projection.
+     * @param verticalFieldOfView Vertical field of view in radians.
+     * @param aspectRatio Framebuffer width divided by height.
+     * @param nearPlane Positive distance to the near clipping plane.
+     * @param farPlane Distance to the far clipping plane, greater than nearPlane.
+     * @return Projection whose normalized depth range is zero to one.
+     * @throws std::invalid_argument if a projection parameter is outside its valid range.
+     *
+     * Invalid projection configuration is a setup error. A framebuffer-derived aspect ratio
+     * must only be supplied after resize handling has established a non-zero extent.
+     */
+    [[nodiscard]] static Mat4 perspective(float verticalFieldOfView, float aspectRatio,
+                                          float nearPlane, float farPlane)
+    {
+        if (!std::isfinite(verticalFieldOfView) || !std::isfinite(aspectRatio) ||
+            !std::isfinite(nearPlane) || !std::isfinite(farPlane) || verticalFieldOfView <= 0.0f ||
+            verticalFieldOfView >= std::numbers::pi_v<float> || aspectRatio <= 0.0f ||
+            nearPlane <= 0.0f || farPlane <= nearPlane)
+        {
+            throw std::invalid_argument("Perspective projection parameters are invalid");
+        }
+
+        const float focalLength = 1.0f / std::tan(verticalFieldOfView * 0.5f);
+        Mat4 result;
+        result[0, 0] = focalLength / aspectRatio;
+        // A positive-height Vulkan viewport maps positive NDC Y downward. Flip here so the
+        // projection retains the conventional view-space direction where positive Y is up.
+        result[1, 1] = -focalLength;
+        result[2, 2] = farPlane / (nearPlane - farPlane);
+        result[2, 3] = farPlane * nearPlane / (nearPlane - farPlane);
+        result[3, 2] = -1.0f;
+        return result;
+    }
+
+    /**
+     * @brief Builds a right-handed view matrix looking from eye toward target.
+     * @param eye Camera position in world space.
+     * @param target World-space point at the center of the view.
+     * @param up Approximate world-space up direction.
+     * @return View matrix, or the normalization error caused by a degenerate basis.
+     *
+     * Unlike fixed projection configuration, a runtime camera direction can legitimately
+     * become degenerate, so this factory reports that outcome explicitly.
+     */
+    [[nodiscard]] static std::expected<Mat4, NormalizeError> lookAt(Vec3 eye, Vec3 target,
+                                                                    Vec3 up) noexcept
+    {
+        const std::expected<Vec3, NormalizeError> forwardResult = (target - eye).normalized();
+        if (!forwardResult)
+        {
+            return std::unexpected{forwardResult.error()};
+        }
+
+        const Vec3 forward = *forwardResult;
+        const std::expected<Vec3, NormalizeError> rightResult = forward.cross(up).normalized();
+        if (!rightResult)
+        {
+            return std::unexpected{rightResult.error()};
+        }
+
+        const Vec3 right = *rightResult;
+        const Vec3 cameraUp = right.cross(forward);
+
+        Mat4 result = identity();
+        result[0, 0] = right.x;
+        result[0, 1] = right.y;
+        result[0, 2] = right.z;
+        result[0, 3] = -right.dot(eye);
+        result[1, 0] = cameraUp.x;
+        result[1, 1] = cameraUp.y;
+        result[1, 2] = cameraUp.z;
+        result[1, 3] = -cameraUp.dot(eye);
+        result[2, 0] = -forward.x;
+        result[2, 1] = -forward.y;
+        result[2, 2] = -forward.z;
+        result[2, 3] = forward.dot(eye);
         return result;
     }
 

@@ -17,12 +17,17 @@ const std::string& SceneNode::name() const noexcept
     return name_;
 }
 
-const Mat4& SceneNode::localTransform() const noexcept
+std::optional<SceneNodeId> SceneNode::id() const noexcept
+{
+    return id_;
+}
+
+const Transform& SceneNode::localTransform() const noexcept
 {
     return localTransform_;
 }
 
-void SceneNode::localTransform(const Mat4& transform) noexcept
+void SceneNode::localTransform(const Transform& transform) noexcept
 {
     localTransform_ = transform;
 }
@@ -71,9 +76,14 @@ const std::vector<std::unique_ptr<SceneNode>>& SceneNode::children() const noexc
 
 /* --- Private member functions --- */
 
+void SceneNode::assignId(SceneNodeId id) noexcept
+{
+    id_ = id;
+}
+
 void SceneNode::resolve(const Mat4& parentWorld) noexcept
 {
-    worldTransform_ = parentWorld * localTransform_;
+    worldTransform_ = parentWorld * localTransform_.matrix();
     for (const std::unique_ptr<SceneNode>& child : children_)
     {
         child->resolve(worldTransform_);

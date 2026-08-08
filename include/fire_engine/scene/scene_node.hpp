@@ -8,14 +8,16 @@
 #include <fire_engine/graphics/draw_item.hpp>
 #include <fire_engine/graphics/render_ids.hpp>
 #include <fire_engine/math/mat4.hpp>
+#include <fire_engine/math/transform.hpp>
+#include <fire_engine/scene/scene_node_id.hpp>
 
 namespace fire_engine
 {
 /* --- Classes --- */
 
 #if defined(_MSC_VER)
-// The two Mat4 members deliberately carry 16-byte shader-compatible alignment.
-// SceneNode combines them with smaller standard-library members, so its final
+// The world-transform Mat4 carries 16-byte shader-compatible alignment.
+// SceneNode combines it with smaller standard-library members, so its final
 // size requires intentional padding that MSVC reports as C4324.
 #pragma warning(push)
 #pragma warning(disable : 4324)
@@ -36,22 +38,33 @@ public:
 
     SceneNode(const SceneNode&) = delete;
     SceneNode& operator=(const SceneNode&) = delete;
-    /** @brief Moves the node, its optional object, and its complete child hierarchy. */
-    SceneNode(SceneNode&&) noexcept = default;
-    /** @brief Replaces this node by moving another node and its hierarchy. @return This node. */
-    SceneNode& operator=(SceneNode&&) noexcept = default;
+    // Registered nodes are addressed by stable pointers, so the node itself is immovable.
+    SceneNode(SceneNode&&) = delete;
+    SceneNode& operator=(SceneNode&&) = delete;
+
+    /**
+     * @brief Returns the stable ID assigned when this node enters a scene.
+     * @return Scene-local ID, or no value before scene registration.
+     *
+     * The optional records whether this node has entered a Scene. SceneNodeId retains its
+     * invalid sentinel separately so findNode() can reject fabricated default IDs.
+     */
+    [[nodiscard]] std::optional<SceneNodeId> id() const noexcept;
 
     /** @brief Returns this node's diagnostic name. @return Name supplied at construction. */
     [[nodiscard]] const std::string& name() const noexcept;
 
-    /** @brief Returns the transform relative to this node's parent. @return Local matrix. */
-    [[nodiscard]] const Mat4& localTransform() const noexcept;
+    /**
+     * @brief Returns the decomposed transform relative to this node's parent.
+     * @return Translation, rotation, and scale used to build the local matrix.
+     */
+    [[nodiscard]] const Transform& localTransform() const noexcept;
 
     /**
      * @brief Replaces the transform relative to this node's parent.
-     * @param transform New local transform.
+     * @param transform New decomposed local transform.
      */
-    void localTransform(const Mat4& transform) noexcept;
+    void localTransform(const Transform& transform) noexcept;
 
     /** @brief Returns the resolved object-to-world transform. @return Cached world matrix. */
     [[nodiscard]] const Mat4& worldTransform() const noexcept;
@@ -95,6 +108,12 @@ public:
 private:
     friend class Scene;
 
+    /**
+     * @brief Assigns this node its dense scene-local identity.
+     * @param id ID selected by the owning scene.
+     */
+    void assignId(SceneNodeId id) noexcept;
+
     /** @brief Resolves this subtree. @param parentWorld Resolved transform of the parent. */
     void resolve(const Mat4& parentWorld) noexcept;
     /** @brief Appends this subtree's visuals. @param output Draw list receiving depth-first items.
@@ -102,7 +121,8 @@ private:
     void appendDrawItems(std::vector<DrawItem>& output) const;
 
     std::string name_;                                 ///< Human-readable node name.
-    Mat4 localTransform_ = Mat4::identity();           ///< Transform relative to the parent.
+    std::optional<SceneNodeId> id_;                    ///< Identity assigned by the owning scene.
+    Transform localTransform_;                         ///< Transform relative to the parent.
     Mat4 worldTransform_ = Mat4::identity();           ///< Cached resolved world transform.
     std::optional<RenderObjectId> renderObject_;       ///< Optional visual attached to this node.
     std::vector<std::unique_ptr<SceneNode>> children_; ///< Owned child hierarchy.
