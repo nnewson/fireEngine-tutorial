@@ -69,6 +69,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build cmake clang-tidy-22 g++-14 \
+            autoconf autoconf-archive automake libtool \
             libxinerama-dev libxcursor-dev libxcb1-dev libx11-xcb-dev \
             xorg-dev libglu1-mesa-dev pkg-config
 
@@ -77,7 +78,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
+          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -185,6 +186,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build cmake g++-14 libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb \
+            autoconf autoconf-archive automake libtool \
             libxinerama-dev libxcursor-dev libxcb1-dev libx11-xcb-dev \
             xorg-dev libglu1-mesa-dev pkg-config
 
@@ -208,7 +210,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
+          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -256,7 +258,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
+          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -300,7 +302,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: 5d35de2ee8b13d0bcec328153605638a74fbbf84
+          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
 
       - name: Bootstrap vcpkg
         run: .\vcpkg\bootstrap-vcpkg.bat

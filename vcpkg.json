@@ -6,21 +6,19 @@
     "glfw3",
     "shader-slang",
     "vulkan-memory-allocator",
-    {
-      "name": "vulkan-headers",
-      "version>=": "1.4.357.0"
-    },
+    "vulkan-headers",
     {
       "name": "vulkan-loader",
-      "version>=": "1.4.357.0",
       "features": [
         {
           "name": "xcb",
-          "platform": "linux"
+          "platform": "linux",
+          "$comment": "Enable the VK_KHR_xcb_surface path that GLFW's Linux X11 backend may use."
         },
         {
           "name": "xlib",
-          "platform": "linux"
+          "platform": "linux",
+          "$comment": "Enable GLFW's alternative VK_KHR_xlib_surface path instead of assuming one X11 integration route."
         }
       ]
     }
