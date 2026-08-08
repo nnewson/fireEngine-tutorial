@@ -10,7 +10,7 @@ namespace fire_engine::detail
 /** @cond INTERNAL */
 /**
  * @brief Chooses an sRGB surface format when available.
- * @param formats Non-empty format and colour-space pairs reported by the surface.
+ * @param formats Non-empty format and color-space pairs reported by the surface.
  * @return Preferred sRGB pair, or the first supported pair as a fallback.
  */
 [[nodiscard]] vk::SurfaceFormatKHR

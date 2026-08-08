@@ -38,11 +38,11 @@ void validateAssets(const RenderAssets& assets)
 
     for (const Material& material : assets.materials())
     {
-        const Color4 colour = material.baseColour;
-        if (!std::isfinite(colour.r) || !std::isfinite(colour.g) || !std::isfinite(colour.b) ||
-            !std::isfinite(colour.a))
+        const Color4 color = material.baseColor;
+        if (!std::isfinite(color.r) || !std::isfinite(color.g) || !std::isfinite(color.b) ||
+            !std::isfinite(color.a))
         {
-            throw std::invalid_argument("A material base colour must be finite");
+            throw std::invalid_argument("A material base color must be finite");
         }
     }
 

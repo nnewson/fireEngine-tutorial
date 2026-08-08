@@ -11,6 +11,6 @@ namespace fire_engine
 struct Vertex
 {
     Vec3 position; ///< Object-space position.
-    Color4 colour; ///< Linear RGBA vertex colour.
+    Color4 color;  ///< Linear RGBA vertex color.
 };
 } // namespace fire_engine
