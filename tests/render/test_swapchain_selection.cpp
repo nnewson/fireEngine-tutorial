@@ -14,12 +14,12 @@ namespace selection = fire_engine::detail;
 [[nodiscard]] vk::SurfaceCapabilitiesKHR variableExtentCapabilities()
 {
     vk::SurfaceCapabilitiesKHR capabilities{};
-    capabilities.currentExtent = {
+    capabilities.currentExtent = vk::Extent2D{
         .width = std::numeric_limits<std::uint32_t>::max(),
         .height = std::numeric_limits<std::uint32_t>::max(),
     };
-    capabilities.minImageExtent = {.width = 320, .height = 240};
-    capabilities.maxImageExtent = {.width = 1920, .height = 1080};
+    capabilities.minImageExtent = vk::Extent2D{.width = 320, .height = 240};
+    capabilities.maxImageExtent = vk::Extent2D{.width = 1920, .height = 1080};
     return capabilities;
 }
 } // namespace
@@ -53,8 +53,9 @@ TEST_CASE("Swapchain extent selection respects fixed and variable surfaces")
     SECTION("fixed extent")
     {
         vk::SurfaceCapabilitiesKHR capabilities{};
-        capabilities.currentExtent = {.width = 800, .height = 600};
-        REQUIRE(selection::chooseExtent(capabilities, {}) == capabilities.currentExtent);
+        capabilities.currentExtent = vk::Extent2D{.width = 800, .height = 600};
+        REQUIRE(selection::chooseExtent(capabilities, vk::Extent2D{}) ==
+                capabilities.currentExtent);
     }
     SECTION("clamped variable extent")
     {
@@ -66,7 +67,8 @@ TEST_CASE("Swapchain extent selection respects fixed and variable surfaces")
     SECTION("zero-area variable extent")
     {
         const vk::SurfaceCapabilitiesKHR capabilities = variableExtentCapabilities();
-        REQUIRE_THROWS_AS(selection::chooseExtent(capabilities, {}), std::runtime_error);
+        REQUIRE_THROWS_AS(selection::chooseExtent(capabilities, vk::Extent2D{}),
+                          std::runtime_error);
     }
 }
 
@@ -90,6 +92,6 @@ TEST_CASE("Swapchain composite-alpha selection follows preference order")
     REQUIRE(selection::chooseCompositeAlpha(capabilities) ==
             vk::CompositeAlphaFlagBitsKHR::ePreMultiplied);
 
-    capabilities.supportedCompositeAlpha = {};
+    capabilities.supportedCompositeAlpha = vk::CompositeAlphaFlagsKHR{};
     REQUIRE_THROWS_AS(selection::chooseCompositeAlpha(capabilities), std::runtime_error);
 }
