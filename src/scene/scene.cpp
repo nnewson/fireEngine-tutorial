@@ -19,6 +19,7 @@ SceneNode& Scene::addRoot(std::unique_ptr<SceneNode> root)
 
     SceneNode& result = *root;
     roots_.push_back(std::move(root));
+    registerSubtree(result);
     return result;
 }
 
@@ -27,10 +28,11 @@ SceneNode& Scene::addRoot(std::string name)
     return addRoot(std::make_unique<SceneNode>(std::move(name)));
 }
 
-void Scene::updateWorldTransforms() noexcept
+void Scene::updateWorldTransforms()
 {
     for (const std::unique_ptr<SceneNode>& root : roots_)
     {
+        registerSubtree(*root);
         root->resolve(Mat4::identity());
     }
 }
@@ -61,6 +63,40 @@ SceneDrawList Scene::buildDrawItems() const
 const std::vector<std::unique_ptr<SceneNode>>& Scene::roots() const noexcept
 {
     return roots_;
+}
+
+std::optional<SceneNodeRef> Scene::findNode(SceneNodeId id) noexcept
+{
+    if (!id.valid() || id.value >= nodes_.size())
+    {
+        return std::nullopt;
+    }
+    return std::ref(*nodes_[id.value]);
+}
+
+std::optional<SceneNodeConstRef> Scene::findNode(SceneNodeId id) const noexcept
+{
+    if (!id.valid() || id.value >= nodes_.size())
+    {
+        return std::nullopt;
+    }
+    return std::cref(*nodes_[id.value]);
+}
+
+/* --- Private member functions --- */
+
+void Scene::registerSubtree(SceneNode& node)
+{
+    if (!node.id().has_value())
+    {
+        node.assignId(SceneNodeId{.value = nodes_.size()});
+        nodes_.push_back(&node);
+    }
+
+    for (const std::unique_ptr<SceneNode>& child : node.children())
+    {
+        registerSubtree(*child);
+    }
 }
 
 } // namespace fire_engine

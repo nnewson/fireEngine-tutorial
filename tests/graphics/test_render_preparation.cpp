@@ -161,7 +161,11 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
     const auto& firstPlan = preparation.build(assets, firstDrawList);
     REQUIRE(preparation.generation() == 1);
 
-    root.localTransform(fire_engine::Mat4::translation({.x = 2.0f}));
+    root.localTransform({
+        .translation = {.x = 2.0f, .y = 0.0f, .z = 0.0f},
+        .rotation = {},
+        .scale = {.x = 1.0f, .y = 1.0f, .z = 1.0f},
+    });
     scene.updateWorldTransforms();
     const auto movedDrawList = scene.buildDrawItems();
     const auto& reusedPlan = preparation.build(assets, movedDrawList);
