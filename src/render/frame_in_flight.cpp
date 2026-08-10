@@ -1,13 +1,14 @@
-#include <fire_engine/render/frame_in_flight.hpp>
+#include <fire_engine/render/detail/frame_in_flight.hpp>
 
-#include <fire_engine/render/allocator.hpp>
-#include <fire_engine/render/device.hpp>
+#include <fire_engine/render/detail/allocator.hpp>
+#include <fire_engine/render/detail/device.hpp>
 
 #include <span>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
-/* --- Public member functions --- */
+/** @cond INTERNAL */
+/* --- Internal member functions --- */
 
 FrameInFlight::FrameInFlight(const Device& device, const MemoryAllocator& allocator)
     : uniformBuffer_{allocator, sizeof(FrameUniforms), vk::BufferUsageFlagBits::eUniformBuffer}
@@ -83,4 +84,5 @@ const AllocatedBuffer& FrameInFlight::uniformBuffer() const noexcept
 {
     return uniformBuffer_;
 }
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail

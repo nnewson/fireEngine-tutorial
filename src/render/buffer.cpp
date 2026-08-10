@@ -1,6 +1,6 @@
-#include <fire_engine/render/buffer.hpp>
+#include <fire_engine/render/detail/buffer.hpp>
 
-#include <fire_engine/render/allocator.hpp>
+#include <fire_engine/render/detail/allocator.hpp>
 
 #include <cstddef>
 #include <stdexcept>
@@ -8,9 +8,10 @@
 
 #include <vk_mem_alloc.h>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
-/* --- Public member functions --- */
+/** @cond INTERNAL */
+/* --- Internal member functions --- */
 
 AllocatedBuffer::AllocatedBuffer(const MemoryAllocator& allocator, vk::DeviceSize size,
                                  vk::BufferUsageFlags usage)
@@ -85,4 +86,5 @@ vk::DeviceSize AllocatedBuffer::size() const noexcept
 {
     return size_;
 }
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail

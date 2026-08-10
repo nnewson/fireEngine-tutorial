@@ -1,9 +1,9 @@
-#include <fire_engine/render/pipeline.hpp>
+#include <fire_engine/render/detail/pipeline.hpp>
 
 #include <fire_engine/graphics/vertex.hpp>
+#include <fire_engine/render/detail/device.hpp>
+#include <fire_engine/render/detail/draw_constants.hpp>
 #include <fire_engine/render/detail/spirv_loader.hpp>
-#include <fire_engine/render/device.hpp>
-#include <fire_engine/render/draw_constants.hpp>
 
 #include <array>
 #include <cstddef>
@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
 namespace
 {
@@ -107,7 +107,8 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
 /** @endcond */
 } // namespace
 
-/* --- Public member functions --- */
+/** @cond INTERNAL */
+/* --- Internal member functions --- */
 
 Pipeline::Pipeline(const Device& device, vk::Format colorFormat)
 {
@@ -133,6 +134,7 @@ const vk::raii::Pipeline& Pipeline::pipeline() const noexcept
 {
     return pipeline_;
 }
+/** @endcond */
 
 namespace
 {
@@ -306,4 +308,4 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
 }
 /** @endcond */
 } // namespace
-} // namespace fire_engine
+} // namespace fire_engine::detail

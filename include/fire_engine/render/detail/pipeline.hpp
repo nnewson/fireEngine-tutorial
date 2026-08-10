@@ -2,8 +2,9 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
+/** @cond INTERNAL */
 /* --- Forward declarations --- */
 
 class Device;
@@ -68,4 +69,5 @@ private:
     vk::raii::PipelineLayout pipelineLayout_{nullptr}; ///< Supplied to each push-descriptor write.
     vk::raii::Pipeline pipeline_{nullptr};             ///< Dynamic-rendering graphics pipeline.
 };
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail

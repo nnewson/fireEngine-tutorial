@@ -1,8 +1,8 @@
-#include <fire_engine/render/swapchain.hpp>
+#include <fire_engine/render/detail/swapchain.hpp>
 
 #include <fire_engine/platform/window.hpp>
+#include <fire_engine/render/detail/device.hpp>
 #include <fire_engine/render/detail/swapchain_selection.hpp>
-#include <fire_engine/render/device.hpp>
 
 #include <array>
 #include <cstddef>
@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
 namespace
 {
@@ -36,7 +36,8 @@ createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t image
 /** @endcond */
 } // namespace
 
-/* --- Public member functions --- */
+/** @cond INTERNAL */
+/* --- Internal member functions --- */
 
 Swapchain::Swapchain(const Device& device, const Window& window)
 {
@@ -142,6 +143,7 @@ const vk::raii::Semaphore& Swapchain::renderFinished(std::size_t imageIndex) con
 {
     return renderFinished_.at(imageIndex);
 }
+/** @endcond */
 
 namespace
 {
@@ -221,4 +223,4 @@ createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t image
 }
 /** @endcond */
 } // namespace
-} // namespace fire_engine
+} // namespace fire_engine::detail

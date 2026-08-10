@@ -127,6 +127,25 @@ jobs:
             build/docs-internal/html \
             build/docs/html/internals
 
+      - name: Check documentation boundary
+        run: |
+          public_file_index=build/docs/html/files.html
+          internal_file_index=build/docs-internal/html/files.html
+
+          if grep -qE '>(detail|src)</a>' "$public_file_index"; then
+            echo 'Internal headers or sources leaked into the public documentation.' >&2
+            exit 1
+          fi
+
+          grep -q '>detail</a>' "$internal_file_index" || {
+            echo 'The internal documentation does not contain detail headers.' >&2
+            exit 1
+          }
+          grep -q '>src</a>' "$internal_file_index" || {
+            echo 'The internal documentation does not contain implementation sources.' >&2
+            exit 1
+          }
+
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
         with:

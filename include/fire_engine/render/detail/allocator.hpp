@@ -4,8 +4,9 @@
 
 struct VmaAllocator_T;
 
-namespace fire_engine
+namespace fire_engine::detail
 {
+/** @cond INTERNAL */
 /* --- Forward declarations --- */
 
 class Device;
@@ -55,4 +56,5 @@ public:
 private:
     VmaAllocator_T* allocator_ = nullptr; ///< Opaque VMA allocator owned by this object.
 };
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail

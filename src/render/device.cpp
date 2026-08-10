@@ -1,4 +1,4 @@
-#include <fire_engine/render/device.hpp>
+#include <fire_engine/render/detail/device.hpp>
 
 #include <fire_engine/core/detail/debug.hpp>
 #include <fire_engine/platform/glfw.hpp>
@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
 namespace
 {
@@ -72,7 +72,8 @@ makeQueueCreateInfos(const DeviceSelection& selection);
 /** @endcond */
 } // namespace
 
-/* --- Public member functions --- */
+/** @cond INTERNAL */
+/* --- Internal member functions --- */
 
 Device::Device(const Glfw& glfw, const Window& window, const std::string& applicationName)
 {
@@ -150,16 +151,16 @@ void Device::createInstance(const Glfw& glfw, const std::string& applicationName
 
     // Start with the platform surface extensions GLFW requires, then opt into
     // debug utilities and validation only when the runtime advertises them.
-    const detail::InstanceSupport debugSupport = detail::queryInstanceSupport(context_);
+    const InstanceSupport debugSupport = queryInstanceSupport(context_);
     std::vector<const char*> extensions = glfw.requiredVulkanExtensions();
     if (debugSupport.hasDebugUtils)
     {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
-    const std::vector<const char*> layers =
-        debugSupport.hasValidationLayer ? std::vector<const char*>{detail::kValidationLayerName}
-                                        : std::vector<const char*>{};
-    const vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo = detail::makeMessengerCreateInfo();
+    const std::vector<const char*> layers = debugSupport.hasValidationLayer
+                                                ? std::vector<const char*>{kValidationLayerName}
+                                                : std::vector<const char*>{};
+    const vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo = makeMessengerCreateInfo();
 
     // std::string supplies the null terminator required by Vulkan. The pointer
     // only needs to remain valid for the synchronous vkCreateInstance call.
@@ -189,6 +190,7 @@ void Device::createInstance(const Glfw& glfw, const std::string& applicationName
         debugMessenger_ = vk::raii::DebugUtilsMessengerEXT{instance_, debugCreateInfo};
     }
 }
+/** @endcond */
 
 namespace
 {
@@ -482,4 +484,4 @@ makeQueueCreateInfos(const DeviceSelection& selection)
 }
 /** @endcond */
 } // namespace
-} // namespace fire_engine
+} // namespace fire_engine::detail
