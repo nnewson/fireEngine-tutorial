@@ -60,6 +60,8 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
     plan.assetRevision = assets.revision();
     plan.dependencyHash = drawList.dependencyHash;
     std::vector<bool> usedMeshes(assets.meshes().size(), false);
+    std::vector<bool> usedImages(assets.images().size(), false);
+    std::vector<bool> usedTextures(assets.textures().size(), false);
     std::vector<bool> usedMaterials(assets.materials().size(), false);
 
     for (std::size_t index = 0; index < usedRenderObjects.size(); ++index)
@@ -91,6 +93,26 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
         if (usedMaterials[index])
         {
             plan.materials.push_back(MaterialId{.value = index});
+            const std::optional<TextureId> texture = assets.materials()[index].baseColorTexture;
+            if (texture.has_value())
+            {
+                usedTextures[texture->value] = true;
+            }
+        }
+    }
+    for (std::size_t index = 0; index < usedTextures.size(); ++index)
+    {
+        if (usedTextures[index])
+        {
+            plan.textures.push_back(TextureId{.value = index});
+            usedImages[assets.textures()[index].image.value] = true;
+        }
+    }
+    for (std::size_t index = 0; index < usedImages.size(); ++index)
+    {
+        if (usedImages[index])
+        {
+            plan.images.push_back(ImageId{.value = index});
         }
     }
 

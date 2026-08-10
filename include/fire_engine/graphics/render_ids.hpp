@@ -22,6 +22,36 @@ struct MeshId
     [[nodiscard]] constexpr bool operator==(const MeshId&) const noexcept = default;
 };
 
+/** @brief Stable index of one decoded CPU image. */
+struct ImageId
+{
+    std::size_t value = std::numeric_limits<std::size_t>::max(); ///< Dense owning-container index.
+
+    /** @brief Returns whether this ID contains an assigned dense index. @return True if valid. */
+    [[nodiscard]] constexpr bool valid() const noexcept
+    {
+        return value != std::numeric_limits<std::size_t>::max();
+    }
+
+    /** @brief Compares two image IDs by their dense index. @return True when equal. */
+    [[nodiscard]] constexpr bool operator==(const ImageId&) const noexcept = default;
+};
+
+/** @brief Stable index of one image and sampling description. */
+struct TextureId
+{
+    std::size_t value = std::numeric_limits<std::size_t>::max(); ///< Dense owning-container index.
+
+    /** @brief Returns whether this ID contains an assigned dense index. @return True if valid. */
+    [[nodiscard]] constexpr bool valid() const noexcept
+    {
+        return value != std::numeric_limits<std::size_t>::max();
+    }
+
+    /** @brief Compares two texture IDs by their dense index. @return True when equal. */
+    [[nodiscard]] constexpr bool operator==(const TextureId&) const noexcept = default;
+};
+
 /** @brief Stable index of one CPU material description. */
 struct MaterialId
 {

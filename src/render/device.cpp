@@ -1,6 +1,6 @@
 #include <fire_engine/render/device.hpp>
 
-#include <fire_engine/core/debug.hpp>
+#include <fire_engine/core/detail/debug.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 
@@ -150,16 +150,16 @@ void Device::createInstance(const Glfw& glfw, const std::string& applicationName
 
     // Start with the platform surface extensions GLFW requires, then opt into
     // debug utilities and validation only when the runtime advertises them.
-    const debug::InstanceSupport debugSupport = debug::queryInstanceSupport(context_);
+    const detail::InstanceSupport debugSupport = detail::queryInstanceSupport(context_);
     std::vector<const char*> extensions = glfw.requiredVulkanExtensions();
     if (debugSupport.hasDebugUtils)
     {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
     const std::vector<const char*> layers =
-        debugSupport.hasValidationLayer ? std::vector<const char*>{debug::kValidationLayerName}
+        debugSupport.hasValidationLayer ? std::vector<const char*>{detail::kValidationLayerName}
                                         : std::vector<const char*>{};
-    const vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo = debug::makeMessengerCreateInfo();
+    const vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo = detail::makeMessengerCreateInfo();
 
     // std::string supplies the null terminator required by Vulkan. The pointer
     // only needs to remain valid for the synchronous vkCreateInstance call.

@@ -1,6 +1,6 @@
 #include <fire_engine/scene/scene.hpp>
 
-#include <fire_engine/core/hash.hpp>
+#include <fire_engine/core/detail/hash.hpp>
 
 #include <functional>
 #include <stdexcept>
@@ -48,8 +48,8 @@ SceneDrawList Scene::buildDrawItems() const
     // Hash only preparation dependencies. Exact IDs are retained in drawItems
     // so RenderPreparation can still prove equality after this fast check.
     constexpr std::size_t kHashCombineConstant = static_cast<std::size_t>(
-        sizeof(std::size_t) == sizeof(std::uint64_t) ? hash::k64BitGoldenRatio
-                                                     : hash::k32BitGoldenRatio);
+        sizeof(std::size_t) == sizeof(std::uint64_t) ? detail::k64BitGoldenRatio
+                                                     : detail::k32BitGoldenRatio);
     output.dependencyHash = output.drawItems.size();
     for (const DrawItem& drawItem : output.drawItems)
     {

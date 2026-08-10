@@ -15,6 +15,31 @@ namespace fire_engine::detail
 
 void validateAssets(const RenderAssets& assets)
 {
+    for (const ImageData& image : assets.images())
+    {
+        if (image.width == 0 || image.height == 0)
+        {
+            throw std::invalid_argument("A decoded image must have a non-zero extent");
+        }
+
+        constexpr std::size_t kRgbaChannelCount = 4;
+        const std::size_t width = image.width;
+        const std::size_t height = image.height;
+        if (width > std::numeric_limits<std::size_t>::max() / height / kRgbaChannelCount ||
+            image.pixels.size() != width * height * kRgbaChannelCount)
+        {
+            throw std::invalid_argument("A decoded image must contain tightly packed RGBA8 pixels");
+        }
+    }
+
+    for (const Texture& texture : assets.textures())
+    {
+        if (!texture.image.valid() || texture.image.value >= assets.images().size())
+        {
+            throw std::invalid_argument("A texture refers to a missing image");
+        }
+    }
+
     for (const Mesh& mesh : assets.meshes())
     {
         if (mesh.vertices.empty())
@@ -43,6 +68,12 @@ void validateAssets(const RenderAssets& assets)
             !std::isfinite(color.a))
         {
             throw std::invalid_argument("A material base color must be finite");
+        }
+        if (material.baseColorTexture.has_value() &&
+            (!material.baseColorTexture->valid() ||
+             material.baseColorTexture->value >= assets.textures().size()))
+        {
+            throw std::invalid_argument("A material refers to a missing base-color texture");
         }
     }
 

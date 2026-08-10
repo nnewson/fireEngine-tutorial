@@ -4,10 +4,15 @@
 
 #include <memory>
 #include <stdexcept>
+#include <variant>
 #include <vector>
 
 namespace
 {
+using fire_engine::AnimationChannelId;
+using fire_engine::AnimationId;
+using fire_engine::AnimationTargetPath;
+using fire_engine::Animator;
 using fire_engine::DrawItem;
 using fire_engine::Mat4;
 using fire_engine::RenderObjectId;
@@ -28,7 +33,7 @@ TEST_CASE("Scene resolves transforms and emits draw items depth first")
         .rotation = {},
         .scale = {.x = 1.0f, .y = 1.0f, .z = 1.0f},
     });
-    root->renderObject(RenderObjectId{.value = 0});
+    root->component(RenderObjectId{.value = 0});
 
     auto child = std::make_unique<SceneNode>("child");
     child->localTransform(Transform{
@@ -36,7 +41,7 @@ TEST_CASE("Scene resolves transforms and emits draw items depth first")
         .rotation = {},
         .scale = {.x = 1.0f, .y = 1.0f, .z = 1.0f},
     });
-    child->renderObject(RenderObjectId{.value = 1});
+    child->component(RenderObjectId{.value = 1});
     SceneNode& childReference = root->addChild(std::move(child));
 
     scene.addRoot(std::move(root));
@@ -93,14 +98,52 @@ TEST_CASE("Scene supports several roots in stable insertion order")
 {
     Scene scene;
     SceneNode& first = scene.addRoot("first");
-    first.renderObject(RenderObjectId{.value = 0});
+    first.component(RenderObjectId{.value = 0});
     SceneNode& second = scene.addRoot("second");
-    second.renderObject(RenderObjectId{.value = 1});
+    second.component(RenderObjectId{.value = 1});
     scene.updateWorldTransforms();
 
     const auto drawList = scene.buildDrawItems();
     REQUIRE(drawList.drawItems.size() == 2);
     REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
+    REQUIRE(drawList.drawItems[1].renderObject == RenderObjectId{.value = 1});
+}
+
+TEST_CASE("Scene components separate animation behavior from renderable children")
+{
+    const Animator sharedAnimation{
+        .animation = AnimationId{.value = 0},
+        .channel = AnimationChannelId{.value = 0},
+        .targetPath = AnimationTargetPath::eRotation,
+        .playbackTime = 0.0f,
+        .looping = true,
+    };
+
+    Scene scene;
+    SceneNode& firstAnimator = scene.addRoot("first animator");
+    firstAnimator.component(sharedAnimation);
+    firstAnimator.localTransform(Transform{
+        .translation = {.x = 3.0f, .y = 0.0f, .z = 0.0f},
+        .rotation = {},
+        .scale = {.x = 1.0f, .y = 1.0f, .z = 1.0f},
+    });
+    firstAnimator.addChild("first renderable").component(RenderObjectId{.value = 0});
+
+    SceneNode& secondAnimator = scene.addRoot("second animator");
+    secondAnimator.component(sharedAnimation);
+    secondAnimator.addChild("second renderable").component(RenderObjectId{.value = 1});
+
+    SceneNode& transformOnly = scene.addRoot("transform only");
+
+    REQUIRE(std::get<Animator>(firstAnimator.component()).animation == sharedAnimation.animation);
+    REQUIRE(std::get<Animator>(secondAnimator.component()).channel == sharedAnimation.channel);
+    REQUIRE(std::holds_alternative<std::monostate>(transformOnly.component()));
+
+    scene.updateWorldTransforms();
+    const auto drawList = scene.buildDrawItems();
+    REQUIRE(drawList.drawItems.size() == 2);
+    REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
+    REQUIRE(drawList.drawItems[0].world[0, 3] == 3.0f);
     REQUIRE(drawList.drawItems[1].renderObject == RenderObjectId{.value = 1});
 }
 

@@ -4,7 +4,7 @@ namespace fire_engine
 {
 /* --- POD structs --- */
 
-/** @brief Four-component floating-point vector used by colors and homogeneous coordinates. */
+/** @brief Four-component floating-point vector used by homogeneous coordinates. */
 struct Vec4
 {
     float x = 0.0f; ///< First component.
