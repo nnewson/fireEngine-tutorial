@@ -7,3 +7,8 @@ PROJECT_NAME           = "Fire Engine Tutorial — Internal Implementation"
 PROJECT_BRIEF          = "The implementation details behind the tutorial renderer"
 OUTPUT_DIRECTORY       = build/docs-internal
 ENABLED_SECTIONS       = INTERNAL
+
+# Restore the implementation inputs excluded by the public configuration.
+EXCLUDE                 =
+EXCLUDE_PATTERNS        =
+EXTRACT_ANON_NSPACES   = YES

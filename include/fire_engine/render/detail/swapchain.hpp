@@ -9,8 +9,13 @@ namespace fire_engine
 {
 /* --- Forward declarations --- */
 
-class Device;
 class Window;
+
+namespace detail
+{
+/** @cond INTERNAL */
+
+class Device;
 
 /* --- Classes --- */
 
@@ -156,4 +161,6 @@ private:
     vk::PresentModeKHR presentMode_ = vk::PresentModeKHR::eFifo; ///< Presentation scheduling mode.
     vk::Extent2D extent_{}; ///< Dimensions shared by all images.
 };
+/** @endcond */
+} // namespace detail
 } // namespace fire_engine

@@ -5,13 +5,13 @@
 #include <fire_engine/graphics/render_preparation.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
-#include <fire_engine/render/allocator.hpp>
-#include <fire_engine/render/buffer.hpp>
-#include <fire_engine/render/device.hpp>
-#include <fire_engine/render/draw_constants.hpp>
-#include <fire_engine/render/frame_in_flight.hpp>
-#include <fire_engine/render/pipeline.hpp>
-#include <fire_engine/render/swapchain.hpp>
+#include <fire_engine/render/detail/allocator.hpp>
+#include <fire_engine/render/detail/buffer.hpp>
+#include <fire_engine/render/detail/device.hpp>
+#include <fire_engine/render/detail/draw_constants.hpp>
+#include <fire_engine/render/detail/frame_in_flight.hpp>
+#include <fire_engine/render/detail/pipeline.hpp>
+#include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene.hpp>
 
 #include <array>
@@ -52,19 +52,19 @@ public:
      * @param allocator VMA owner used to create both buffers.
      * @param mesh Validated CPU geometry copied into the buffers.
      */
-    CompiledMesh(const MemoryAllocator& allocator, const Mesh& mesh);
+    CompiledMesh(const detail::MemoryAllocator& allocator, const Mesh& mesh);
 
     /** @brief Returns the uploaded vertex buffer. @return Vertex-buffer allocation. */
-    [[nodiscard]] const AllocatedBuffer& vertexBuffer() const noexcept;
+    [[nodiscard]] const detail::AllocatedBuffer& vertexBuffer() const noexcept;
     /** @brief Returns the uploaded index buffer. @return Index-buffer allocation. */
-    [[nodiscard]] const AllocatedBuffer& indexBuffer() const noexcept;
+    [[nodiscard]] const detail::AllocatedBuffer& indexBuffer() const noexcept;
     /** @brief Returns the number of indices uploaded for drawing. @return Index count. */
     [[nodiscard]] std::uint32_t indexCount() const noexcept;
 
 private:
-    AllocatedBuffer vertexBuffer_; ///< GPU buffer containing tightly packed vertices.
-    AllocatedBuffer indexBuffer_;  ///< GPU buffer containing 32-bit triangle indices.
-    std::uint32_t indexCount_;     ///< Number of indices consumed by drawIndexed.
+    detail::AllocatedBuffer vertexBuffer_; ///< GPU buffer containing tightly packed vertices.
+    detail::AllocatedBuffer indexBuffer_;  ///< GPU buffer containing 32-bit triangle indices.
+    std::uint32_t indexCount_;             ///< Number of indices consumed by drawIndexed.
 };
 
 /** @brief Prepared lookup target for one RenderObjectId. */
@@ -161,15 +161,15 @@ private:
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
     // Foundational long-lived state.
-    Device device_;             ///< Vulkan instance, surface, device, and queues.
-    MemoryAllocator allocator_; ///< VMA owner created from the logical device.
+    detail::Device device_;             ///< Vulkan instance, surface, device, and queues.
+    detail::MemoryAllocator allocator_; ///< VMA owner created from the logical device.
 
     // Presentation-dependent state replaced together when recreation is added.
-    Swapchain swapchain_; ///< Images and synchronization tied to presentation.
-    Pipeline pipeline_;   ///< Pipeline compatible with the swapchain format.
+    detail::Swapchain swapchain_; ///< Images and synchronization tied to presentation.
+    detail::Pipeline pipeline_;   ///< Pipeline compatible with the swapchain format.
 
     // Per-frame submission state.
-    FrameInFlight frame_;           ///< Reusable resources for the current frame slot.
+    detail::FrameInFlight frame_;   ///< Reusable resources for the current frame slot.
     bool workMayBePending_ = false; ///< Whether destruction requires a defensive wait.
 
     // Prepared state compiled from the current scene dependencies.
@@ -498,7 +498,7 @@ void Renderer::Impl::beginColorPass(const vk::raii::CommandBuffer& commandBuffer
     const vk::DescriptorBufferInfo uniformInfo{
         .buffer = frame_.uniformBuffer().handle(),
         .offset = 0,
-        .range = sizeof(FrameUniforms),
+        .range = sizeof(detail::FrameUniforms),
     };
     const vk::WriteDescriptorSet uniformWrite{
         .dstBinding = 0,
@@ -522,12 +522,12 @@ void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
         commandBuffer.bindIndexBuffer(object.mesh->indexBuffer().handle(), 0,
                                       vk::IndexType::eUint32);
 
-        const DrawConstants constants{
+        const detail::DrawConstants constants{
             .model = item.world,
             .baseColor = object.baseColor,
         };
-        commandBuffer.pushConstants<DrawConstants>(*pipeline_.pipelineLayout(),
-                                                   vk::ShaderStageFlagBits::eVertex, 0, constants);
+        commandBuffer.pushConstants<detail::DrawConstants>(
+            *pipeline_.pipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, constants);
         commandBuffer.drawIndexed(object.mesh->indexCount(), 1, 0, 0, 0);
     }
 }
@@ -558,7 +558,7 @@ namespace
 {
 /* --- File-local class member functions --- */
 
-CompiledMesh::CompiledMesh(const MemoryAllocator& allocator, const Mesh& mesh)
+CompiledMesh::CompiledMesh(const detail::MemoryAllocator& allocator, const Mesh& mesh)
     : vertexBuffer_{allocator, mesh.vertices.size() * sizeof(Vertex),
                     vk::BufferUsageFlagBits::eVertexBuffer},
       indexBuffer_{allocator, mesh.indices.size() * sizeof(std::uint32_t),
@@ -569,12 +569,12 @@ CompiledMesh::CompiledMesh(const MemoryAllocator& allocator, const Mesh& mesh)
     indexBuffer_.write(std::as_bytes(std::span{mesh.indices}));
 }
 
-const AllocatedBuffer& CompiledMesh::vertexBuffer() const noexcept
+const detail::AllocatedBuffer& CompiledMesh::vertexBuffer() const noexcept
 {
     return vertexBuffer_;
 }
 
-const AllocatedBuffer& CompiledMesh::indexBuffer() const noexcept
+const detail::AllocatedBuffer& CompiledMesh::indexBuffer() const noexcept
 {
     return indexBuffer_;
 }

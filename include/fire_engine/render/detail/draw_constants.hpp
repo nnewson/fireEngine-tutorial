@@ -5,8 +5,9 @@
 #include <fire_engine/graphics/color4.hpp>
 #include <fire_engine/math/mat4.hpp>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
+/** @cond INTERNAL */
 /* --- POD structs --- */
 
 /** @brief Per-draw values supplied through Vulkan push constants. */
@@ -19,4 +20,5 @@ struct alignas(16) DrawConstants
 static_assert(sizeof(DrawConstants) == 20 * sizeof(float));
 static_assert(alignof(DrawConstants) == 16);
 static_assert(offsetof(DrawConstants, baseColor) == 16 * sizeof(float));
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail

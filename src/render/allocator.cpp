@@ -1,6 +1,6 @@
-#include <fire_engine/render/allocator.hpp>
+#include <fire_engine/render/detail/allocator.hpp>
 
-#include <fire_engine/render/device.hpp>
+#include <fire_engine/render/detail/device.hpp>
 
 #include <stdexcept>
 #include <string>
@@ -18,9 +18,10 @@
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
-/* --- Public member functions --- */
+/** @cond INTERNAL */
+/* --- Internal member functions --- */
 
 MemoryAllocator::MemoryAllocator(const Device& device)
 {
@@ -55,4 +56,5 @@ VmaAllocator_T* MemoryAllocator::handle() const noexcept
 {
     return allocator_;
 }
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail

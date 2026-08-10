@@ -12,6 +12,10 @@ namespace fire_engine
 class Glfw;
 class Window;
 
+namespace detail
+{
+/** @cond INTERNAL */
+
 /* --- Classes --- */
 
 /**
@@ -126,4 +130,6 @@ private:
     std::uint32_t graphicsQueueFamily_ = 0;   ///< Family index of graphicsQueue_.
     std::uint32_t presentQueueFamily_ = 0;    ///< Family index of presentQueue_.
 };
+/** @endcond */
+} // namespace detail
 } // namespace fire_engine

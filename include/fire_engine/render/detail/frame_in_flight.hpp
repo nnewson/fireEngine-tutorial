@@ -3,10 +3,11 @@
 #include <vulkan/vulkan_raii.hpp>
 
 #include <fire_engine/math/mat4.hpp>
-#include <fire_engine/render/buffer.hpp>
+#include <fire_engine/render/detail/buffer.hpp>
 
-namespace fire_engine
+namespace fire_engine::detail
 {
+/** @cond INTERNAL */
 /* --- Forward declarations --- */
 
 class Device;
@@ -134,4 +135,5 @@ private:
     vk::raii::Semaphore imageAvailable_{nullptr};      ///< Signals swapchain-image acquisition.
     vk::raii::Fence frameFinished_{nullptr};           ///< Signals completion of submitted work.
 };
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail

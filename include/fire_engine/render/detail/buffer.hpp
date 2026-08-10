@@ -10,8 +10,9 @@
 struct VmaAllocation_T;
 struct VmaAllocator_T;
 
-namespace fire_engine
+namespace fire_engine::detail
 {
+/** @cond INTERNAL */
 /* --- Forward declarations --- */
 
 class MemoryAllocator;
@@ -80,4 +81,5 @@ private:
     vk::Buffer buffer_{};                   ///< Vulkan buffer destroyed through VMA.
     vk::DeviceSize size_ = 0;               ///< Bounds checked by write().
 };
-} // namespace fire_engine
+/** @endcond */
+} // namespace fire_engine::detail
