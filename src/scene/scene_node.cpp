@@ -37,19 +37,14 @@ const Mat4& SceneNode::worldTransform() const noexcept
     return worldTransform_;
 }
 
-std::optional<RenderObjectId> SceneNode::renderObject() const noexcept
+const SceneComponent& SceneNode::component() const noexcept
 {
-    return renderObject_;
+    return component_;
 }
 
-void SceneNode::renderObject(RenderObjectId renderObject) noexcept
+void SceneNode::component(SceneComponent component) noexcept
 {
-    renderObject_ = renderObject;
-}
-
-void SceneNode::clearRenderObject() noexcept
-{
-    renderObject_.reset();
+    component_ = component;
 }
 
 SceneNode& SceneNode::addChild(std::unique_ptr<SceneNode> child)
@@ -92,9 +87,10 @@ void SceneNode::resolve(const Mat4& parentWorld) noexcept
 
 void SceneNode::appendDrawItems(std::vector<DrawItem>& output) const
 {
-    if (renderObject_.has_value())
+    const RenderObjectId* renderObject = std::get_if<RenderObjectId>(&component_);
+    if (renderObject != nullptr)
     {
-        output.push_back({.renderObject = *renderObject_, .world = worldTransform_});
+        output.push_back({.renderObject = *renderObject, .world = worldTransform_});
     }
     for (const std::unique_ptr<SceneNode>& child : children_)
     {

@@ -1,4 +1,4 @@
-#include <fire_engine/core/debug.hpp>
+#include <fire_engine/core/detail/debug.hpp>
 
 #ifdef FIRE_ENGINE_ENABLE_VALIDATION
 #include <algorithm>
@@ -7,7 +7,7 @@
 
 #include <fire_engine/core/log.hpp>
 
-namespace fire_engine::debug
+namespace fire_engine::detail
 {
 namespace
 {
@@ -20,7 +20,8 @@ debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT, vk::DebugUtilsMessageTyp
 /** @endcond */
 } // namespace
 
-/* --- Public functions --- */
+/** @cond INTERNAL */
+/* --- Internal functions --- */
 
 InstanceSupport queryInstanceSupport(const vk::raii::Context& context)
 {
@@ -67,6 +68,7 @@ vk::DebugUtilsMessengerCreateInfoEXT makeMessengerCreateInfo()
         .pfnUserCallback = debugCallback,
     };
 }
+/** @endcond */
 
 namespace
 {
@@ -94,4 +96,4 @@ debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT, vk::DebugUtilsMessageTyp
 }
 /** @endcond */
 } // namespace
-} // namespace fire_engine::debug
+} // namespace fire_engine::detail

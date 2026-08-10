@@ -2,9 +2,9 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
-/** @brief Debugging and Vulkan validation support. */
-namespace fire_engine::debug
+namespace fire_engine::detail
 {
+/** @cond INTERNAL */
 /* --- Constants --- */
 
 /**
@@ -44,4 +44,5 @@ struct InstanceSupport
  * @return A configuration that requests warning and error messages.
  */
 [[nodiscard]] vk::DebugUtilsMessengerCreateInfoEXT makeMessengerCreateInfo();
-} // namespace fire_engine::debug
+/** @endcond */
+} // namespace fire_engine::detail

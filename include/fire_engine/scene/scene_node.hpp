@@ -6,9 +6,9 @@
 #include <vector>
 
 #include <fire_engine/graphics/draw_item.hpp>
-#include <fire_engine/graphics/render_ids.hpp>
 #include <fire_engine/math/mat4.hpp>
 #include <fire_engine/math/transform.hpp>
+#include <fire_engine/scene/components.hpp>
 #include <fire_engine/scene/scene_node_id.hpp>
 
 namespace fire_engine
@@ -69,20 +69,15 @@ public:
     /** @brief Returns the resolved object-to-world transform. @return Cached world matrix. */
     [[nodiscard]] const Mat4& worldTransform() const noexcept;
 
-    /**
-     * @brief Returns the optional render object attached to this node.
-     * @return Attached object ID, or no value for a transform-only node.
+    /** @brief Returns this node's role. @return Transform-only, animator, or renderable component.
      */
-    [[nodiscard]] std::optional<RenderObjectId> renderObject() const noexcept;
+    [[nodiscard]] const SceneComponent& component() const noexcept;
 
     /**
-     * @brief Attaches one render object to this node.
-     * @param renderObject Object emitted during draw traversal.
+     * @brief Replaces this node's optional behavior or renderable role.
+     * @param component Transform-only, animator, or renderable component.
      */
-    void renderObject(RenderObjectId renderObject) noexcept;
-
-    /** @brief Removes any render object attached to this node. */
-    void clearRenderObject() noexcept;
+    void component(SceneComponent component) noexcept;
 
     /**
      * @brief Adds an owned child node.
@@ -124,7 +119,7 @@ private:
     std::optional<SceneNodeId> id_;                    ///< Identity assigned by the owning scene.
     Transform localTransform_;                         ///< Transform relative to the parent.
     Mat4 worldTransform_ = Mat4::identity();           ///< Cached resolved world transform.
-    std::optional<RenderObjectId> renderObject_;       ///< Optional visual attached to this node.
+    SceneComponent component_;                         ///< Optional behavior or renderable role.
     std::vector<std::unique_ptr<SceneNode>> children_; ///< Owned child hierarchy.
 };
 

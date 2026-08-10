@@ -44,6 +44,7 @@ option(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS
 # lets CPU-only unit tests exercise maths, scene traversal, and render planning
 # without creating a window or Vulkan device.
 add_library(fireEngineTutorialEngine STATIC
+    src/animation/animation_validation.cpp
     src/core/debug.cpp
     src/graphics/asset_validation.cpp
     src/graphics/render_assets.cpp
@@ -183,6 +184,7 @@ fire_engine_enable_warnings(fireEngineTutorial)
 enable_testing()
 
 add_executable(fireEngineTutorialTests
+    tests/animation/test_animation_validation.cpp
     tests/graphics/test_asset_validation.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp

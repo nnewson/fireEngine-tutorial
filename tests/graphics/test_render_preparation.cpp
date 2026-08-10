@@ -7,10 +7,12 @@
 
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 namespace
 {
 using fire_engine::Color4;
+using fire_engine::ImageData;
 using fire_engine::Material;
 using fire_engine::Mesh;
 using fire_engine::RenderAssets;
@@ -19,6 +21,9 @@ using fire_engine::RenderObjectId;
 using fire_engine::RenderPreparation;
 using fire_engine::Scene;
 using fire_engine::SceneNode;
+using fire_engine::Texture;
+using fire_engine::TextureFilter;
+using fire_engine::TextureWrap;
 using fire_engine::Vec3;
 using fire_engine::Vertex;
 
@@ -30,17 +35,31 @@ Mesh makeTriangle()
                 Vertex{
                     .position = Vec3{.x = 0.0f, .y = -0.5f, .z = 0.0f},
                     .color = Color4{.r = 1.0f, .a = 1.0f},
+                    .textureCoordinate = {},
                 },
                 Vertex{
                     .position = Vec3{.x = 0.5f, .y = 0.5f, .z = 0.0f},
                     .color = Color4{.g = 1.0f, .a = 1.0f},
+                    .textureCoordinate = {},
                 },
                 Vertex{
                     .position = Vec3{.x = -0.5f, .y = 0.5f, .z = 0.0f},
                     .color = Color4{.b = 1.0f, .a = 1.0f},
+                    .textureCoordinate = {},
                 },
             },
         .indices = {0, 1, 2},
+    };
+}
+
+Texture makeTexture(fire_engine::ImageId image)
+{
+    return {
+        .image = image,
+        .minFilter = TextureFilter::eLinear,
+        .magFilter = TextureFilter::eLinear,
+        .wrapU = TextureWrap::eRepeat,
+        .wrapV = TextureWrap::eRepeat,
     };
 }
 } // namespace
@@ -69,11 +88,11 @@ TEST_CASE("Render preparation shares mesh and material resources")
         assets.addRenderObject(RenderObject{.mesh = unusedMesh, .material = unusedMaterial}));
 
     auto root = std::make_unique<SceneNode>("first");
-    root->renderObject(first);
+    root->component(first);
     scene.addRoot(std::move(root));
 
     auto otherRoot = std::make_unique<SceneNode>("second");
-    otherRoot->renderObject(second);
+    otherRoot->component(second);
     scene.addRoot(std::move(otherRoot));
 
     RenderPreparation preparation;
@@ -83,6 +102,41 @@ TEST_CASE("Render preparation shares mesh and material resources")
     REQUIRE(plan.materials.size() == 1);
     REQUIRE(plan.renderObjects.size() == 2);
     REQUIRE(plan.assetRevision == assets.revision());
+}
+
+TEST_CASE("Render preparation extracts shared image and texture dependencies")
+{
+    RenderAssets assets;
+    const auto image =
+        assets.addImage(ImageData{.width = 1, .height = 1, .pixels = {255, 255, 255, 255}});
+    const auto firstTexture = assets.addTexture(makeTexture(image));
+    const auto secondTexture = assets.addTexture(makeTexture(image));
+    const auto mesh = assets.addMesh(makeTriangle());
+    const auto firstMaterial = assets.addMaterial(Material{
+        .baseColor = {.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f},
+        .baseColorTexture = firstTexture,
+    });
+    const auto secondMaterial = assets.addMaterial(Material{
+        .baseColor = {.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f},
+        .baseColorTexture = secondTexture,
+    });
+    const auto firstObject =
+        assets.addRenderObject(RenderObject{.mesh = mesh, .material = firstMaterial});
+    const auto secondObject =
+        assets.addRenderObject(RenderObject{.mesh = mesh, .material = secondMaterial});
+
+    Scene scene;
+    SceneNode& firstNode = scene.addRoot("first");
+    firstNode.component(firstObject);
+    SceneNode& secondNode = scene.addRoot("second");
+    secondNode.component(secondObject);
+
+    RenderPreparation preparation;
+    const auto& plan = preparation.build(assets, scene.buildDrawItems());
+
+    REQUIRE(plan.images == std::vector{image});
+    REQUIRE(plan.textures == std::vector{firstTexture, secondTexture});
+    REQUIRE(plan.materials == std::vector{firstMaterial, secondMaterial});
 }
 
 TEST_CASE("Render preparation rejects incomplete mesh data")
@@ -136,7 +190,7 @@ TEST_CASE("Render preparation rejects dangling references")
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = material}));
 
         auto root = std::make_unique<SceneNode>("dangling");
-        root->renderObject(RenderObjectId{.value = 1});
+        root->component(RenderObjectId{.value = 1});
         scene.addRoot(std::move(root));
 
         RenderPreparation preparation;
@@ -153,7 +207,7 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
 
     Scene scene;
     SceneNode& root = scene.addRoot("triangle");
-    root.renderObject(object);
+    root.component(object);
     scene.updateWorldTransforms();
 
     RenderPreparation preparation;
@@ -175,7 +229,7 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
     REQUIRE(preparation.generation() == 1);
 
     SceneNode& second = scene.addRoot("second triangle");
-    second.renderObject(object);
+    second.component(object);
     auto expandedDrawList = scene.buildDrawItems();
     // Simulate a hash collision: the exact dependency sequence must still
     // distinguish one instance from two.
@@ -199,4 +253,27 @@ TEST_CASE("Render asset revisions are independent of scene hierarchy")
 
     static_cast<void>(assets.addMesh(makeTriangle()));
     REQUIRE(assets.revision() == initialRevision + 1);
+}
+
+TEST_CASE("Image and texture additions invalidate render preparation")
+{
+    RenderAssets assets;
+    const auto mesh = assets.addMesh(makeTriangle());
+    const auto material = assets.addMaterial(Material{});
+    const auto object = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
+    Scene scene;
+    scene.addRoot("triangle").component(object);
+
+    RenderPreparation preparation;
+    static_cast<void>(preparation.build(assets, scene.buildDrawItems()));
+    REQUIRE(preparation.generation() == 1);
+
+    const auto image =
+        assets.addImage(ImageData{.width = 1, .height = 1, .pixels = {255, 255, 255, 255}});
+    static_cast<void>(preparation.build(assets, scene.buildDrawItems()));
+    REQUIRE(preparation.generation() == 2);
+
+    static_cast<void>(assets.addTexture(makeTexture(image)));
+    static_cast<void>(preparation.build(assets, scene.buildDrawItems()));
+    REQUIRE(preparation.generation() == 3);
 }

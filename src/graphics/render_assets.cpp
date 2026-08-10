@@ -8,6 +8,8 @@ namespace fire_engine
 
 RenderAssets::RenderAssets(RenderAssets&& other) noexcept
     : meshes_{std::move(other.meshes_)},
+      images_{std::move(other.images_)},
+      textures_{std::move(other.textures_)},
       materials_{std::move(other.materials_)},
       renderObjects_{std::move(other.renderObjects_)},
       revision_{other.revision_}
@@ -25,6 +27,8 @@ RenderAssets& RenderAssets::operator=(RenderAssets&& other) noexcept
     }
 
     meshes_ = std::move(other.meshes_);
+    images_ = std::move(other.images_);
+    textures_ = std::move(other.textures_);
     materials_ = std::move(other.materials_);
     renderObjects_ = std::move(other.renderObjects_);
 
@@ -39,6 +43,22 @@ MeshId RenderAssets::addMesh(Mesh mesh)
 {
     const MeshId id{.value = meshes_.size()};
     meshes_.push_back(std::move(mesh));
+    ++revision_;
+    return id;
+}
+
+ImageId RenderAssets::addImage(ImageData image)
+{
+    const ImageId id{.value = images_.size()};
+    images_.push_back(std::move(image));
+    ++revision_;
+    return id;
+}
+
+TextureId RenderAssets::addTexture(Texture texture)
+{
+    const TextureId id{.value = textures_.size()};
+    textures_.push_back(texture);
     ++revision_;
     return id;
 }
@@ -62,6 +82,16 @@ RenderObjectId RenderAssets::addRenderObject(RenderObject renderObject)
 const std::vector<Mesh>& RenderAssets::meshes() const noexcept
 {
     return meshes_;
+}
+
+const std::vector<ImageData>& RenderAssets::images() const noexcept
+{
+    return images_;
+}
+
+const std::vector<Texture>& RenderAssets::textures() const noexcept
+{
+    return textures_;
 }
 
 const std::vector<Material>& RenderAssets::materials() const noexcept

@@ -27,6 +27,8 @@ struct PreparedRenderObject
 struct RenderPreparationPlan
 {
     std::vector<MeshId> meshes;        ///< Distinct required meshes in stable ID order.
+    std::vector<ImageId> images;       ///< Distinct required decoded images in stable ID order.
+    std::vector<TextureId> textures;   ///< Distinct required textures in stable ID order.
     std::vector<MaterialId> materials; ///< Distinct required materials in stable ID order.
     std::vector<PreparedRenderObject> renderObjects; ///< Required relationships by ID.
     std::size_t assetRevision = 0;                   ///< Asset revision represented by this plan.
