@@ -38,17 +38,146 @@ using MeshRenderObjects = std::vector<std::vector<fire_engine::RenderObjectId>>;
 
 /* --- File-local function declarations --- */
 
+/**
+ * @brief Stops loading with a consistently classified unsupported-subset diagnostic.
+ * @param message Specific unsupported glTF feature.
+ * @throws std::runtime_error unconditionally.
+ */
+[[noreturn]] void unsupported(const std::string& message);
+
+/**
+ * @brief Parses one JSON glTF and loads its external buffer data.
+ * @param path Source glTF path.
+ * @return fastgltf asset retaining parsed descriptions and buffer bytes.
+ * @throws std::runtime_error if reading or parsing fails, or a required extension is unsupported.
+ */
 [[nodiscard]] fastgltf::Asset parseAsset(const std::filesystem::path& path);
+
+/**
+ * @brief Decodes every external source image into the destination asset collection.
+ * @param source Parsed glTF containing image descriptions.
+ * @param directory Directory used to resolve relative image paths.
+ * @param destination Render assets receiving decoded images in source order.
+ * @throws std::runtime_error if an image source or its encoded data is unsupported or invalid.
+ */
 void loadImages(const fastgltf::Asset& source, const std::filesystem::path& directory,
                 fire_engine::RenderAssets& destination);
+
+/**
+ * @brief Maps a glTF filtering mode to the tutorial's non-mipmapped subset.
+ * @param filter Source filtering mode.
+ * @return Corresponding nearest or linear texture filter.
+ * @throws std::runtime_error if the filtering mode is unknown.
+ */
+[[nodiscard]] fire_engine::TextureFilter mapFilter(fastgltf::Filter filter);
+
+/**
+ * @brief Maps a glTF coordinate-wrapping mode to the tutorial texture description.
+ * @param wrap Source wrapping mode.
+ * @return Corresponding texture-addressing mode.
+ * @throws std::runtime_error if the wrapping mode is unknown.
+ */
+[[nodiscard]] fire_engine::TextureWrap mapWrap(fastgltf::Wrap wrap);
+
+/**
+ * @brief Imports image references and sampler behavior in source texture order.
+ * @param source Parsed glTF containing textures and samplers.
+ * @param destination Render assets receiving texture descriptions.
+ * @throws std::runtime_error if a texture reference or sampler value is invalid.
+ */
 void loadTextures(const fastgltf::Asset& source, fire_engine::RenderAssets& destination);
+
+/**
+ * @brief Imports base-color factors and texture references in source material order.
+ * @param source Parsed glTF containing material descriptions.
+ * @param destination Render assets receiving materials.
+ * @return Engine material IDs corresponding to source material indices.
+ * @throws std::runtime_error if a material uses an unsupported texture coordinate or reference.
+ */
 [[nodiscard]] std::vector<fire_engine::MaterialId>
 loadMaterials(const fastgltf::Asset& source, fire_engine::RenderAssets& destination);
+
+/**
+ * @brief Checks one vertex-like accessor against the supported float subset.
+ * @param accessor Source accessor to inspect.
+ * @param type Required scalar or vector shape.
+ * @param semantic Diagnostic name of the attribute represented by the accessor.
+ * @throws std::runtime_error if the accessor is sparse, missing data, or has the wrong type.
+ */
+void validateVertexAccessor(const fastgltf::Accessor& accessor, fastgltf::AccessorType type,
+                            std::string_view semantic);
+
+/**
+ * @brief Imports one indexed triangle primitive with positions and texture coordinates.
+ * @param source Parsed glTF owning the primitive's accessors and buffer data.
+ * @param primitive Primitive description to import.
+ * @return Complete CPU mesh description.
+ * @throws std::runtime_error if required geometry data is absent, invalid, or unsupported.
+ */
+[[nodiscard]] fire_engine::Mesh loadPrimitive(const fastgltf::Asset& source,
+                                              const fastgltf::Primitive& primitive);
+
+/**
+ * @brief Imports every mesh primitive and creates its mesh/material relationship.
+ * @param source Parsed glTF containing mesh descriptions.
+ * @param materials Engine material IDs corresponding to source material indices.
+ * @param destination Render assets receiving meshes and render objects.
+ * @return Render-object IDs grouped by their source mesh index.
+ * @throws std::runtime_error if a primitive or material reference is invalid.
+ */
 [[nodiscard]] MeshRenderObjects loadMeshes(const fastgltf::Asset& source,
                                            const std::vector<fire_engine::MaterialId>& materials,
                                            fire_engine::RenderAssets& destination);
+
+/**
+ * @brief Imports one linear quaternion timeline from a glTF animation sampler.
+ * @param source Parsed glTF owning the sampler's accessors and buffer data.
+ * @param sampler Animation sampler connecting timestamp and rotation accessors.
+ * @return Target-independent rotation channel.
+ * @throws std::runtime_error if interpolation, timestamps, or quaternion values are invalid.
+ */
+[[nodiscard]] fire_engine::AnimationChannel
+loadAnimationChannel(const fastgltf::Asset& source, const fastgltf::AnimationSampler& sampler);
+
+/**
+ * @brief Imports target-independent animations and records their source-node bindings.
+ * @param source Parsed glTF containing animations and target nodes.
+ * @param destination Animation collection receiving imported channels.
+ * @return Optional Animator binding for every source node.
+ * @throws std::runtime_error if a channel target, sampler, or binding is unsupported or invalid.
+ */
 [[nodiscard]] std::vector<std::optional<NodeAnimationBinding>>
 loadAnimations(const fastgltf::Asset& source, std::vector<fire_engine::Animation>& destination);
+
+/**
+ * @brief Converts one decomposed glTF node transform into engine math types.
+ * @param node Source node containing translation, rotation, and scale.
+ * @return Normalized engine transform.
+ * @throws std::runtime_error if decomposition or quaternion normalization failed.
+ */
+[[nodiscard]] fire_engine::Transform loadTransform(const fastgltf::Node& node);
+
+/**
+ * @brief Recursively imports one source node and its renderable children.
+ * @param source Parsed glTF owning the node hierarchy.
+ * @param nodeIndex Source node index to import.
+ * @param meshes Render-object IDs grouped by source mesh index.
+ * @param animationBindings Optional Animator binding for every source node.
+ * @return Owned engine node containing the imported subtree.
+ * @throws std::runtime_error if a node, mesh, transform, or child reference is invalid.
+ */
+[[nodiscard]] std::unique_ptr<fire_engine::SceneNode>
+loadNode(const fastgltf::Asset& source, std::size_t nodeIndex, const MeshRenderObjects& meshes,
+         const std::vector<std::optional<NodeAnimationBinding>>& animationBindings);
+
+/**
+ * @brief Imports the default selected scene and all reachable root subtrees.
+ * @param source Parsed glTF containing scene and node descriptions.
+ * @param meshes Render-object IDs grouped by source mesh index.
+ * @param animationBindings Optional Animator binding for every source node.
+ * @param destination Scene receiving imported roots.
+ * @throws std::runtime_error if the selected scene or a reachable node is invalid.
+ */
 void loadScene(const fastgltf::Asset& source, const MeshRenderObjects& meshes,
                const std::vector<std::optional<NodeAnimationBinding>>& animationBindings,
                fire_engine::Scene& destination);
