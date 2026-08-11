@@ -1,0 +1,19 @@
+{
+  "asset": { "version": "2.0" },
+  "accessors": [
+    { "componentType": 5126, "count": 1, "type": "SCALAR" },
+    { "componentType": 5126, "count": 1, "type": "VEC4" }
+  ],
+  "animations": [
+    {
+      "channels": [
+        { "sampler": 0, "target": { "node": 0, "path": "rotation" } }
+      ],
+      "samplers": [
+        { "input": 0, "interpolation": "STEP", "output": 1 }
+      ]
+    }
+  ],
+  "nodes": [{}],
+  "scenes": [{ "nodes": [0] }]
+}

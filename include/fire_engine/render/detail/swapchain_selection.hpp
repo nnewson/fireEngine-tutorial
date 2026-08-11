@@ -9,9 +9,9 @@ namespace fire_engine::detail
 {
 /** @cond INTERNAL */
 /**
- * @brief Chooses an sRGB surface format when available.
+ * @brief Chooses a four-channel 8-bit sRGB format in the nonlinear sRGB color space.
  * @param formats Non-empty format and color-space pairs reported by the surface.
- * @return Preferred sRGB pair, or the first supported pair as a fallback.
+ * @return First suitable sRGB pair, or the first supported pair as a fallback.
  */
 [[nodiscard]] vk::SurfaceFormatKHR
 chooseSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& formats);

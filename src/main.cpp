@@ -13,6 +13,7 @@
 #include <string_view>
 #include <utility>
 
+#include <fire_engine/content/scene_content.hpp>
 #include <fire_engine/core/log.hpp>
 #include <fire_engine/graphics/material.hpp>
 #include <fire_engine/graphics/mesh.hpp>
@@ -29,15 +30,6 @@
 namespace
 {
 /** @cond INTERNAL */
-/* --- File-local structs --- */
-
-/** @brief Vulkan-free render descriptions and the hierarchy that instances them. */
-struct TutorialContent
-{
-    fire_engine::RenderAssets assets; ///< Mesh, material, and render-object descriptions.
-    fire_engine::Scene scene;         ///< Transform hierarchy referencing those descriptions.
-};
-
 /* --- File-local function declarations --- */
 
 /**
@@ -53,7 +45,7 @@ struct TutorialContent
  * @brief Builds the tutorial triangle entirely from Vulkan-free descriptions.
  * @return Separate render descriptions and scene hierarchy exercising the public path.
  */
-[[nodiscard]] TutorialContent makeTriangleScene();
+[[nodiscard]] fire_engine::SceneContent makeTriangleScene();
 /** @endcond */
 } // namespace
 
@@ -74,7 +66,7 @@ try
     fire_engine::Glfw glfw;
     const fire_engine::Window window{800, 600, applicationName};
     fire_engine::Renderer renderer{glfw, window, applicationName};
-    TutorialContent content = makeTriangleScene();
+    fire_engine::SceneContent content = makeTriangleScene();
     renderer.prepare(content.assets, content.scene);
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
@@ -162,9 +154,9 @@ namespace
     return value;
 }
 
-[[nodiscard]] TutorialContent makeTriangleScene()
+[[nodiscard]] fire_engine::SceneContent makeTriangleScene()
 {
-    TutorialContent content;
+    fire_engine::SceneContent content;
     fire_engine::Mesh triangleMesh{
         .vertices =
             {

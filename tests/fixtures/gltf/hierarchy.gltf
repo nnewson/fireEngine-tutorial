@@ -1,0 +1,22 @@
+{
+  "asset": {
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "nodes": [0]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "parent",
+      "translation": [1.0, 2.0, 3.0],
+      "children": [1]
+    },
+    {
+      "name": "child",
+      "scale": [2.0, 3.0, 4.0]
+    }
+  ]
+}
