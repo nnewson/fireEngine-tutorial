@@ -14,7 +14,11 @@ namespace
 {
 /* --- File-local function declarations --- */
 
-/** @brief Returns whether a format preserves four-channel 8-bit sRGB output. */
+/**
+ * @brief Returns whether a format preserves four-channel 8-bit sRGB output.
+ * @param format Vulkan color format to classify.
+ * @return True when the format is interchangeable for the tutorial's swapchain output.
+ */
 [[nodiscard]] constexpr bool isSrgbFormat(vk::Format format) noexcept;
 } // namespace
 
