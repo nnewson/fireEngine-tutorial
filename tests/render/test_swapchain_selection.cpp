@@ -30,13 +30,33 @@ TEST_CASE("Swapchain format selection prefers sRGB")
         .format = vk::Format::eR8G8B8A8Unorm,
         .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
     };
-    const vk::SurfaceFormatKHR preferred{
+    const vk::SurfaceFormatKHR preferredRgba{
+        .format = vk::Format::eR8G8B8A8Srgb,
+        .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
+    };
+    const vk::SurfaceFormatKHR preferredBgra{
         .format = vk::Format::eB8G8R8A8Srgb,
         .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
     };
+    const vk::SurfaceFormatKHR preferredPacked{
+        .format = vk::Format::eA8B8G8R8SrgbPack32,
+        .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
+    };
+    const vk::SurfaceFormatKHR singleChannelSrgb{
+        .format = vk::Format::eR8Srgb,
+        .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
+    };
+    const vk::SurfaceFormatKHR wrongColorSpace{
+        .format = vk::Format::eB8G8R8A8Srgb,
+        .colorSpace = vk::ColorSpaceKHR::eDisplayP3NonlinearEXT,
+    };
 
     REQUIRE(selection::chooseSurfaceFormat({fallback}) == fallback);
-    REQUIRE(selection::chooseSurfaceFormat({fallback, preferred}) == preferred);
+    REQUIRE(selection::chooseSurfaceFormat({fallback, preferredRgba}) == preferredRgba);
+    REQUIRE(selection::chooseSurfaceFormat({fallback, preferredBgra}) == preferredBgra);
+    REQUIRE(selection::chooseSurfaceFormat({fallback, preferredPacked}) == preferredPacked);
+    REQUIRE(selection::chooseSurfaceFormat({fallback, singleChannelSrgb}) == fallback);
+    REQUIRE(selection::chooseSurfaceFormat({wrongColorSpace, preferredBgra}) == preferredBgra);
 }
 
 TEST_CASE("Swapchain present-mode selection prefers mailbox")

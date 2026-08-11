@@ -10,19 +10,29 @@
 namespace fire_engine::detail
 {
 /** @cond INTERNAL */
-/* --- File-local constants --- */
+namespace
+{
+/* --- File-local function declarations --- */
 
-/** @brief Preferred color format for presenting gamma-correct color values. */
-constexpr vk::SurfaceFormatKHR kPreferredSurfaceFormat{
-    .format = vk::Format::eB8G8R8A8Srgb,
-    .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
-};
+/**
+ * @brief Returns whether a format preserves four-channel 8-bit sRGB output.
+ * @param format Vulkan color format to classify.
+ * @return True when the format is interchangeable for the tutorial's swapchain output.
+ */
+[[nodiscard]] constexpr bool isSrgbFormat(vk::Format format) noexcept;
+} // namespace
 
 /* --- Internal functions --- */
 
 vk::SurfaceFormatKHR chooseSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& formats)
 {
-    const auto preferred = std::ranges::find(formats, kPreferredSurfaceFormat);
+    const auto preferred =
+        std::ranges::find_if(formats,
+                             [](const vk::SurfaceFormatKHR& candidate)
+                             {
+                                 return isSrgbFormat(candidate.format) &&
+                                        candidate.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear;
+                             });
     return preferred != formats.end() ? *preferred : formats.front();
 }
 
@@ -76,5 +86,23 @@ vk::CompositeAlphaFlagBitsKHR chooseCompositeAlpha(const vk::SurfaceCapabilities
     }
     throw std::runtime_error("The presentation surface has no supported composite-alpha mode");
 }
+
+namespace
+{
+/* --- File-local functions --- */
+
+constexpr bool isSrgbFormat(vk::Format format) noexcept
+{
+    switch (format)
+    {
+    case vk::Format::eR8G8B8A8Srgb:
+    case vk::Format::eB8G8R8A8Srgb:
+    case vk::Format::eA8B8G8R8SrgbPack32:
+        return true;
+    default:
+        return false;
+    }
+}
+} // namespace
 /** @endcond */
 } // namespace fire_engine::detail

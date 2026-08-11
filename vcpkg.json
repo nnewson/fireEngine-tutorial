@@ -3,8 +3,10 @@
   "version-string": "0.7.0",
   "dependencies": [
     "catch2",
+    "fastgltf",
     "glfw3",
     "shader-slang",
+    "stb",
     "vulkan-memory-allocator",
     "vulkan-headers",
     {

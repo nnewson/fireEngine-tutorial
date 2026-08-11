@@ -28,7 +28,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # knowledge of where vcpkg lays out its tools directory.
 find_package(glfw3 CONFIG REQUIRED)
 find_package(Catch2 3 CONFIG REQUIRED)
+find_package(fastgltf CONFIG REQUIRED)
 find_package(slang CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 find_package(VulkanHeaders 1.4 CONFIG REQUIRED)
 find_package(VulkanLoader 1.4 CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
@@ -45,7 +47,10 @@ option(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS
 # without creating a window or Vulkan device.
 add_library(fireEngineTutorialEngine STATIC
     src/animation/animation_validation.cpp
+    src/content/scene_content_validation.cpp
     src/core/debug.cpp
+    src/gltf/gltf_loader.cpp
+    src/gltf/image_decoder.cpp
     src/graphics/asset_validation.cpp
     src/graphics/render_assets.cpp
     src/graphics/render_preparation.cpp
@@ -65,6 +70,7 @@ add_library(fireEngineTutorialEngine STATIC
 )
 
 target_include_directories(fireEngineTutorialEngine PUBLIC include)
+target_include_directories(fireEngineTutorialEngine PRIVATE ${Stb_INCLUDE_DIR})
 
 # The application owns only its event loop and high-level scene construction.
 add_executable(fireEngineTutorial src/main.cpp)
@@ -113,6 +119,7 @@ target_link_libraries(fireEngineTutorialEngine
     PUBLIC
         Vulkan::Headers
     PRIVATE
+        fastgltf::fastgltf
         GPUOpen::VulkanMemoryAllocator
         glfw
         Vulkan::Loader
@@ -158,6 +165,18 @@ add_custom_command(
 add_custom_target(fireEngineShaders ALL DEPENDS "${FIRE_ENGINE_SHADER_BINARY}")
 add_dependencies(fireEngineTutorial fireEngineShaders)
 
+# Keep the example's external glTF buffer and images beside the executable.
+# An ALL target deliberately checks the directory on every build, so asset-only
+# edits reach the runtime tree without forcing an unrelated executable relink.
+add_custom_target(fireEngineAssets ALL
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/AnimatedCube"
+        "$<TARGET_FILE_DIR:fireEngineTutorial>/assets/AnimatedCube"
+    COMMENT "Copying AnimatedCube runtime assets"
+    VERBATIM
+)
+add_dependencies(fireEngineTutorial fireEngineAssets)
+
 # MSVC and Clang/GCC spell equivalent warning options differently. Apply one
 # strict policy to the library, executable, and unit tests.
 function(fire_engine_enable_warnings target)
@@ -185,12 +204,18 @@ enable_testing()
 
 add_executable(fireEngineTutorialTests
     tests/animation/test_animation_validation.cpp
+    tests/content/test_scene_content_validation.cpp
+    tests/gltf/test_gltf_loader.cpp
     tests/graphics/test_asset_validation.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
     tests/render/test_spirv_loader.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
+)
+target_compile_definitions(fireEngineTutorialTests PRIVATE
+    FIRE_ENGINE_TEST_ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    FIRE_ENGINE_TEST_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
 )
 target_link_libraries(fireEngineTutorialTests
     PRIVATE
