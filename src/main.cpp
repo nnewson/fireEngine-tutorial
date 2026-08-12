@@ -6,6 +6,7 @@
 #include <charconv>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -15,13 +16,7 @@
 
 #include <fire_engine/content/scene_content.hpp>
 #include <fire_engine/core/log.hpp>
-#include <fire_engine/graphics/material.hpp>
-#include <fire_engine/graphics/mesh.hpp>
-#include <fire_engine/graphics/render_assets.hpp>
-#include <fire_engine/graphics/render_object.hpp>
-#include <fire_engine/math/mat4.hpp>
-#include <fire_engine/math/vec3.hpp>
-#include <fire_engine/math/vec4.hpp>
+#include <fire_engine/gltf/gltf_loader.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/renderer.hpp>
@@ -41,11 +36,6 @@ namespace
  */
 [[nodiscard]] std::optional<std::uint64_t> parseFrameLimit(int argumentCount, char* arguments[]);
 
-/**
- * @brief Builds the tutorial triangle entirely from Vulkan-free descriptions.
- * @return Separate render descriptions and scene hierarchy exercising the public path.
- */
-[[nodiscard]] fire_engine::SceneContent makeTriangleScene();
 /** @endcond */
 } // namespace
 
@@ -66,7 +56,18 @@ try
     fire_engine::Glfw glfw;
     const fire_engine::Window window{800, 600, applicationName};
     fire_engine::Renderer renderer{glfw, window, applicationName};
-    fire_engine::SceneContent content = makeTriangleScene();
+    fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
+        std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
+
+    // Camera and depth arrive in the next focused step. Until then, place the
+    // imported cube wholly inside Vulkan clip space so texture upload and
+    // sampling can be demonstrated independently with the identity view matrix.
+    fire_engine::SceneNode& cube = *content.scene.roots().front();
+    fire_engine::Transform cubeTransform = cube.localTransform();
+    cubeTransform.translation = {.x = 0.0f, .y = 0.0f, .z = 0.5f};
+    cubeTransform.scale = {.x = 0.45f, .y = 0.45f, .z = 0.45f};
+    cube.localTransform(cubeTransform);
+    content.scene.updateWorldTransforms();
     renderer.prepare(content.assets, content.scene);
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
@@ -78,7 +79,7 @@ try
                  rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode,
                  rendererInfo.presentationSemaphoreCount);
-    std::println("Scene prepared: one indexed mesh, material, render object, and node.");
+    std::println("AnimatedCube prepared: one indexed mesh and sampled base-color texture.");
 
     std::uint64_t renderedFrameCount = 0;
     bool swapchainNeedsRecreation = false;
@@ -154,49 +155,5 @@ namespace
     return value;
 }
 
-[[nodiscard]] fire_engine::SceneContent makeTriangleScene()
-{
-    fire_engine::SceneContent content;
-    fire_engine::Mesh triangleMesh{
-        .vertices =
-            {
-                fire_engine::Vertex{
-                    .position = {.x = 0.0f, .y = -0.6f, .z = 0.0f},
-                    .color = {.r = 1.0f, .g = 0.2f, .b = 0.1f, .a = 1.0f},
-                    .textureCoordinate = {},
-                },
-                fire_engine::Vertex{
-                    .position = {.x = 0.6f, .y = 0.6f, .z = 0.0f},
-                    .color = {.r = 0.1f, .g = 1.0f, .b = 0.2f, .a = 1.0f},
-                    .textureCoordinate = {},
-                },
-                fire_engine::Vertex{
-                    .position = {.x = -0.6f, .y = 0.6f, .z = 0.0f},
-                    .color = {.r = 0.2f, .g = 0.3f, .b = 1.0f, .a = 1.0f},
-                    .textureCoordinate = {},
-                },
-            },
-        .indices = {0, 1, 2},
-    };
-    const fire_engine::MeshId mesh = content.assets.addMesh(std::move(triangleMesh));
-    const fire_engine::MaterialId material = content.assets.addMaterial({
-        .baseColor = {.r = 0.9f, .g = 0.95f, .b = 1.0f, .a = 1.0f},
-        .baseColorTexture = std::nullopt,
-    });
-    const fire_engine::RenderObjectId triangle = content.assets.addRenderObject({
-        .mesh = mesh,
-        .material = material,
-    });
-
-    fire_engine::SceneNode& node = content.scene.addRoot("Tutorial triangle");
-    node.localTransform({
-        .translation = {.x = 0.12f, .y = 0.0f, .z = 0.0f},
-        .rotation = fire_engine::Quaternion::identity(),
-        .scale = {.x = 0.9f, .y = 0.9f, .z = 1.0f},
-    });
-    node.component(triangle);
-    content.scene.updateWorldTransforms();
-    return content;
-}
 /** @endcond */
 } // namespace

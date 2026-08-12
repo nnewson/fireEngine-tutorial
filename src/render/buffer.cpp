@@ -33,7 +33,7 @@ AllocatedBuffer::AllocatedBuffer(const MemoryAllocator& allocator, vk::DeviceSiz
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     // VMA chooses a suitable host-visible memory type. Sequential-write access
-    // is enough for both the immutable triangle and its small frame uniform.
+    // is enough for immutable meshes, texture staging, and the small frame uniform.
     VmaAllocationCreateInfo allocationInfo{};
     allocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
     allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
