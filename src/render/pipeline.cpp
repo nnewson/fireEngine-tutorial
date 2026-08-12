@@ -46,6 +46,20 @@ constexpr vk::DescriptorSetLayoutBinding kFrameUniformBinding{
     .stageFlags = vk::ShaderStageFlagBits::eVertex,
 };
 
+/** @brief Base-color image and sampler written for each draw. */
+constexpr vk::DescriptorSetLayoutBinding kBaseColorTextureBinding{
+    .binding = 1,
+    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+    .descriptorCount = 1,
+    .stageFlags = vk::ShaderStageFlagBits::eFragment,
+};
+
+/** @brief Complete push-descriptor interface shared with the Slang shader. */
+constexpr std::array kDescriptorBindings = {
+    kFrameUniformBinding,
+    kBaseColorTextureBinding,
+};
+
 /** @brief Interleaved vertex-buffer layout shared with Renderer uploads. */
 constexpr vk::VertexInputBindingDescription kVertexBinding{
     .binding = 0,
@@ -53,7 +67,7 @@ constexpr vk::VertexInputBindingDescription kVertexBinding{
     .inputRate = vk::VertexInputRate::eVertex,
 };
 
-/** @brief Position and color attributes currently consumed by the vertex shader. */
+/** @brief Interleaved attributes consumed by the vertex shader. */
 constexpr std::array kVertexAttributes = {
     vk::VertexInputAttributeDescription{
         .location = 0,
@@ -66,6 +80,12 @@ constexpr std::array kVertexAttributes = {
         .binding = 0,
         .format = vk::Format::eR32G32B32A32Sfloat,
         .offset = static_cast<std::uint32_t>(offsetof(Vertex, color)),
+    },
+    vk::VertexInputAttributeDescription{
+        .location = 2,
+        .binding = 0,
+        .format = vk::Format::eR32G32Sfloat,
+        .offset = static_cast<std::uint32_t>(offsetof(Vertex, textureCoordinate)),
     },
 };
 
@@ -88,8 +108,7 @@ static_assert(std::is_standard_layout_v<Vertex>,
 // The binding stride and the attribute offsets above describe the same struct to
 // Vulkan twice. Padding introduced by a future member would silently desynchronize
 // them, so pin the expected size: three floats of position, four of color, and
-// two texture-coordinate floats. The texture coordinates become an attribute
-// when the texture-sampling shader is introduced.
+// two texture-coordinate floats.
 static_assert(sizeof(Vertex) == 9 * sizeof(float),
               "Vertex must stay tightly packed to match kVertexBinding.stride");
 
@@ -144,7 +163,7 @@ namespace
 /**
  * @brief Creates set zero as a Vulkan push-descriptor layout.
  * @param device Logical device with the Vulkan 1.4 pushDescriptor feature enabled.
- * @return Layout containing one vertex-stage uniform-buffer binding.
+ * @return Layout containing the frame uniform and base-color texture bindings.
  * @throws vk::SystemError if Vulkan cannot create the descriptor-set layout.
  */
 [[nodiscard]] vk::raii::DescriptorSetLayout
@@ -155,8 +174,8 @@ createPushDescriptorLayout(const vk::raii::Device& device)
     // defines ePushDescriptorKHR as an alias for code written before 1.4.
     const vk::DescriptorSetLayoutCreateInfo createInfo{
         .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor,
-        .bindingCount = 1,
-        .pBindings = &kFrameUniformBinding,
+        .bindingCount = static_cast<std::uint32_t>(kDescriptorBindings.size()),
+        .pBindings = kDescriptorBindings.data(),
     };
     return {device, createInfo};
 }

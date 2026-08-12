@@ -22,9 +22,9 @@ class MemoryAllocator;
 /**
  * @brief Owns one Vulkan buffer and the VMA allocation bound to it.
  *
- * The buffer uses host-visible memory so tutorial data can be uploaded without
- * introducing a staging copy yet. Larger static resources would normally be
- * staged into device-local memory instead.
+ * The buffer uses host-visible memory. Mesh and frame data use it directly at
+ * this tutorial scale, while texture upload uses it as the transfer source for
+ * a device-local image.
  *
  * The allocator is borrowed and must outlive this object.
  */

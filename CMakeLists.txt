@@ -60,6 +60,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/buffer.cpp
     src/render/device.cpp
     src/render/frame_in_flight.cpp
+    src/render/image.cpp
     src/render/pipeline.cpp
     src/render/renderer.cpp
     src/render/spirv_loader.cpp
@@ -102,6 +103,14 @@ target_compile_definitions(fireEngineTutorialEngine PUBLIC
 set(FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 target_compile_definitions(fireEngineTutorialEngine PRIVATE
     FIRE_ENGINE_SHADER_DIRECTORY="${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}"
+)
+
+# The example scene is also addressed through its build-tree location rather
+# than the process working directory. This keeps command-line, CTest, and
+# multi-configuration Visual Studio runs on the same deterministic path.
+set(FIRE_ENGINE_ASSET_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/assets")
+target_compile_definitions(fireEngineTutorial PRIVATE
+    FIRE_ENGINE_ASSET_DIRECTORY="${FIRE_ENGINE_ASSET_OUTPUT_DIRECTORY}"
 )
 
 # Validation is most useful while developing and has a runtime cost, so it is
@@ -171,7 +180,7 @@ add_dependencies(fireEngineTutorial fireEngineShaders)
 add_custom_target(fireEngineAssets ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/AnimatedCube"
-        "$<TARGET_FILE_DIR:fireEngineTutorial>/assets/AnimatedCube"
+        "${FIRE_ENGINE_ASSET_OUTPUT_DIRECTORY}/AnimatedCube"
     COMMENT "Copying AnimatedCube runtime assets"
     VERBATIM
 )
