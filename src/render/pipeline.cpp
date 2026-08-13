@@ -122,14 +122,14 @@ createPipelineLayout(const vk::raii::Device& device,
 [[nodiscard]] vk::raii::Pipeline
 createDynamicRenderingPipeline(const vk::raii::Device& device,
                                const vk::raii::PipelineLayout& pipelineLayout,
-                               vk::Format colorFormat);
+                               vk::Format colorFormat, vk::Format depthFormat);
 /** @endcond */
 } // namespace
 
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-Pipeline::Pipeline(const Device& device, vk::Format colorFormat)
+Pipeline::Pipeline(const Device& device, vk::Format colorFormat, vk::Format depthFormat)
 {
     // Push descriptors allocate no descriptor sets. Vulkan no longer requires
     // this handle after pipeline-layout creation, but retaining it keeps the
@@ -140,8 +140,8 @@ Pipeline::Pipeline(const Device& device, vk::Format colorFormat)
 
     // Dynamic rendering replaces the render-pass compatibility object with the
     // attachment format chained into graphics-pipeline creation.
-    pipeline_ =
-        createDynamicRenderingPipeline(device.logicalDevice(), pipelineLayout_, colorFormat);
+    pipeline_ = createDynamicRenderingPipeline(device.logicalDevice(), pipelineLayout_, colorFormat,
+                                               depthFormat);
 }
 
 const vk::raii::PipelineLayout& Pipeline::pipelineLayout() const noexcept
@@ -211,6 +211,7 @@ createPipelineLayout(const vk::raii::Device& device,
  * @param device Logical device that owns the pipeline.
  * @param pipelineLayout Layout containing the push-descriptor set zero.
  * @param colorFormat Format of the dynamic-rendering color attachment.
+ * @param depthFormat Format of the dynamic-rendering depth attachment.
  * @return RAII graphics pipeline compatible with the swapchain format.
  * @throws std::runtime_error if the compiled shader cannot be loaded.
  * @throws vk::SystemError if Vulkan cannot create the pipeline.
@@ -218,7 +219,7 @@ createPipelineLayout(const vk::raii::Device& device,
 [[nodiscard]] vk::raii::Pipeline
 createDynamicRenderingPipeline(const vk::raii::Device& device,
                                const vk::raii::PipelineLayout& pipelineLayout,
-                               vk::Format colorFormat)
+                               vk::Format colorFormat, vk::Format depthFormat)
 {
     const std::vector<std::uint32_t> shaderCode = detail::loadSpirv(kShaderPath);
     const vk::ShaderModuleCreateInfo moduleInfo{
@@ -276,13 +277,19 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
     };
     const vk::PipelineRasterizationStateCreateInfo rasterization{
         .polygonMode = vk::PolygonMode::eFill,
-        // The first triangle focuses on the rendering path rather than a
-        // framebuffer-space winding convention. A later 3D pipeline can cull.
-        .cullMode = vk::CullModeFlagBits::eNone,
+        // glTF defines counter-clockwise front faces, but the projection-side
+        // Vulkan Y flip reverses their framebuffer-space winding.
+        .cullMode = vk::CullModeFlagBits::eBack,
+        .frontFace = vk::FrontFace::eClockwise,
         .lineWidth = 1.0f,
     };
     const vk::PipelineMultisampleStateCreateInfo multisampling{
         .rasterizationSamples = vk::SampleCountFlagBits::e1,
+    };
+    const vk::PipelineDepthStencilStateCreateInfo depthStencil{
+        .depthTestEnable = vk::True,
+        .depthWriteEnable = vk::True,
+        .depthCompareOp = vk::CompareOp::eLess,
     };
     const vk::PipelineColorBlendStateCreateInfo colorBlending{
         .attachmentCount = 1,
@@ -296,11 +303,8 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
     // Dynamic rendering communicates attachment formats through the pNext chain
     // instead of through a compatible VkRenderPass.
     //
-    // Two state pointers are deliberately absent from the structure below.
-    // pTessellationState is only read when a tessellation stage is present, and
-    // pDepthStencilState is only read when the rendering info names a depth or
-    // stencil format. Both are left at VK_FORMAT_UNDEFINED here, so Vulkan
-    // ignores the corresponding state and a null pointer is valid.
+    // pTessellationState remains absent because no tessellation stage is present.
+    // Depth state is required now that dynamic rendering names a depth format.
     const vk::StructureChain pipelineCreateChain{
         vk::GraphicsPipelineCreateInfo{
             .stageCount = static_cast<std::uint32_t>(shaderStages.size()),
@@ -310,6 +314,7 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
             .pViewportState = &viewportState,
             .pRasterizationState = &rasterization,
             .pMultisampleState = &multisampling,
+            .pDepthStencilState = &depthStencil,
             .pColorBlendState = &colorBlending,
             .pDynamicState = &dynamicState,
             .layout = *pipelineLayout,
@@ -317,6 +322,7 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
         vk::PipelineRenderingCreateInfo{
             .colorAttachmentCount = 1,
             .pColorAttachmentFormats = &colorFormat,
+            .depthAttachmentFormat = depthFormat,
         },
     };
 

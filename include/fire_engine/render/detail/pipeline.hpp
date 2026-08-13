@@ -14,9 +14,10 @@ class Device;
 /**
  * @brief Owns a pipeline layout and dynamic-rendering graphics pipeline.
  *
- * The pipeline targets one swapchain color format and does not use a render
- * pass. Its set-zero layout accepts a uniform buffer through Vulkan 1.4 push
- * descriptors, so no descriptor pool or allocated descriptor set is needed.
+ * The pipeline targets one swapchain color format and one depth format without
+ * using a render pass. Its set-zero layout accepts a uniform buffer and sampled
+ * texture through Vulkan 1.4 push descriptors, so no descriptor pool or
+ * allocated descriptor set is needed.
  *
  * The vertex input state describes interleaved mesh data. Set zero accepts the
  * frame's view-projection matrix, while push constants carry each draw's world
@@ -30,10 +31,11 @@ public:
      * @param device Logical device with dynamic rendering, push descriptors, and
      *               maintenance5 enabled.
      * @param colorFormat Swapchain format used by the dynamic color attachment.
+     * @param depthFormat Format used by the dynamic depth attachment.
      * @throws std::runtime_error if the compiled shader cannot be loaded.
      * @throws vk::SystemError if Vulkan cannot create a pipeline object.
      */
-    Pipeline(const Device& device, vk::Format colorFormat);
+    Pipeline(const Device& device, vk::Format colorFormat, vk::Format depthFormat);
 
     /** @brief Releases the pipeline, pipeline layout, and retained set layout in order. */
     ~Pipeline() = default;

@@ -55,10 +55,12 @@ public:
      * @brief Creates one command buffer and this frame's synchronization state.
      * @param device Logical device and graphics queue family used by this frame.
      * @param allocator VMA owner used for the frame's uniform buffer.
+     * @param initialUniforms Initial shader values written before construction completes.
      * @throws vk::SystemError if Vulkan cannot create or allocate an object.
      * @throws std::runtime_error if VMA cannot create or populate the uniform buffer.
      */
-    FrameInFlight(const Device& device, const MemoryAllocator& allocator);
+    FrameInFlight(const Device& device, const MemoryAllocator& allocator,
+                  const FrameUniforms& initialUniforms);
 
     /** @brief Releases the uniform, synchronization objects, command buffer, and pool. */
     ~FrameInFlight() = default;

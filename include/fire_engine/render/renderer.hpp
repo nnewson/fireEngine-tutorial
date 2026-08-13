@@ -27,6 +27,7 @@ struct RendererInfo
     std::uint32_t width;                    ///< Swapchain width in physical pixels.
     std::uint32_t height;                   ///< Swapchain height in physical pixels.
     std::string imageFormat;                ///< Human-readable Vulkan image format.
+    std::string depthFormat;                ///< Human-readable depth attachment format.
     std::string presentMode;                ///< Human-readable Vulkan presentation mode.
 };
 

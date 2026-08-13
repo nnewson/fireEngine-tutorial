@@ -3,6 +3,8 @@
 #include <fire_engine/core/log.hpp>
 #include <fire_engine/graphics/render_assets.hpp>
 #include <fire_engine/graphics/render_preparation.hpp>
+#include <fire_engine/math/normalize_error.hpp>
+#include <fire_engine/math/vec3.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/detail/allocator.hpp>
@@ -18,8 +20,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -36,6 +40,15 @@ namespace
 /** @brief The sole color mip and array layer used by every image barrier. */
 constexpr vk::ImageSubresourceRange kColorSubresourceRange{
     .aspectMask = vk::ImageAspectFlagBits::eColor,
+    .baseMipLevel = 0,
+    .levelCount = 1,
+    .baseArrayLayer = 0,
+    .layerCount = 1,
+};
+
+/** @brief The sole mip and array layer used by the depth attachment. */
+constexpr vk::ImageSubresourceRange kDepthSubresourceRange{
+    .aspectMask = vk::ImageAspectFlagBits::eDepth,
     .baseMipLevel = 0,
     .levelCount = 1,
     .baseArrayLayer = 0,
@@ -66,6 +79,33 @@ private:
     detail::AllocatedBuffer vertexBuffer_; ///< GPU buffer containing tightly packed vertices.
     detail::AllocatedBuffer indexBuffer_;  ///< GPU buffer containing 32-bit triangle indices.
     std::uint32_t indexCount_;             ///< Number of indices consumed by drawIndexed.
+};
+
+/** @brief Extent-dependent depth attachment paired with the swapchain. */
+class DepthBuffer final
+{
+public:
+    /**
+     * @brief Selects a supported format and creates one depth image and view.
+     * @param device Physical and logical device used for selection and view creation.
+     * @param allocator VMA owner used for the image allocation.
+     * @param extent Swapchain extent shared by the depth attachment.
+     * @throws std::runtime_error if no supported depth-only format is available.
+     */
+    DepthBuffer(const detail::Device& device, const detail::MemoryAllocator& allocator,
+                vk::Extent2D extent);
+
+    /** @brief Returns the selected depth format. @return Depth attachment format. */
+    [[nodiscard]] vk::Format format() const noexcept;
+    /** @brief Returns the allocated image. @return Non-owning depth image handle. */
+    [[nodiscard]] vk::Image image() const noexcept;
+    /** @brief Returns the depth-only image view. @return Owned depth view. */
+    [[nodiscard]] const vk::raii::ImageView& view() const noexcept;
+
+private:
+    vk::Format format_;            ///< Supported depth-only attachment format.
+    detail::AllocatedImage image_; ///< Extent-matched depth image and allocation.
+    vk::raii::ImageView view_;     ///< View destroyed before image_.
 };
 
 /** @brief Device-local sampled image compiled from decoded RGBA8 pixels. */
@@ -136,6 +176,8 @@ struct CompiledRenderObject
 
 [[nodiscard]] vk::Filter compileFilter(TextureFilter filter);
 [[nodiscard]] vk::SamplerAddressMode compileWrap(TextureWrap wrap);
+[[nodiscard]] vk::Format chooseDepthFormat(const vk::raii::PhysicalDevice& physicalDevice);
+[[nodiscard]] Mat4 createViewProjection(vk::Extent2D extent);
 void uploadImages(const detail::Device& device, detail::FrameInFlight& frame,
                   std::span<const PendingImageUpload> uploads);
 } // namespace
@@ -199,12 +241,18 @@ private:
                                 std::uint32_t imageIndex) const;
 
     /**
+     * @brief Discards earlier depth and transitions it for this frame's writes.
+     * @param commandBuffer Command buffer receiving the image barrier.
+     */
+    void transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const;
+
+    /**
      * @brief Begins dynamic rendering and binds state shared by every draw.
      * @param commandBuffer Command buffer receiving rendering and binding commands.
      * @param imageIndex Acquired swapchain-image index used as the color attachment.
      */
-    void beginColorPass(const vk::raii::CommandBuffer& commandBuffer,
-                        std::uint32_t imageIndex) const;
+    void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer,
+                           std::uint32_t imageIndex) const;
 
     /**
      * @brief Records the mesh bindings, constants, and indexed draw for each item.
@@ -231,9 +279,11 @@ private:
 
     // Presentation-dependent state replaced together when recreation is added.
     detail::Swapchain swapchain_; ///< Images and synchronization tied to presentation.
-    detail::Pipeline pipeline_;   ///< Pipeline compatible with the swapchain format.
+    DepthBuffer depthBuffer_;     ///< Depth attachment matching the swapchain extent.
+    detail::Pipeline pipeline_;   ///< Pipeline compatible with both attachment formats.
 
     // Per-frame submission state.
+    // Its initializer reads swapchain_.extent(), so frame_ must remain declared after swapchain_.
     detail::FrameInFlight frame_;   ///< Reusable resources for the current frame slot.
     bool workMayBePending_ = false; ///< Whether destruction requires a defensive wait.
 
@@ -285,8 +335,10 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
     : device_{glfw, window, applicationName},
       allocator_{device_},
       swapchain_{device_, window},
-      pipeline_{device_, swapchain_.imageFormat()},
-      frame_{device_, allocator_}
+      depthBuffer_{device_, allocator_, swapchain_.extent()},
+      pipeline_{device_, swapchain_.imageFormat(), depthBuffer_.format()},
+      frame_{device_, allocator_,
+             detail::FrameUniforms{.viewProjection = createViewProjection(swapchain_.extent())}}
 {
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
@@ -558,6 +610,7 @@ RendererInfo Renderer::Impl::info() const
         .width = swapchain_.extent().width,
         .height = swapchain_.extent().height,
         .imageFormat = vk::to_string(swapchain_.imageFormat()),
+        .depthFormat = vk::to_string(depthBuffer_.format()),
         .presentMode = vk::to_string(swapchain_.presentMode()),
     };
 }
@@ -572,11 +625,38 @@ void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
     commandBuffer.begin(beginInfo);
 
     transitionToAttachment(commandBuffer, imageIndex);
-    beginColorPass(commandBuffer, imageIndex);
+    transitionDepthToAttachment(commandBuffer);
+    beginGeometryPass(commandBuffer, imageIndex);
     recordDraws(commandBuffer, drawItems);
     commandBuffer.endRendering();
     transitionToPresent(commandBuffer, imageIndex);
     commandBuffer.end();
+}
+
+void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const
+{
+    // The depth value is cleared before every use, so no previous contents need
+    // preserving. The sole frame fence has completed before this command buffer
+    // is recorded, making it safe to discard the previous frame's depth writes.
+    const vk::ImageMemoryBarrier2 toAttachment{
+        .srcStageMask = vk::PipelineStageFlagBits2::eNone,
+        .srcAccessMask = vk::AccessFlagBits2::eNone,
+        .dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                        vk::PipelineStageFlagBits2::eLateFragmentTests,
+        .dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead |
+                         vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = depthBuffer_.image(),
+        .subresourceRange = kDepthSubresourceRange,
+    };
+    const vk::DependencyInfo dependency{
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &toAttachment,
+    };
+    commandBuffer.pipelineBarrier2(dependency);
 }
 
 void Renderer::Impl::transitionToAttachment(const vk::raii::CommandBuffer& commandBuffer,
@@ -603,8 +683,8 @@ void Renderer::Impl::transitionToAttachment(const vk::raii::CommandBuffer& comma
     commandBuffer.pipelineBarrier2(beginDependency);
 }
 
-void Renderer::Impl::beginColorPass(const vk::raii::CommandBuffer& commandBuffer,
-                                    std::uint32_t imageIndex) const
+void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer,
+                                       std::uint32_t imageIndex) const
 {
     const vk::ClearValue clearValue{
         .color = {.float32 = std::array{0.015f, 0.02f, 0.03f, 1.0f}},
@@ -616,6 +696,16 @@ void Renderer::Impl::beginColorPass(const vk::raii::CommandBuffer& commandBuffer
         .storeOp = vk::AttachmentStoreOp::eStore,
         .clearValue = clearValue,
     };
+    const vk::ClearValue depthClear{
+        .depthStencil = {.depth = 1.0f, .stencil = 0},
+    };
+    const vk::RenderingAttachmentInfo depthAttachment{
+        .imageView = *depthBuffer_.view(),
+        .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp = vk::AttachmentLoadOp::eClear,
+        .storeOp = vk::AttachmentStoreOp::eDontCare,
+        .clearValue = depthClear,
+    };
     const vk::RenderingInfo renderingInfo{
         .renderArea =
             {
@@ -625,6 +715,7 @@ void Renderer::Impl::beginColorPass(const vk::raii::CommandBuffer& commandBuffer
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachment,
+        .pDepthAttachment = &depthAttachment,
     };
     commandBuffer.beginRendering(renderingInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline_.pipeline());
@@ -721,6 +812,35 @@ namespace
 {
 /* --- File-local class member functions --- */
 
+DepthBuffer::DepthBuffer(const detail::Device& device, const detail::MemoryAllocator& allocator,
+                         vk::Extent2D extent)
+    : format_{chooseDepthFormat(device.physicalDevice())},
+      image_{allocator, extent.width, extent.height, format_,
+             vk::ImageUsageFlagBits::eDepthStencilAttachment},
+      view_{device.logicalDevice(), vk::ImageViewCreateInfo{
+                                        .image = image_.handle(),
+                                        .viewType = vk::ImageViewType::e2D,
+                                        .format = format_,
+                                        .subresourceRange = kDepthSubresourceRange,
+                                    }}
+{
+}
+
+vk::Format DepthBuffer::format() const noexcept
+{
+    return format_;
+}
+
+vk::Image DepthBuffer::image() const noexcept
+{
+    return image_.handle();
+}
+
+const vk::raii::ImageView& DepthBuffer::view() const noexcept
+{
+    return view_;
+}
+
 CompiledImage::CompiledImage(const detail::Device& device, const detail::MemoryAllocator& allocator,
                              const ImageData& source)
     : image_{allocator, source.width, source.height, vk::Format::eR8G8B8A8Srgb,
@@ -797,6 +917,51 @@ std::uint32_t CompiledMesh::indexCount() const noexcept
 }
 
 /* --- File-local functions --- */
+
+/**
+ * @brief Selects the first supported depth-only attachment format.
+ * @param physicalDevice Device whose optimal-tiling format support is queried.
+ * @return Supported format suitable for depth attachment use.
+ * @throws std::runtime_error if neither tutorial depth format is supported.
+ */
+[[nodiscard]] vk::Format chooseDepthFormat(const vk::raii::PhysicalDevice& physicalDevice)
+{
+    constexpr std::array candidates = {
+        vk::Format::eD32Sfloat,
+        vk::Format::eD16Unorm,
+    };
+    for (const vk::Format candidate : candidates)
+    {
+        const vk::FormatProperties properties = physicalDevice.getFormatProperties(candidate);
+        if ((properties.optimalTilingFeatures &
+             vk::FormatFeatureFlagBits::eDepthStencilAttachment) != vk::FormatFeatureFlags{})
+        {
+            return candidate;
+        }
+    }
+    throw std::runtime_error("The selected device supports no depth-only attachment format");
+}
+
+/**
+ * @brief Builds the fixed tutorial camera for the current presentation extent.
+ * @param extent Non-zero swapchain extent used to derive the projection aspect ratio.
+ * @return World-to-clip transform for the static camera.
+ * @throws std::logic_error if the fixed camera unexpectedly has a degenerate basis.
+ */
+[[nodiscard]] Mat4 createViewProjection(vk::Extent2D extent)
+{
+    const std::expected<Mat4, NormalizeError> view = Mat4::lookAt(
+        Vec3{.x = 0.0f, .y = 0.0f, .z = 4.0f}, Vec3{}, Vec3{.x = 0.0f, .y = 1.0f, .z = 0.0f});
+    if (!view.has_value())
+    {
+        throw std::logic_error("The fixed camera produced a degenerate view basis");
+    }
+
+    const float aspectRatio = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+    const Mat4 projection =
+        Mat4::perspective(std::numbers::pi_v<float> / 3.0f, aspectRatio, 0.1f, 100.0f);
+    return projection * *view;
+}
 
 /**
  * @brief Converts a Vulkan-free texture filter into Vulkan sampling state.

@@ -21,9 +21,9 @@ class MemoryAllocator;
 /**
  * @brief Owns one Vulkan image and the VMA allocation bound to it.
  *
- * The image uses device-preferred memory and is intended for GPU-only texture
- * access after data has been copied from a staging buffer. The allocator is
- * borrowed and must outlive this object.
+ * The image uses device-preferred memory for GPU-only resources such as sampled
+ * textures and depth attachments. The allocator is borrowed and must outlive
+ * this object.
  */
 class AllocatedImage final
 {
