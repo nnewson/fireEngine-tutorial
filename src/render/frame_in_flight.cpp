@@ -10,10 +10,10 @@ namespace fire_engine::detail
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-FrameInFlight::FrameInFlight(const Device& device, const MemoryAllocator& allocator)
+FrameInFlight::FrameInFlight(const Device& device, const MemoryAllocator& allocator,
+                             const FrameUniforms& initialUniforms)
     : uniformBuffer_{allocator, sizeof(FrameUniforms), vk::BufferUsageFlagBits::eUniformBuffer}
 {
-    constexpr FrameUniforms initialUniforms{};
     uniformBuffer_.write(std::as_bytes(std::span{&initialUniforms, 1}));
 
     // No creation flags. eResetCommandBuffer would still allow resetting the

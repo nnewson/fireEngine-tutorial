@@ -59,14 +59,6 @@ try
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
         std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
 
-    // Camera and depth arrive in the next focused step. Until then, place the
-    // imported cube wholly inside Vulkan clip space so texture upload and
-    // sampling can be demonstrated independently with the identity view matrix.
-    fire_engine::SceneNode& cube = *content.scene.roots().front();
-    fire_engine::Transform cubeTransform = cube.localTransform();
-    cubeTransform.translation = {.x = 0.0f, .y = 0.0f, .z = 0.5f};
-    cubeTransform.scale = {.x = 0.45f, .y = 0.45f, .z = 0.45f};
-    cube.localTransform(cubeTransform);
     content.scene.updateWorldTransforms();
     renderer.prepare(content.assets, content.scene);
 
@@ -75,9 +67,10 @@ try
     std::println("Graphics queue family: {}", rendererInfo.graphicsQueueFamily);
     std::println("Present queue family: {}", rendererInfo.presentQueueFamily);
     std::println("Logical device, queues, and VMA allocator created.");
-    std::println("Swapchain created: {} images at {}x{} ({}, {}), {} presentation semaphores.",
+    std::println("Swapchain created: {} images at {}x{} ({}, {}, depth {}), {} presentation "
+                 "semaphores.",
                  rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,
-                 rendererInfo.imageFormat, rendererInfo.presentMode,
+                 rendererInfo.imageFormat, rendererInfo.presentMode, rendererInfo.depthFormat,
                  rendererInfo.presentationSemaphoreCount);
     std::println("AnimatedCube prepared: one indexed mesh and sampled base-color texture.");
 
