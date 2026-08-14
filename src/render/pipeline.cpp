@@ -277,10 +277,12 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
     };
     const vk::PipelineRasterizationStateCreateInfo rasterization{
         .polygonMode = vk::PolygonMode::eFill,
-        // glTF defines counter-clockwise front faces, but the projection-side
-        // Vulkan Y flip reverses their framebuffer-space winding.
+        // Vulkan names winding in framebuffer coordinates, whose Y axis already
+        // points down. The projection-side Y inversion maps glTF's Y-up
+        // counter-clockwise front faces onto exactly that convention, so the
+        // glTF value carries over unchanged rather than being reversed.
         .cullMode = vk::CullModeFlagBits::eBack,
-        .frontFace = vk::FrontFace::eClockwise,
+        .frontFace = vk::FrontFace::eCounterClockwise,
         .lineWidth = 1.0f,
     };
     const vk::PipelineMultisampleStateCreateInfo multisampling{

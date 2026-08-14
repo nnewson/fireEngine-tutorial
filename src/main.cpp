@@ -4,6 +4,7 @@
  */
 
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <string_view>
 #include <utility>
 
+#include <fire_engine/animation/animation_playback.hpp>
 #include <fire_engine/content/scene_content.hpp>
 #include <fire_engine/core/log.hpp>
 #include <fire_engine/gltf/gltf_loader.hpp>
@@ -76,6 +78,7 @@ try
 
     std::uint64_t renderedFrameCount = 0;
     bool swapchainNeedsRecreation = false;
+    auto previousFrameTime = std::chrono::steady_clock::now();
     while (!window.shouldClose() && (!frameLimit.has_value() || renderedFrameCount < *frameLimit))
     {
         window.pollEvents();
@@ -84,6 +87,11 @@ try
             break;
         }
 
+        const auto currentFrameTime = std::chrono::steady_clock::now();
+        const float elapsedSeconds =
+            std::chrono::duration<float>{currentFrameTime - previousFrameTime}.count();
+        previousFrameTime = currentFrameTime;
+        fire_engine::advanceAnimations(content.scene, content.animations, elapsedSeconds);
         content.scene.updateWorldTransforms();
         const fire_engine::RenderResult result = renderer.drawFrame(content.scene);
         if (result != fire_engine::RenderResult::eNotPresented)
