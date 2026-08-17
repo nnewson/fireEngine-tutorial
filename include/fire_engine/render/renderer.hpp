@@ -91,7 +91,20 @@ public:
      */
     [[nodiscard]] RenderResult drawFrame(const Scene& scene);
 
-    /** @brief Waits for device work before renderer-dependent resources are destroyed. */
+    /**
+     * @brief Replaces presentation resources for the window's current framebuffer.
+     * @param window Window whose framebuffer extent selects the replacement size.
+     * @return true after replacement, or false when the framebuffer is currently zero-sized.
+     * @throws std::runtime_error if the surface no longer supports presentation.
+     * @throws vk::SystemError internally if Vulkan resource creation fails.
+     *
+     * A minimized window can become zero-sized between an event-loop check and
+     * this call, so that transient state is reported rather than treated as an
+     * error. Prepared meshes, textures, and render objects remain unchanged.
+     */
+    [[nodiscard]] bool recreatePresentation(const Window& window);
+
+    /** @brief Waits for device and presentation work before resources are destroyed. */
     void waitIdle();
 
     /**

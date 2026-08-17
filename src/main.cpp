@@ -27,16 +27,34 @@
 namespace
 {
 /** @cond INTERNAL */
+/* --- File-local types --- */
+
+/** @brief Command-line controls used by automated integration runs. */
+struct RunOptions
+{
+    std::optional<std::uint64_t> frameLimit; ///< Presented frames requested before exit.
+    bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
+};
+
 /* --- File-local function declarations --- */
 
 /**
- * @brief Reads the optional frame limit used by the automated smoke test.
+ * @brief Reads the optional frame limit and presentation-recreation smoke mode.
  * @param argumentCount Number of command-line arguments including the executable.
  * @param arguments Null-terminated argument strings supplied by the host environment.
- * @return Requested positive frame count, or no limit for an interactive run.
- * @throws std::invalid_argument if the command line is not `--frames N`.
+ * @return Parsed controls, or interactive defaults when no arguments are supplied.
+ * @throws std::invalid_argument if the command line does not match the documented usage.
  */
-[[nodiscard]] std::optional<std::uint64_t> parseFrameLimit(int argumentCount, char* arguments[]);
+[[nodiscard]] RunOptions parseOptions(int argumentCount, char* arguments[]);
+
+/**
+ * @brief Waits without spinning and retries recreation until the framebuffer is drawable.
+ * @param renderer Renderer whose presentation-dependent state is replaced.
+ * @param window Window whose events and framebuffer extent are inspected.
+ * @return False when closure was requested before recreation succeeded.
+ */
+[[nodiscard]] bool recreateWhenDrawable(fire_engine::Renderer& renderer,
+                                        const fire_engine::Window& window);
 
 /** @endcond */
 } // namespace
@@ -52,11 +70,11 @@ namespace
 int main(int argumentCount, char* arguments[])
 try
 {
-    const std::optional<std::uint64_t> frameLimit = parseFrameLimit(argumentCount, arguments);
+    const RunOptions options = parseOptions(argumentCount, arguments);
     const std::string applicationName = "fireEngine Tutorial";
 
     fire_engine::Glfw glfw;
-    const fire_engine::Window window{800, 600, applicationName};
+    fire_engine::Window window{800, 600, applicationName};
     fire_engine::Renderer renderer{glfw, window, applicationName};
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
         std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
@@ -77,9 +95,9 @@ try
     std::println("AnimatedCube prepared: one indexed mesh and sampled base-color texture.");
 
     std::uint64_t renderedFrameCount = 0;
-    bool swapchainNeedsRecreation = false;
     auto previousFrameTime = std::chrono::steady_clock::now();
-    while (!window.shouldClose() && (!frameLimit.has_value() || renderedFrameCount < *frameLimit))
+    while (!window.shouldClose() &&
+           (!options.frameLimit.has_value() || renderedFrameCount < *options.frameLimit))
     {
         window.pollEvents();
         if (window.shouldClose())
@@ -93,30 +111,39 @@ try
         previousFrameTime = currentFrameTime;
         fire_engine::advanceAnimations(content.scene, content.animations, elapsedSeconds);
         content.scene.updateWorldTransforms();
+
+        if (window.consumeFramebufferResize())
+        {
+            if (!recreateWhenDrawable(renderer, window))
+            {
+                break;
+            }
+        }
+
         const fire_engine::RenderResult result = renderer.drawFrame(content.scene);
         if (result != fire_engine::RenderResult::eNotPresented)
         {
             ++renderedFrameCount;
         }
-        if (result != fire_engine::RenderResult::ePresented)
+        if (result != fire_engine::RenderResult::ePresented || options.recreateEveryFrame)
         {
-            swapchainNeedsRecreation = true;
-            break;
+            // Coalesce a resize callback with the out-of-date or suboptimal
+            // result that the same surface change may have produced.
+            static_cast<void>(window.consumeFramebufferResize());
+            if (!recreateWhenDrawable(renderer, window))
+            {
+                break;
+            }
         }
     }
 
-    // Presentation is not covered by the per-frame fence. Waiting for the whole
-    // device covers the submitted work the VMA buffers depend on. For presentation
-    // resources it is the conventional shutdown fallback rather than a
-    // specification guarantee; deferred destruction or presentation fences are
-    // the specification-backed solutions once recreation exists.
+    // Presentation is not covered by the per-frame fence. Renderer::waitIdle
+    // first waits for device work, then waits for every presentation fence
+    // supplied through the KHR or equivalent EXT swapchain-maintenance extension.
+    // Together they make submitted and presentation resources safe to destroy.
     renderer.waitIdle();
 
-    if (swapchainNeedsRecreation)
-    {
-        std::println("The surface changed; swapchain recreation is left to a later tutorial.");
-    }
-    if (frameLimit.has_value() && renderedFrameCount != *frameLimit)
+    if (options.frameLimit.has_value() && renderedFrameCount != *options.frameLimit)
     {
         throw std::runtime_error("The smoke test ended before presenting every requested frame");
     }
@@ -134,15 +161,18 @@ namespace
 /** @cond INTERNAL */
 /* --- File-local functions --- */
 
-[[nodiscard]] std::optional<std::uint64_t> parseFrameLimit(int argumentCount, char* arguments[])
+[[nodiscard]] RunOptions parseOptions(int argumentCount, char* arguments[])
 {
     if (argumentCount == 1)
     {
-        return std::nullopt;
+        return {};
     }
-    if (argumentCount != 3 || std::string_view{arguments[1]} != "--frames")
+    if ((argumentCount != 3 && argumentCount != 4) ||
+        std::string_view{arguments[1]} != "--frames" ||
+        (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
-        throw std::invalid_argument("Usage: fireEngineTutorial [--frames positive-count]");
+        throw std::invalid_argument(
+            "Usage: fireEngineTutorial [--frames positive-count [--recreate-every-frame]]");
     }
 
     const std::string_view valueText{arguments[2]};
@@ -153,7 +183,25 @@ namespace
     {
         throw std::invalid_argument("--frames requires a positive integer");
     }
-    return value;
+    return {
+        .frameLimit = value,
+        .recreateEveryFrame = argumentCount == 4,
+    };
+}
+
+[[nodiscard]] bool recreateWhenDrawable(fire_engine::Renderer& renderer,
+                                        const fire_engine::Window& window)
+{
+    while (!window.shouldClose())
+    {
+        const vk::Extent2D extent = window.framebufferExtent();
+        if (extent.width != 0 && extent.height != 0 && renderer.recreatePresentation(window))
+        {
+            return true;
+        }
+        window.waitEvents();
+    }
+    return false;
 }
 
 /** @endcond */

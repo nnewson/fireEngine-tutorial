@@ -20,6 +20,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <expected>
 #include <limits>
 #include <memory>
@@ -172,6 +173,60 @@ struct CompiledRenderObject
     Color4 baseColor{};                       ///< Material factor pushed for each draw.
 };
 
+/** @brief Replaceable swapchain, attachments, pipeline, and presentation completion state. */
+class PresentationState final
+{
+public:
+    /**
+     * @brief Creates one complete set of mutually compatible presentation resources.
+     * @param device Device and queues used for rendering and presentation.
+     * @param allocator VMA owner used for the depth attachment.
+     * @param window Window whose current framebuffer determines the extent.
+     * @param oldSwapchain Previous swapchain offered for implementation reuse.
+     */
+    PresentationState(const detail::Device& device, const detail::MemoryAllocator& allocator,
+                      const Window& window, vk::SwapchainKHR oldSwapchain = nullptr);
+
+    /** @brief Returns the owned swapchain. @return Presentation images and semaphores. */
+    [[nodiscard]] const detail::Swapchain& swapchain() const noexcept;
+    /** @brief Returns the extent-matched depth attachment. @return Owned depth state. */
+    [[nodiscard]] const DepthBuffer& depthBuffer() const noexcept;
+    /** @brief Returns the attachment-compatible graphics pipeline. @return Owned pipeline. */
+    [[nodiscard]] const detail::Pipeline& pipeline() const noexcept;
+
+    /**
+     * @brief Waits and resets an earlier presentation fence before its image reuses it.
+     * @param imageIndex Newly acquired swapchain-image index.
+     */
+    void preparePresentFence(std::size_t imageIndex);
+
+    /**
+     * @brief Returns the unsignaled fence associated with the next present of one image.
+     * @param imageIndex Acquired swapchain-image index.
+     * @return Fence chained to VkPresentInfoKHR.
+     */
+    [[nodiscard]] const vk::raii::Fence& presentFence(std::size_t imageIndex) const;
+
+    /**
+     * @brief Records that presentation will signal one image's fence.
+     * @param imageIndex Presented swapchain-image index.
+     */
+    void markPresentSubmitted(std::size_t imageIndex);
+
+    /** @brief Waits until all submitted presentation resources may be destroyed. */
+    void waitForPresentations();
+
+private:
+    // Reverse destruction releases fences and the pipeline before attachment
+    // resources, and releases the depth allocation before the swapchain.
+    const vk::raii::Device* logicalDevice_ = nullptr; ///< Borrowed owner used for fence waits.
+    detail::Swapchain swapchain_; ///< Images, views, and per-image binary semaphores.
+    DepthBuffer depthBuffer_;     ///< Extent-matched depth image and view.
+    detail::Pipeline pipeline_;   ///< Compatible color/depth graphics pipeline.
+    std::vector<vk::raii::Fence> presentFences_; ///< Completion fence per image.
+    std::vector<std::uint8_t> presentSubmitted_; ///< Whether each fence has pending work.
+};
+
 /* --- File-local function declarations --- */
 
 [[nodiscard]] vk::Filter compileFilter(TextureFilter filter);
@@ -217,6 +272,13 @@ public:
      * @return Presentation outcome for the acquired swapchain image.
      */
     [[nodiscard]] RenderResult drawFrame(const Scene& scene);
+
+    /**
+     * @brief Replaces the complete presentation-dependent ownership group.
+     * @param window Window whose current framebuffer selects the new extent.
+     * @return true after replacement, or false for a transient zero-sized framebuffer.
+     */
+    [[nodiscard]] bool recreatePresentation(const Window& window);
 
     /** @brief Waits for device work and clears pending-submission bookkeeping. */
     void waitIdle();
@@ -277,13 +339,11 @@ private:
     detail::Device device_;             ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_; ///< VMA owner created from the logical device.
 
-    // Presentation-dependent state replaced together when recreation is added.
-    detail::Swapchain swapchain_; ///< Images and synchronization tied to presentation.
-    DepthBuffer depthBuffer_;     ///< Depth attachment matching the swapchain extent.
-    detail::Pipeline pipeline_;   ///< Pipeline compatible with both attachment formats.
+    // Presentation-dependent state replaced as one ownership group.
+    std::unique_ptr<PresentationState> presentation_; ///< Swapchain-compatible resources.
 
     // Per-frame submission state.
-    // Its initializer reads swapchain_.extent(), so frame_ must remain declared after swapchain_.
+    // Its initializer reads presentation_, so frame_ must remain declared after it.
     detail::FrameInFlight frame_;   ///< Reusable resources for the current frame slot.
     bool workMayBePending_ = false; ///< Whether destruction requires a defensive wait.
 
@@ -318,6 +378,11 @@ RenderResult Renderer::drawFrame(const Scene& scene)
     return implementation_->drawFrame(scene);
 }
 
+bool Renderer::recreatePresentation(const Window& window)
+{
+    return implementation_->recreatePresentation(window);
+}
+
 void Renderer::waitIdle()
 {
     implementation_->waitIdle();
@@ -334,11 +399,10 @@ RendererInfo Renderer::info() const
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName)
     : device_{glfw, window, applicationName},
       allocator_{device_},
-      swapchain_{device_, window},
-      depthBuffer_{device_, allocator_, swapchain_.extent()},
-      pipeline_{device_, swapchain_.imageFormat(), depthBuffer_.format()},
+      presentation_{std::make_unique<PresentationState>(device_, allocator_, window)},
       frame_{device_, allocator_,
-             detail::FrameUniforms{.viewProjection = createViewProjection(swapchain_.extent())}}
+             detail::FrameUniforms{.viewProjection =
+                                       createViewProjection(presentation_->swapchain().extent())}}
 {
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
@@ -347,12 +411,6 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
     if (allocator_.handle() == nullptr)
     {
         throw std::runtime_error("VMA returned a null allocator");
-    }
-    if (swapchain_.imageCount() == 0 ||
-        swapchain_.imageViews().size() != swapchain_.images().size() ||
-        swapchain_.renderFinished().size() != swapchain_.imageCount())
-    {
-        throw std::runtime_error("Vulkan returned an incomplete swapchain");
     }
     if (frame_.frameFinished().getStatus() != vk::Result::eSuccess)
     {
@@ -374,6 +432,16 @@ Renderer::Impl::~Impl() noexcept
     {
         fire_engine::log("Vulkan cleanup wait failed with result code {}.",
                          static_cast<std::int32_t>(result));
+        return;
+    }
+
+    try
+    {
+        presentation_->waitForPresentations();
+    }
+    catch (const std::exception& error)
+    {
+        fire_engine::log("Presentation cleanup wait failed: {}.", error.what());
     }
 }
 
@@ -527,8 +595,9 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
     bool swapchainIsSuboptimal = false;
     try
     {
-        const auto [result, acquiredImageIndex] = swapchain_.handle().acquireNextImage(
-            std::numeric_limits<std::uint64_t>::max(), *frame_.imageAvailable());
+        const auto [result, acquiredImageIndex] =
+            presentation_->swapchain().handle().acquireNextImage(
+                std::numeric_limits<std::uint64_t>::max(), *frame_.imageAvailable());
         imageIndex = acquiredImageIndex;
         swapchainIsSuboptimal = result == vk::Result::eSuboptimalKHR;
     }
@@ -539,6 +608,7 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
         return RenderResult::eNotPresented;
     }
 
+    presentation_->preparePresentFence(imageIndex);
     frame_.resetCommands();
     recordCommands(imageIndex, drawList.drawItems);
 
@@ -554,7 +624,7 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
         .commandBuffer = *frame_.commandBuffer(),
     };
     const vk::SemaphoreSubmitInfo signalInfo{
-        .semaphore = *swapchain_.renderFinished(imageIndex),
+        .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
         .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
     };
     const vk::SubmitInfo2 submitInfo{
@@ -568,9 +638,15 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
     device_.graphicsQueue().submit2(submitInfo, *frame_.frameFinished());
     workMayBePending_ = true;
 
-    const vk::Semaphore renderFinished = *swapchain_.renderFinished(imageIndex);
-    const vk::SwapchainKHR swapchain = *swapchain_.handle();
+    const vk::Semaphore renderFinished = *presentation_->swapchain().renderFinished(imageIndex);
+    const vk::SwapchainKHR swapchain = *presentation_->swapchain().handle();
+    const vk::Fence presentFence = *presentation_->presentFence(imageIndex);
+    const vk::SwapchainPresentFenceInfoKHR presentFenceInfo{
+        .swapchainCount = 1,
+        .pFences = &presentFence,
+    };
     const vk::PresentInfoKHR presentInfo{
+        .pNext = &presentFenceInfo,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &renderFinished,
         .swapchainCount = 1,
@@ -584,9 +660,12 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
         {
             swapchainIsSuboptimal = true;
         }
+        presentation_->markPresentSubmitted(imageIndex);
     }
     catch (const vk::OutOfDateKHRError&)
     {
+        // Out-of-date still enqueues the presentation operation and its fence.
+        presentation_->markPresentSubmitted(imageIndex);
         return RenderResult::eNotPresented;
     }
 
@@ -596,7 +675,30 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
 void Renderer::Impl::waitIdle()
 {
     device_.logicalDevice().waitIdle();
+    presentation_->waitForPresentations();
     workMayBePending_ = false;
+}
+
+bool Renderer::Impl::recreatePresentation(const Window& window)
+{
+    const vk::Extent2D framebufferExtent = window.framebufferExtent();
+    if (framebufferExtent.width == 0 || framebufferExtent.height == 0)
+    {
+        return false;
+    }
+
+    // Device idle covers command-buffer use of the old color and depth images.
+    // Presentation fences separately prove that the presentation engine has
+    // released the old swapchain and its binary wait semaphores.
+    waitIdle();
+    const vk::SwapchainKHR oldSwapchain = *presentation_->swapchain().handle();
+    auto replacement =
+        std::make_unique<PresentationState>(device_, allocator_, window, oldSwapchain);
+    frame_.writeUniforms(detail::FrameUniforms{
+        .viewProjection = createViewProjection(replacement->swapchain().extent()),
+    });
+    presentation_ = std::move(replacement);
+    return true;
 }
 
 RendererInfo Renderer::Impl::info() const
@@ -605,13 +707,13 @@ RendererInfo Renderer::Impl::info() const
         .deviceName = device_.name(),
         .graphicsQueueFamily = device_.graphicsQueueFamily(),
         .presentQueueFamily = device_.presentQueueFamily(),
-        .swapchainImageCount = swapchain_.imageCount(),
-        .presentationSemaphoreCount = swapchain_.renderFinished().size(),
-        .width = swapchain_.extent().width,
-        .height = swapchain_.extent().height,
-        .imageFormat = vk::to_string(swapchain_.imageFormat()),
-        .depthFormat = vk::to_string(depthBuffer_.format()),
-        .presentMode = vk::to_string(swapchain_.presentMode()),
+        .swapchainImageCount = presentation_->swapchain().imageCount(),
+        .presentationSemaphoreCount = presentation_->swapchain().renderFinished().size(),
+        .width = presentation_->swapchain().extent().width,
+        .height = presentation_->swapchain().extent().height,
+        .imageFormat = vk::to_string(presentation_->swapchain().imageFormat()),
+        .depthFormat = vk::to_string(presentation_->depthBuffer().format()),
+        .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
     };
 }
 
@@ -649,7 +751,7 @@ void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& 
         .newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = depthBuffer_.image(),
+        .image = presentation_->depthBuffer().image(),
         .subresourceRange = kDepthSubresourceRange,
     };
     const vk::DependencyInfo dependency{
@@ -673,7 +775,7 @@ void Renderer::Impl::transitionToAttachment(const vk::raii::CommandBuffer& comma
         .newLayout = vk::ImageLayout::eAttachmentOptimal,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain_.image(imageIndex),
+        .image = presentation_->swapchain().image(imageIndex),
         .subresourceRange = kColorSubresourceRange,
     };
     const vk::DependencyInfo beginDependency{
@@ -690,7 +792,7 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .color = {.float32 = std::array{0.015f, 0.02f, 0.03f, 1.0f}},
     };
     const vk::RenderingAttachmentInfo colorAttachment{
-        .imageView = *swapchain_.imageView(imageIndex),
+        .imageView = *presentation_->swapchain().imageView(imageIndex),
         .imageLayout = vk::ImageLayout::eAttachmentOptimal,
         .loadOp = vk::AttachmentLoadOp::eClear,
         .storeOp = vk::AttachmentStoreOp::eStore,
@@ -700,7 +802,7 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .depthStencil = {.depth = 1.0f, .stencil = 0},
     };
     const vk::RenderingAttachmentInfo depthAttachment{
-        .imageView = *depthBuffer_.view(),
+        .imageView = *presentation_->depthBuffer().view(),
         .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
         .loadOp = vk::AttachmentLoadOp::eClear,
         .storeOp = vk::AttachmentStoreOp::eDontCare,
@@ -710,7 +812,7 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .renderArea =
             {
                 .offset = {.x = 0, .y = 0},
-                .extent = swapchain_.extent(),
+                .extent = presentation_->swapchain().extent(),
             },
         .layerCount = 1,
         .colorAttachmentCount = 1,
@@ -718,19 +820,20 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .pDepthAttachment = &depthAttachment,
     };
     commandBuffer.beginRendering(renderingInfo);
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline_.pipeline());
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                               *presentation_->pipeline().pipeline());
 
     const vk::Viewport viewport{
         .x = 0.0f,
         .y = 0.0f,
-        .width = static_cast<float>(swapchain_.extent().width),
-        .height = static_cast<float>(swapchain_.extent().height),
+        .width = static_cast<float>(presentation_->swapchain().extent().width),
+        .height = static_cast<float>(presentation_->swapchain().extent().height),
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
     const vk::Rect2D scissor{
         .offset = {.x = 0, .y = 0},
-        .extent = swapchain_.extent(),
+        .extent = presentation_->swapchain().extent(),
     };
     commandBuffer.setViewport(0, viewport);
     commandBuffer.setScissor(0, scissor);
@@ -746,8 +849,8 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .descriptorType = vk::DescriptorType::eUniformBuffer,
         .pBufferInfo = &uniformInfo,
     };
-    commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, *pipeline_.pipelineLayout(),
-                                    0, uniformWrite);
+    commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
+                                    *presentation_->pipeline().pipelineLayout(), 0, uniformWrite);
 }
 
 void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
@@ -774,14 +877,16 @@ void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
             .pImageInfo = &textureInfo,
         };
         commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
-                                        *pipeline_.pipelineLayout(), 0, textureWrite);
+                                        *presentation_->pipeline().pipelineLayout(), 0,
+                                        textureWrite);
 
         const detail::DrawConstants constants{
             .model = item.world,
             .baseColor = object.baseColor,
         };
         commandBuffer.pushConstants<detail::DrawConstants>(
-            *pipeline_.pipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, constants);
+            *presentation_->pipeline().pipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0,
+            constants);
         commandBuffer.drawIndexed(object.mesh->indexCount(), 1, 0, 0, 0);
     }
 }
@@ -798,7 +903,7 @@ void Renderer::Impl::transitionToPresent(const vk::raii::CommandBuffer& commandB
         .newLayout = vk::ImageLayout::ePresentSrcKHR,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain_.image(imageIndex),
+        .image = presentation_->swapchain().image(imageIndex),
         .subresourceRange = kColorSubresourceRange,
     };
     const vk::DependencyInfo endDependency{
@@ -811,6 +916,91 @@ void Renderer::Impl::transitionToPresent(const vk::raii::CommandBuffer& commandB
 namespace
 {
 /* --- File-local class member functions --- */
+
+PresentationState::PresentationState(const detail::Device& device,
+                                     const detail::MemoryAllocator& allocator, const Window& window,
+                                     vk::SwapchainKHR oldSwapchain)
+    : logicalDevice_{&device.logicalDevice()},
+      swapchain_{device, window, oldSwapchain},
+      depthBuffer_{device, allocator, swapchain_.extent()},
+      pipeline_{device, swapchain_.imageFormat(), depthBuffer_.format()},
+      presentSubmitted_(swapchain_.imageCount(), 0)
+{
+    if (swapchain_.imageCount() == 0 ||
+        swapchain_.imageViews().size() != swapchain_.images().size() ||
+        swapchain_.renderFinished().size() != swapchain_.imageCount())
+    {
+        throw std::runtime_error("Vulkan returned an incomplete swapchain");
+    }
+
+    constexpr vk::FenceCreateInfo fenceInfo{};
+    presentFences_.reserve(swapchain_.imageCount());
+    for (std::size_t imageIndex = 0; imageIndex < swapchain_.imageCount(); ++imageIndex)
+    {
+        presentFences_.emplace_back(device.logicalDevice(), fenceInfo);
+    }
+}
+
+const detail::Swapchain& PresentationState::swapchain() const noexcept
+{
+    return swapchain_;
+}
+
+const DepthBuffer& PresentationState::depthBuffer() const noexcept
+{
+    return depthBuffer_;
+}
+
+const detail::Pipeline& PresentationState::pipeline() const noexcept
+{
+    return pipeline_;
+}
+
+void PresentationState::preparePresentFence(std::size_t imageIndex)
+{
+    if (presentSubmitted_.at(imageIndex) == 0)
+    {
+        return;
+    }
+
+    const vk::Result result = logicalDevice_->waitForFences(
+        *presentFences_.at(imageIndex), vk::True, std::numeric_limits<std::uint64_t>::max());
+    if (result != vk::Result::eSuccess)
+    {
+        throw vk::SystemError{vk::make_error_code(result), "Waiting for presentation completion"};
+    }
+    logicalDevice_->resetFences(*presentFences_[imageIndex]);
+    presentSubmitted_[imageIndex] = 0;
+}
+
+const vk::raii::Fence& PresentationState::presentFence(std::size_t imageIndex) const
+{
+    return presentFences_.at(imageIndex);
+}
+
+void PresentationState::markPresentSubmitted(std::size_t imageIndex)
+{
+    presentSubmitted_.at(imageIndex) = 1;
+}
+
+void PresentationState::waitForPresentations()
+{
+    for (std::size_t imageIndex = 0; imageIndex < presentFences_.size(); ++imageIndex)
+    {
+        if (presentSubmitted_[imageIndex] == 0)
+        {
+            continue;
+        }
+        const vk::Result result = logicalDevice_->waitForFences(
+            *presentFences_[imageIndex], vk::True, std::numeric_limits<std::uint64_t>::max());
+        if (result != vk::Result::eSuccess)
+        {
+            throw vk::SystemError{vk::make_error_code(result),
+                                  "Waiting for presentation retirement"};
+        }
+        presentSubmitted_[imageIndex] = 0;
+    }
+}
 
 DepthBuffer::DepthBuffer(const detail::Device& device, const detail::MemoryAllocator& allocator,
                          vk::Extent2D extent)

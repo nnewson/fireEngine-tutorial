@@ -38,7 +38,7 @@ vk::SurfaceFormatKHR chooseSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>
 
 vk::PresentModeKHR choosePresentMode(const std::vector<vk::PresentModeKHR>& presentModes)
 {
-    return std::ranges::find(presentModes, vk::PresentModeKHR::eMailbox) != presentModes.end()
+    return std::ranges::contains(presentModes, vk::PresentModeKHR::eMailbox)
                ? vk::PresentModeKHR::eMailbox
                : vk::PresentModeKHR::eFifo;
 }

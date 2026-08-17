@@ -1,9 +1,7 @@
 #include <fire_engine/core/detail/debug.hpp>
 
-#ifdef FIRE_ENGINE_ENABLE_VALIDATION
 #include <algorithm>
 #include <string_view>
-#endif
 
 #include <fire_engine/core/log.hpp>
 
@@ -27,10 +25,32 @@ InstanceSupport queryInstanceSupport(const vk::raii::Context& context)
 {
     InstanceSupport support;
 
+    const auto extensions = context.enumerateInstanceExtensionProperties();
+    support.hasSurfaceCapabilities2 =
+        std::ranges::any_of(extensions,
+                            [](const vk::ExtensionProperties& extension)
+                            {
+                                return std::string_view{extension.extensionName.data()} ==
+                                       VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
+                            });
+    support.hasKhrSurfaceMaintenance1 =
+        std::ranges::any_of(extensions,
+                            [](const vk::ExtensionProperties& extension)
+                            {
+                                return std::string_view{extension.extensionName.data()} ==
+                                       VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
+                            });
+    support.hasExtSurfaceMaintenance1 =
+        std::ranges::any_of(extensions,
+                            [](const vk::ExtensionProperties& extension)
+                            {
+                                return std::string_view{extension.extensionName.data()} ==
+                                       VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
+                            });
+
 #ifndef FIRE_ENGINE_ENABLE_VALIDATION
     // Release builds skip validation by default. Keeping the function available
     // avoids spreading build-configuration conditionals through Device.
-    static_cast<void>(context);
     return support;
 #else
     // Layers are installed independently from the loader, so requesting
@@ -42,7 +62,6 @@ InstanceSupport queryInstanceSupport(const vk::raii::Context& context)
 
     // The messenger creation call is provided by VK_EXT_debug_utils. Query it
     // separately because a machine may have validation without this extension.
-    const auto extensions = context.enumerateInstanceExtensionProperties();
     support.hasDebugUtils =
         std::ranges::any_of(extensions,
                             [](const vk::ExtensionProperties& extension)

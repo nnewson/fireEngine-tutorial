@@ -129,6 +129,8 @@ private:
     vk::raii::Queue presentQueue_{nullptr};   ///< Queue used to present rendered images.
     std::uint32_t graphicsQueueFamily_ = 0;   ///< Family index of graphicsQueue_.
     std::uint32_t presentQueueFamily_ = 0;    ///< Family index of presentQueue_.
+    bool hasKhrSurfaceMaintenance1_ = false;  ///< Whether the KHR dependency was enabled.
+    bool hasExtSurfaceMaintenance1_ = false;  ///< Whether the EXT dependency was enabled.
 };
 /** @endcond */
 } // namespace detail

@@ -126,6 +126,13 @@ public:
      */
     [[nodiscard]] const AllocatedBuffer& uniformBuffer() const noexcept;
 
+    /**
+     * @brief Replaces the frame-uniform contents after earlier frame work has completed.
+     * @param uniforms New shader values copied into the persistently owned buffer.
+     * @throws std::runtime_error if VMA cannot map or write the allocation.
+     */
+    void writeUniforms(const FrameUniforms& uniforms) const;
+
 private:
     AllocatedBuffer uniformBuffer_; ///< Shader data kept separate for each frame slot.
 
