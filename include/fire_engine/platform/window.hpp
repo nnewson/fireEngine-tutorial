@@ -68,7 +68,25 @@ public:
     /** @brief Processes pending events for all GLFW windows on the current thread. */
     void pollEvents() const noexcept;
 
+    /** @brief Sleeps until the window system delivers at least one event. */
+    void waitEvents() const noexcept;
+
+    /**
+     * @brief Reports and clears a framebuffer-size notification.
+     * @return True once after each framebuffer-size callback.
+     */
+    [[nodiscard]] bool consumeFramebufferResize() noexcept;
+
 private:
-    GLFWwindow* window_ = nullptr; ///< Native window owned by this object.
+    /**
+     * @brief Records a framebuffer-size callback for the owning Window.
+     * @param window Native GLFW window carrying this instance as its user pointer.
+     * @param width Latest framebuffer width reported by GLFW.
+     * @param height Latest framebuffer height reported by GLFW.
+     */
+    static void framebufferSizeCallback(GLFWwindow* window, int width, int height) noexcept;
+
+    GLFWwindow* window_ = nullptr;    ///< Native window owned by this object.
+    bool framebufferResized_ = false; ///< Set by GLFW until consumed by the event loop.
 };
 } // namespace fire_engine

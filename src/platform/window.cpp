@@ -29,6 +29,8 @@ Window::Window(int width, int height, const std::string& title)
     {
         throw std::runtime_error("GLFW window creation failed");
     }
+    glfwSetWindowUserPointer(window_, this);
+    glfwSetFramebufferSizeCallback(window_, framebufferSizeCallback);
 }
 
 Window::~Window()
@@ -74,5 +76,32 @@ void Window::pollEvents() const noexcept
     // GLFW owns the process-wide event queue, but keeping this call on Window
     // prevents its C API and native handle from leaking into the application loop.
     glfwPollEvents();
+}
+
+void Window::waitEvents() const noexcept
+{
+    // Unlike polling, this blocks while a minimized window has no drawable
+    // framebuffer, avoiding a busy loop until restoration generates an event.
+    glfwWaitEvents();
+}
+
+bool Window::consumeFramebufferResize() noexcept
+{
+    const bool result = framebufferResized_;
+    framebufferResized_ = false;
+    return result;
+}
+
+/* --- Private static functions --- */
+
+void Window::framebufferSizeCallback(GLFWwindow* window, int, int) noexcept
+{
+    // Width and height are queried again when recreating because several resize
+    // callbacks may be coalesced before the event loop handles this notification.
+    auto* const owner = static_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (owner != nullptr)
+    {
+        owner->framebufferResized_ = true;
+    }
 }
 } // namespace fire_engine

@@ -240,3 +240,10 @@ catch_discover_tests(fireEngineTutorialTests)
 
 add_test(NAME fireEngineTutorialSmoke COMMAND fireEngineTutorial --frames 1)
 set_tests_properties(fireEngineTutorialSmoke PROPERTIES TIMEOUT 30)
+
+# Repeated replacement exercises oldSwapchain, presentation-fence retirement,
+# depth/pipeline recreation, and projection updates on a real Vulkan device.
+add_test(NAME fireEngineTutorialRecreationSmoke
+    COMMAND fireEngineTutorial --frames 3 --recreate-every-frame
+)
+set_tests_properties(fireEngineTutorialRecreationSmoke PROPERTIES TIMEOUT 30)

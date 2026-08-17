@@ -18,17 +18,20 @@ inline constexpr char kValidationLayerName[] = "VK_LAYER_KHRONOS_validation";
 
 /* --- Types --- */
 
-/** @brief Optional validation facilities advertised by the Vulkan runtime. */
+/** @brief Instance extensions and optional validation facilities advertised by Vulkan. */
 struct InstanceSupport
 {
-    bool hasValidationLayer = false; ///< Whether the Khronos validation layer is installed.
-    bool hasDebugUtils = false;      ///< Whether VK_EXT_debug_utils is available.
+    bool hasValidationLayer = false;        ///< Whether the Khronos validation layer is installed.
+    bool hasDebugUtils = false;             ///< Whether VK_EXT_debug_utils is available.
+    bool hasSurfaceCapabilities2 = false;   ///< Whether extended surface queries are available.
+    bool hasKhrSurfaceMaintenance1 = false; ///< Whether the KHR maintenance variant is available.
+    bool hasExtSurfaceMaintenance1 = false; ///< Whether the EXT maintenance variant is available.
 };
 
 /* --- Functions --- */
 
 /**
- * @brief Queries the validation layer and debug utility support available to an instance.
+ * @brief Queries required instance extensions and optional validation support.
  * @param context Vulkan context used to enumerate instance layers and extensions.
  * @return The optional validation facilities available to this process.
  * @throws vk::SystemError if Vulkan cannot enumerate the requested properties.

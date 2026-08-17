@@ -41,10 +41,11 @@ public:
      * @brief Creates a swapchain suited to the selected device and current window.
      * @param device Device, surface, and queue families used by the swapchain.
      * @param window Window whose framebuffer size determines the image extent.
+     * @param oldSwapchain Retired presentation state whose resources may be reused.
      * @throws std::runtime_error if the surface no longer supports presentation.
      * @throws vk::SystemError if swapchain, image-view, or semaphore creation fails.
      */
-    Swapchain(const Device& device, const Window& window);
+    Swapchain(const Device& device, const Window& window, vk::SwapchainKHR oldSwapchain = nullptr);
 
     /**
      * @brief Releases image views before the swapchain that supplied their images.
@@ -57,12 +58,11 @@ public:
      * an out-of-date result still enqueues the queue operation and its
      * semaphore wait.
      *
-     * This tutorial destroys the swapchain only at shutdown, after a device
-     * wait. That is the conventional fallback rather than a strict guarantee
-     * that the presentation engine has released its references. Recreation must
-     * keep the retired swapchain and its semaphores alive until their
-     * presentation use is known to have finished, or use presentation fences
-     * supplied by VK_KHR_swapchain_maintenance1.
+     * Renderer presentation state supplies a fence for every present through
+     * the KHR or equivalent EXT swapchain-maintenance extension and waits for
+     * all submitted fences before destroying this object. That is the
+     * specification-backed guarantee that the swapchain and its presentation
+     * semaphores are no longer referenced.
      */
     ~Swapchain() = default;
 

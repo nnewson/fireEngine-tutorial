@@ -84,5 +84,10 @@ const AllocatedBuffer& FrameInFlight::uniformBuffer() const noexcept
 {
     return uniformBuffer_;
 }
+
+void FrameInFlight::writeUniforms(const FrameUniforms& uniforms) const
+{
+    uniformBuffer_.write(std::as_bytes(std::span{&uniforms, 1}));
+}
 /** @endcond */
 } // namespace fire_engine::detail

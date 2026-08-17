@@ -39,7 +39,7 @@ createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t image
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-Swapchain::Swapchain(const Device& device, const Window& window)
+Swapchain::Swapchain(const Device& device, const Window& window, vk::SwapchainKHR oldSwapchain)
 {
     const SurfaceSupport support = querySurfaceSupport(device);
 
@@ -78,6 +78,7 @@ Swapchain::Swapchain(const Device& device, const Window& window)
         .compositeAlpha = detail::chooseCompositeAlpha(support.capabilities),
         .presentMode = presentMode,
         .clipped = vk::True,
+        .oldSwapchain = oldSwapchain,
     };
 
     swapchain_ = vk::raii::SwapchainKHR{device.logicalDevice(), createInfo};

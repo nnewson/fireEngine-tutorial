@@ -52,20 +52,25 @@ struct QueueFamilies
 /** @brief Physical device and queue families selected for logical-device creation. */
 struct DeviceSelection
 {
-    vk::raii::PhysicalDevice physicalDevice; ///< Physical device that passed inspection.
-    std::uint32_t graphicsQueueFamily;       ///< Selected graphics family index.
-    std::uint32_t presentQueueFamily;        ///< Selected presentation family index.
+    vk::raii::PhysicalDevice physicalDevice;   ///< Physical device that passed inspection.
+    std::uint32_t graphicsQueueFamily;         ///< Selected graphics family index.
+    std::uint32_t presentQueueFamily;          ///< Selected presentation family index.
+    const char* swapchainMaintenanceExtension; ///< KHR-preferred maintenance variant to enable.
 };
 
 /* --- File-local function declarations --- */
 
 [[nodiscard]] QueueFamilies findQueueFamilies(const vk::raii::PhysicalDevice& physicalDevice,
                                               const vk::raii::SurfaceKHR& surface);
-[[nodiscard]] bool supportsSwapchain(const vk::raii::PhysicalDevice& physicalDevice);
+[[nodiscard]] bool supportsDeviceExtension(const vk::raii::PhysicalDevice& physicalDevice,
+                                           std::string_view extensionName);
 [[nodiscard]] std::expected<DeviceSelection, std::string>
-inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::SurfaceKHR& surface);
+inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::SurfaceKHR& surface,
+              bool hasKhrSurfaceMaintenance1, bool hasExtSurfaceMaintenance1);
 [[nodiscard]] DeviceSelection choosePhysicalDevice(const vk::raii::Instance& instance,
-                                                   const vk::raii::SurfaceKHR& surface);
+                                                   const vk::raii::SurfaceKHR& surface,
+                                                   bool hasKhrSurfaceMaintenance1,
+                                                   bool hasExtSurfaceMaintenance1);
 [[nodiscard]] std::vector<vk::DeviceQueueCreateInfo>
 makeQueueCreateInfos(const DeviceSelection& selection);
 [[nodiscard]] vk::raii::Device createLogicalDeviceFor(const DeviceSelection& selection);
@@ -83,7 +88,8 @@ Device::Device(const Glfw& glfw, const Window& window, const std::string& applic
     createInstance(glfw, applicationName);
     surface_ = window.createVulkanSurface(instance_);
 
-    const DeviceSelection selection = choosePhysicalDevice(instance_, surface_);
+    const DeviceSelection selection = choosePhysicalDevice(
+        instance_, surface_, hasKhrSurfaceMaintenance1_, hasExtSurfaceMaintenance1_);
     physicalDevice_ = selection.physicalDevice;
     graphicsQueueFamily_ = selection.graphicsQueueFamily;
     presentQueueFamily_ = selection.presentQueueFamily;
@@ -151,13 +157,37 @@ void Device::createInstance(const Glfw& glfw, const std::string& applicationName
 
     // Start with the platform surface extensions GLFW requires, then opt into
     // debug utilities and validation only when the runtime advertises them.
-    const InstanceSupport debugSupport = queryInstanceSupport(context_);
+    const InstanceSupport instanceSupport = queryInstanceSupport(context_);
+    if (!instanceSupport.hasSurfaceCapabilities2)
+    {
+        throw std::runtime_error("The Vulkan runtime does not "
+                                 "support " VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+    }
+    if (!instanceSupport.hasKhrSurfaceMaintenance1 && !instanceSupport.hasExtSurfaceMaintenance1)
+    {
+        throw std::runtime_error("The Vulkan runtime supports neither the KHR nor EXT surface "
+                                 "maintenance1 extension");
+    }
+    hasKhrSurfaceMaintenance1_ = instanceSupport.hasKhrSurfaceMaintenance1;
+    hasExtSurfaceMaintenance1_ = instanceSupport.hasExtSurfaceMaintenance1;
     std::vector<const char*> extensions = glfw.requiredVulkanExtensions();
-    if (debugSupport.hasDebugUtils)
+    // Both surface-maintenance variants depend on this extension. The KHR
+    // swapchain-maintenance variant is preferred, while EXT keeps equivalent
+    // presentation fences available on implementations predating its promotion.
+    extensions.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+    if (hasKhrSurfaceMaintenance1_)
+    {
+        extensions.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+    }
+    if (hasExtSurfaceMaintenance1_)
+    {
+        extensions.push_back(VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+    }
+    if (instanceSupport.hasDebugUtils)
     {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
-    const std::vector<const char*> layers = debugSupport.hasValidationLayer
+    const std::vector<const char*> layers = instanceSupport.hasValidationLayer
                                                 ? std::vector<const char*>{kValidationLayerName}
                                                 : std::vector<const char*>{};
     const vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo = makeMessengerCreateInfo();
@@ -174,7 +204,7 @@ void Device::createInstance(const Glfw& glfw, const std::string& applicationName
         .apiVersion = vk::ApiVersion14,
     };
     const vk::InstanceCreateInfo instanceCreateInfo{
-        .pNext = debugSupport.hasDebugUtils ? &debugCreateInfo : nullptr,
+        .pNext = instanceSupport.hasDebugUtils ? &debugCreateInfo : nullptr,
         .pApplicationInfo = &applicationInfo,
         .enabledLayerCount = static_cast<std::uint32_t>(layers.size()),
         .ppEnabledLayerNames = layers.data(),
@@ -185,7 +215,7 @@ void Device::createInstance(const Glfw& glfw, const std::string& applicationName
     // The debug create info is also chained into instance creation so validation
     // can report messages emitted before the messenger itself exists.
     instance_ = vk::raii::Instance{context_, instanceCreateInfo};
-    if (debugSupport.hasDebugUtils)
+    if (instanceSupport.hasDebugUtils)
     {
         debugMessenger_ = vk::raii::DebugUtilsMessengerEXT{instance_, debugCreateInfo};
     }
@@ -237,33 +267,33 @@ namespace
 }
 
 /**
- * @brief Tests whether a physical device advertises the swapchain extension.
+ * @brief Tests whether a physical device advertises one required extension.
  * @param physicalDevice Device whose extension properties are inspected.
- * @return true when VK_KHR_swapchain is available; otherwise false.
+ * @param extensionName Null-terminated extension name to find.
+ * @return true when the extension is available; otherwise false.
  * @throws vk::SystemError if Vulkan cannot enumerate device extensions.
  */
-[[nodiscard]] bool supportsSwapchain(const vk::raii::PhysicalDevice& physicalDevice)
+[[nodiscard]] bool supportsDeviceExtension(const vk::raii::PhysicalDevice& physicalDevice,
+                                           std::string_view extensionName)
 {
-    // Presentation requires VK_KHR_swapchain even though the application and
-    // device otherwise target the Vulkan 1.4 core API.
     const auto extensions = physicalDevice.enumerateDeviceExtensionProperties();
-    return std::ranges::any_of(extensions,
-                               [](const vk::ExtensionProperties& extension)
-                               {
-                                   return std::string_view{extension.extensionName.data()} ==
-                                          VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-                               });
+    return std::ranges::any_of(
+        extensions, [extensionName](const vk::ExtensionProperties& extension)
+        { return std::string_view{extension.extensionName.data()} == extensionName; });
 }
 
 /**
  * @brief Inspects whether a physical device satisfies the tutorial requirements.
  * @param physicalDevice Candidate device to inspect.
  * @param surface Surface for which presentation support is required.
+ * @param hasKhrSurfaceMaintenance1 Whether the matching KHR instance dependency is enabled.
+ * @param hasExtSurfaceMaintenance1 Whether the matching EXT instance dependency is enabled.
  * @return A complete selection on success, or a human-readable rejection reason.
  * @throws vk::SystemError if a Vulkan capability query fails.
  */
 [[nodiscard]] std::expected<DeviceSelection, std::string>
-inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::SurfaceKHR& surface)
+inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::SurfaceKHR& surface,
+              bool hasKhrSurfaceMaintenance1, bool hasExtSurfaceMaintenance1)
 {
     const vk::PhysicalDeviceProperties properties = physicalDevice.getProperties();
     const char* deviceName = properties.deviceName.data();
@@ -277,13 +307,31 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
                                            vk::apiVersionMinor(properties.apiVersion)));
     }
 
+    if (!supportsDeviceExtension(physicalDevice, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+    {
+        return std::unexpected(
+            std::format("{}: {} is unavailable", deviceName, VK_KHR_SWAPCHAIN_EXTENSION_NAME));
+    }
+    const bool supportsKhrMaintenance =
+        hasKhrSurfaceMaintenance1 &&
+        supportsDeviceExtension(physicalDevice, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+    const bool supportsExtMaintenance =
+        hasExtSurfaceMaintenance1 &&
+        supportsDeviceExtension(physicalDevice, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+    if (!supportsKhrMaintenance && !supportsExtMaintenance)
+    {
+        return std::unexpected(std::format(
+            "{}: neither compatible swapchain maintenance1 extension is available", deviceName));
+    }
+
     // Vulkan 1.3 mandates both features, so a conformant Vulkan 1.4 driver
     // reports them as supported. Keep the checks for defensive diagnostics with
     // preview drivers and to show that querying support is separate from enabling
     // the features during logical-device creation.
     const auto features =
         physicalDevice.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features,
-                                    vk::PhysicalDeviceVulkan14Features>();
+                                    vk::PhysicalDeviceVulkan14Features,
+                                    vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
     const auto& features13 = features.get<vk::PhysicalDeviceVulkan13Features>();
     if (features13.dynamicRendering != vk::True)
     {
@@ -313,6 +361,12 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
     {
         return std::unexpected(std::format("{}: maintenance5 is unavailable", deviceName));
     }
+    if (features.get<vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>().swapchainMaintenance1 !=
+        vk::True)
+    {
+        return std::unexpected(
+            std::format("{}: swapchain maintenance1 is unavailable", deviceName));
+    }
 
     // Finish the suitability check with the WSI capabilities required by
     // swapchain creation.
@@ -326,11 +380,6 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
     {
         return std::unexpected(
             std::format("{}: no queue family can present to this surface", deviceName));
-    }
-    if (!supportsSwapchain(physicalDevice))
-    {
-        return std::unexpected(
-            std::format("{}: {} is unavailable", deviceName, VK_KHR_SWAPCHAIN_EXTENSION_NAME));
     }
     if (physicalDevice.getSurfaceFormatsKHR(*surface).empty())
     {
@@ -347,6 +396,9 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
         .physicalDevice = physicalDevice,
         .graphicsQueueFamily = queueFamilies.graphics.value(),
         .presentQueueFamily = queueFamilies.present.value(),
+        .swapchainMaintenanceExtension = supportsKhrMaintenance
+                                             ? VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME
+                                             : VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
     };
 }
 
@@ -358,12 +410,16 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
  *
  * @param instance Vulkan instance used to enumerate physical devices.
  * @param surface Surface for which presentation support is required.
+ * @param hasKhrSurfaceMaintenance1 Whether the KHR instance dependency was enabled.
+ * @param hasExtSurfaceMaintenance1 Whether the EXT instance dependency was enabled.
  * @return The selected physical device and queue-family indices.
  * @throws std::runtime_error if no physical device is present or suitable.
  * @throws vk::SystemError if a Vulkan enumeration or capability query fails.
  */
 [[nodiscard]] DeviceSelection choosePhysicalDevice(const vk::raii::Instance& instance,
-                                                   const vk::raii::SurfaceKHR& surface)
+                                                   const vk::raii::SurfaceKHR& surface,
+                                                   bool hasKhrSurfaceMaintenance1,
+                                                   bool hasExtSurfaceMaintenance1)
 {
     std::optional<DeviceSelection> bestDevice;
     std::uint32_t bestScore = 0;
@@ -380,8 +436,8 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
     // suitable device is installed. Integrated and software devices remain valid.
     for (const vk::raii::PhysicalDevice& physicalDevice : physicalDevices)
     {
-        std::expected<DeviceSelection, std::string> candidate =
-            inspectDevice(physicalDevice, surface);
+        std::expected<DeviceSelection, std::string> candidate = inspectDevice(
+            physicalDevice, surface, hasKhrSurfaceMaintenance1, hasExtSurfaceMaintenance1);
         if (!candidate)
         {
             rejectionReasons.push_back(std::move(candidate.error()));
@@ -446,7 +502,10 @@ makeQueueCreateInfos(const DeviceSelection& selection)
 [[nodiscard]] vk::raii::Device createLogicalDeviceFor(const DeviceSelection& selection)
 {
     const std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos = makeQueueCreateInfos(selection);
-    constexpr std::array kRequiredDeviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    const std::array requiredDeviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        selection.swapchainMaintenanceExtension,
+    };
 
     // Querying support does not enable features. Enable exactly the Vulkan 1.3
     // and 1.4 features the tutorial uses, and no others.
@@ -467,6 +526,10 @@ makeQueueCreateInfos(const DeviceSelection& selection)
         .maintenance5 = vk::True,
         .pushDescriptor = vk::True,
     };
+    vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR enabledSwapchainMaintenance{
+        .swapchainMaintenance1 = vk::True,
+    };
+    enabledFeatures14.pNext = &enabledSwapchainMaintenance;
     vk::PhysicalDeviceVulkan13Features enabledFeatures13{
         .pNext = &enabledFeatures14,
         .synchronization2 = vk::True,
@@ -477,8 +540,8 @@ makeQueueCreateInfos(const DeviceSelection& selection)
         .pNext = &enabledFeatures13,
         .queueCreateInfoCount = static_cast<std::uint32_t>(queueCreateInfos.size()),
         .pQueueCreateInfos = queueCreateInfos.data(),
-        .enabledExtensionCount = static_cast<std::uint32_t>(kRequiredDeviceExtensions.size()),
-        .ppEnabledExtensionNames = kRequiredDeviceExtensions.data(),
+        .enabledExtensionCount = static_cast<std::uint32_t>(requiredDeviceExtensions.size()),
+        .ppEnabledExtensionNames = requiredDeviceExtensions.data(),
     };
     return {selection.physicalDevice, deviceCreateInfo};
 }
