@@ -1,8 +1,9 @@
 /**
  * @file
- * @brief Program entry point, tutorial scene construction, and platform event loop.
+ * @brief Program entry point, AnimatedCube integration scenarios, and platform event loop.
  */
 
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -19,6 +20,9 @@
 #include <fire_engine/content/scene_content.hpp>
 #include <fire_engine/core/log.hpp>
 #include <fire_engine/gltf/gltf_loader.hpp>
+#include <fire_engine/graphics/material.hpp>
+#include <fire_engine/graphics/render_object.hpp>
+#include <fire_engine/math/transform.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/renderer.hpp>
@@ -27,14 +31,80 @@
 namespace
 {
 /** @cond INTERNAL */
+/* --- File-local constants --- */
+
+/**
+ * @brief Deterministic step that samples both intervals and wraps AnimatedCube's two-second clip.
+ */
+constexpr float kSmokeAnimationStepSeconds = 0.8f;
+
 /* --- File-local types --- */
+
+/** @brief Device-level integration paths available to bounded CTest runs. */
+enum class SmokeScenario : std::uint8_t
+{
+    eNone,         ///< Interactive or explicitly frame-limited normal rendering.
+    eBasic,        ///< Load, animate, prepare, and draw the imported textured scene.
+    ePrepareTwice, ///< Change dependencies and replace compiled GPU resources.
+    eUntextured,   ///< Draw the imported mesh through the persistent white fallback texture.
+    eResize,       ///< Recreate presentation-dependent state after every presented frame.
+};
 
 /** @brief Command-line controls used by automated integration runs. */
 struct RunOptions
 {
     std::optional<std::uint64_t> frameLimit; ///< Presented frames requested before exit.
+    std::optional<std::uint64_t>
+        reprepareAfterFrame; ///< Presented-frame count that triggers repeated preparation.
+    SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
 };
+
+/** @brief Data defining one named device-level integration scenario. */
+struct SmokeDefinition
+{
+    std::string_view name;    ///< Command-line scenario name.
+    SmokeScenario scenario;   ///< Integration behavior selected by the name.
+    std::uint64_t frameLimit; ///< Presented frames required before exit.
+    std::optional<std::uint64_t> reprepareAfterFrame; ///< Optional repeated-preparation trigger.
+    bool recreateEveryFrame; ///< Whether to recreate after every presentation.
+};
+
+/** @brief Named integration-scenario metadata consumed by the command-line parser. */
+constexpr std::array<SmokeDefinition, 4> kSmokeDefinitions{{
+    {
+        .name = "basic",
+        .scenario = SmokeScenario::eBasic,
+        .frameLimit = 3,
+        .reprepareAfterFrame = std::nullopt,
+        .recreateEveryFrame = false,
+    },
+    {
+        .name = "prepare-twice",
+        .scenario = SmokeScenario::ePrepareTwice,
+        // After the first frame uses the original resources, three more frames
+        // exercise the replacement. That typically revisits every per-image
+        // presentation fence on the current three-image swapchain, although
+        // image count and acquisition order remain driver-selected.
+        .frameLimit = 4,
+        .reprepareAfterFrame = 1,
+        .recreateEveryFrame = false,
+    },
+    {
+        .name = "untextured",
+        .scenario = SmokeScenario::eUntextured,
+        .frameLimit = 3,
+        .reprepareAfterFrame = std::nullopt,
+        .recreateEveryFrame = false,
+    },
+    {
+        .name = "resize",
+        .scenario = SmokeScenario::eResize,
+        .frameLimit = 3,
+        .reprepareAfterFrame = std::nullopt,
+        .recreateEveryFrame = true,
+    },
+}};
 
 /* --- File-local function declarations --- */
 
@@ -46,6 +116,26 @@ struct RunOptions
  * @throws std::invalid_argument if the command line does not match the documented usage.
  */
 [[nodiscard]] RunOptions parseOptions(int argumentCount, char* arguments[]);
+
+/**
+ * @brief Adds an untextured render object that reuses AnimatedCube's imported mesh.
+ * @param content Loaded content whose asset catalog receives the material and relationship.
+ * @return ID of the newly added render object.
+ */
+[[nodiscard]] fire_engine::RenderObjectId
+addUntexturedRenderObject(fire_engine::SceneContent& content);
+
+/**
+ * @brief Replaces the imported hierarchy with one untextured use of its mesh.
+ * @param content Loaded AnimatedCube content whose mesh remains the geometry source.
+ */
+void selectUntexturedScene(fire_engine::SceneContent& content);
+
+/**
+ * @brief Adds an untextured instance so a second prepare changes assets and dependencies.
+ * @param content Loaded AnimatedCube content extended for the repeated-preparation smoke path.
+ */
+void addUntexturedInstance(fire_engine::SceneContent& content);
 
 /**
  * @brief Waits without spinning and retries recreation until the framebuffer is drawable.
@@ -79,6 +169,10 @@ try
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
         std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
 
+    if (options.smokeScenario == SmokeScenario::eUntextured)
+    {
+        selectUntexturedScene(content);
+    }
     content.scene.updateWorldTransforms();
     renderer.prepare(content.assets, content.scene);
 
@@ -92,9 +186,10 @@ try
                  rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode, rendererInfo.depthFormat,
                  rendererInfo.presentationSemaphoreCount);
-    std::println("AnimatedCube prepared: one indexed mesh and sampled base-color texture.");
+    std::println("AnimatedCube content prepared for drawing.");
 
     std::uint64_t renderedFrameCount = 0;
+    bool repeatedPreparationComplete = false;
     auto previousFrameTime = std::chrono::steady_clock::now();
     while (!window.shouldClose() &&
            (!options.frameLimit.has_value() || renderedFrameCount < *options.frameLimit))
@@ -107,7 +202,9 @@ try
 
         const auto currentFrameTime = std::chrono::steady_clock::now();
         const float elapsedSeconds =
-            std::chrono::duration<float>{currentFrameTime - previousFrameTime}.count();
+            options.smokeScenario == SmokeScenario::eNone
+                ? std::chrono::duration<float>{currentFrameTime - previousFrameTime}.count()
+                : kSmokeAnimationStepSeconds;
         previousFrameTime = currentFrameTime;
         fire_engine::advanceAnimations(content.scene, content.animations, elapsedSeconds);
         content.scene.updateWorldTransforms();
@@ -124,6 +221,15 @@ try
         if (result != fire_engine::RenderResult::eNotPresented)
         {
             ++renderedFrameCount;
+        }
+        if (!repeatedPreparationComplete && options.reprepareAfterFrame == renderedFrameCount)
+        {
+            // Replace compiled resources only after a submitted frame has used
+            // the original set, exercising prepare()'s retirement wait.
+            addUntexturedInstance(content);
+            content.scene.updateWorldTransforms();
+            renderer.prepare(content.assets, content.scene);
+            repeatedPreparationComplete = true;
         }
         if (result != fire_engine::RenderResult::ePresented || options.recreateEveryFrame)
         {
@@ -167,12 +273,34 @@ namespace
     {
         return {};
     }
-    if ((argumentCount != 3 && argumentCount != 4) ||
-        std::string_view{arguments[1]} != "--frames" ||
+    const std::string_view option{arguments[1]};
+    if (argumentCount == 3 && option == "--smoke")
+    {
+        const std::string_view scenario{arguments[2]};
+        for (const SmokeDefinition& definition : kSmokeDefinitions)
+        {
+            if (scenario == definition.name)
+            {
+                return {
+                    .frameLimit = definition.frameLimit,
+                    .reprepareAfterFrame = definition.reprepareAfterFrame,
+                    .smokeScenario = definition.scenario,
+                    .recreateEveryFrame = definition.recreateEveryFrame,
+                };
+            }
+        }
+        std::string requirement{"--smoke requires one of:"};
+        for (const SmokeDefinition& definition : kSmokeDefinitions)
+        {
+            requirement.append(" ").append(definition.name);
+        }
+        throw std::invalid_argument{requirement};
+    }
+    if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
-        throw std::invalid_argument(
-            "Usage: fireEngineTutorial [--frames positive-count [--recreate-every-frame]]");
+        throw std::invalid_argument("Usage: fireEngineTutorial [--frames positive-count "
+                                    "[--recreate-every-frame] | --smoke scenario]");
     }
 
     const std::string_view valueText{arguments[2]};
@@ -185,8 +313,47 @@ namespace
     }
     return {
         .frameLimit = value,
+        .reprepareAfterFrame = std::nullopt,
         .recreateEveryFrame = argumentCount == 4,
     };
+}
+
+[[nodiscard]] fire_engine::RenderObjectId
+addUntexturedRenderObject(fire_engine::SceneContent& content)
+{
+    if (content.assets.meshes().size() != 1)
+    {
+        throw std::logic_error("The AnimatedCube smoke fixture must supply exactly one mesh");
+    }
+    const fire_engine::MaterialId material = content.assets.addMaterial({
+        .baseColor = {.r = 0.25f, .g = 0.7f, .b = 1.0f, .a = 1.0f},
+        .baseColorTexture = std::nullopt,
+    });
+    return content.assets.addRenderObject({
+        .mesh = fire_engine::MeshId{.value = 0},
+        .material = material,
+    });
+}
+
+void selectUntexturedScene(fire_engine::SceneContent& content)
+{
+    const fire_engine::RenderObjectId object = addUntexturedRenderObject(content);
+    fire_engine::Scene scene;
+    scene.addRoot("Untextured AnimatedCube").component(object);
+    content.scene = std::move(scene);
+    // The replacement scene omits the imported nodes targeted by the clip, so
+    // it deliberately has no animation playback state.
+    content.animations.clear();
+}
+
+void addUntexturedInstance(fire_engine::SceneContent& content)
+{
+    const fire_engine::RenderObjectId object = addUntexturedRenderObject(content);
+    fire_engine::SceneNode& node = content.scene.addRoot("Untextured fallback instance");
+    node.localTransform(fire_engine::Transform{
+        .translation = {.x = 1.5f, .y = 0.0f, .z = 0.0f},
+    });
+    node.component(object);
 }
 
 [[nodiscard]] bool recreateWhenDrawable(fire_engine::Renderer& renderer,

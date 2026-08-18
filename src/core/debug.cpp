@@ -13,7 +13,7 @@ namespace
 /* --- File-local function declarations --- */
 
 VKAPI_ATTR vk::Bool32 VKAPI_CALL
-debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT, vk::DebugUtilsMessageTypeFlagsEXT,
+debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT,
               const vk::DebugUtilsMessengerCallbackDataEXT* callbackData, void*) noexcept;
 /** @endcond */
 } // namespace
@@ -101,16 +101,19 @@ namespace
  * Returning false tells Vulkan that the callback observed the message but does
  * not want to abort the API call that triggered it.
  *
+ * @param severity Whether Vulkan classified the message as a warning or error.
  * @param callbackData Validation message data supplied by Vulkan.
  * @return VK_FALSE so the API call that produced the message can continue.
  */
 VKAPI_ATTR vk::Bool32 VKAPI_CALL
-debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT, vk::DebugUtilsMessageTypeFlagsEXT,
+debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT,
               const vk::DebugUtilsMessengerCallbackDataEXT* callbackData, void*) noexcept
 {
     // log is noexcept because C++ exceptions must not escape through Vulkan's
     // C callback boundary.
-    fire_engine::log("Vulkan validation: {}", callbackData->pMessage);
+    const std::string_view severityName =
+        severity == vk::DebugUtilsMessageSeverityFlagBitsEXT::eError ? "error" : "warning";
+    fire_engine::log("Vulkan validation {}: {}", severityName, callbackData->pMessage);
     return VK_FALSE;
 }
 /** @endcond */

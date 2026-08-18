@@ -26,7 +26,7 @@ namespace
  * per module, and a pipeline stage selects one by name, so the two stages below
  * share a single file and a single read.
  */
-constexpr std::string_view kShaderPath = FIRE_ENGINE_SHADER_DIRECTORY "/triangle.spv";
+constexpr std::string_view kShaderPath = FIRE_ENGINE_SHADER_DIRECTORY "/scene.spv";
 
 // Slang rewrites an entry point to "main" when it compiles just one. The shader
 // target in CMakeLists.txt passes -fvk-use-entrypoint-name so the emitted SPIR-V
@@ -207,7 +207,7 @@ createPipelineLayout(const vk::raii::Device& device,
 }
 
 /**
- * @brief Creates the triangle pipeline without a render pass or shader modules.
+ * @brief Creates the scene pipeline without a render pass or shader modules.
  * @param device Logical device that owns the pipeline.
  * @param pipelineLayout Layout containing the push-descriptor set zero.
  * @param colorFormat Format of the dynamic-rendering color attachment.

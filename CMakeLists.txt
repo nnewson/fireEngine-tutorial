@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 # Declare the project metadata and tell CMake that this repository contains
 # C++ sources. No C compiler is needed for this tutorial.
 project(fire_engine_tutorial
-    VERSION 0.7.0
+    VERSION 0.8.0
     DESCRIPTION "A development tutorial to building your own fireEngine"
     LANGUAGES CXX
 )
@@ -59,6 +59,8 @@ add_library(fireEngineTutorialEngine STATIC
     src/platform/window.cpp
     src/render/allocator.cpp
     src/render/buffer.cpp
+    src/render/compiled_resources.cpp
+    src/render/depth_buffer.cpp
     src/render/device.cpp
     src/render/frame_in_flight.cpp
     src/render/image.cpp
@@ -152,8 +154,8 @@ target_link_libraries(fireEngineTutorialEngine
 # through vcpkg forces a recompile. It does not track Slang `import`ed or
 # `#include`d modules; add `-depfile` and DEPFILE once the shader spans more
 # than this one file.
-set(FIRE_ENGINE_SHADER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/triangle.slang")
-set(FIRE_ENGINE_SHADER_BINARY "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}/triangle.spv")
+set(FIRE_ENGINE_SHADER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/scene.slang")
+set(FIRE_ENGINE_SHADER_BINARY "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}/scene.spv")
 
 add_custom_command(
     OUTPUT "${FIRE_ENGINE_SHADER_BINARY}"
@@ -238,12 +240,63 @@ fire_engine_enable_warnings(fireEngineTutorialTests)
 include(Catch)
 catch_discover_tests(fireEngineTutorialTests)
 
-add_test(NAME fireEngineTutorialSmoke COMMAND fireEngineTutorial --frames 1)
-set_tests_properties(fireEngineTutorialSmoke PROPERTIES TIMEOUT 30)
-
-# Repeated replacement exercises oldSwapchain, presentation-fence retirement,
-# depth/pipeline recreation, and projection updates on a real Vulkan device.
-add_test(NAME fireEngineTutorialRecreationSmoke
-    COMMAND fireEngineTutorial --frames 3 --recreate-every-frame
+# These bounded scenarios retain the real application integration path. They
+# cover imported animation, changed preparation dependencies, the untextured
+# fallback descriptor, and presentation-resource replacement on a Vulkan device.
+add_test(NAME fireEngineTutorialAnimatedCubeSmoke
+    COMMAND fireEngineTutorial --smoke basic
 )
-set_tests_properties(fireEngineTutorialRecreationSmoke PROPERTIES TIMEOUT 30)
+add_test(NAME fireEngineTutorialPrepareTwiceSmoke
+    COMMAND fireEngineTutorial --smoke prepare-twice
+)
+add_test(NAME fireEngineTutorialUntexturedSmoke
+    COMMAND fireEngineTutorial --smoke untextured
+)
+add_test(NAME fireEngineTutorialRecreationSmoke
+    COMMAND fireEngineTutorial --smoke resize
+)
+
+# Synchronization validation is compiled into Debug configurations only. Keep
+# its device scenarios out of Release test lists instead of registering silent
+# duplicates with an environment variable that cannot enable the absent layer.
+set(FIRE_ENGINE_SYNC_VALIDATION_TESTS)
+set(FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS)
+if(CMAKE_CONFIGURATION_TYPES)
+    list(APPEND FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS CONFIGURATIONS Debug)
+endif()
+if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_test(NAME fireEngineTutorialPrepareTwiceSyncValidation
+        COMMAND fireEngineTutorial --smoke prepare-twice
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    add_test(NAME fireEngineTutorialRecreationSyncValidation
+        COMMAND fireEngineTutorial --smoke resize
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
+        fireEngineTutorialPrepareTwiceSyncValidation
+        fireEngineTutorialRecreationSyncValidation
+    )
+    set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
+        ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
+    )
+endif()
+
+set_tests_properties(
+    fireEngineTutorialAnimatedCubeSmoke
+    fireEngineTutorialPrepareTwiceSmoke
+    fireEngineTutorialUntexturedSmoke
+    fireEngineTutorialRecreationSmoke
+    ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
+    PROPERTIES
+        FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
+        RESOURCE_LOCK fireEngineTutorialVulkan
+        TIMEOUT 30
+)
+# Run one scenario away from the executable and copied assets to prove that the
+# compiled absolute asset and shader paths do not depend on the working folder.
+set(FIRE_ENGINE_SMOKE_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/smoke-work")
+file(MAKE_DIRECTORY "${FIRE_ENGINE_SMOKE_WORKING_DIRECTORY}")
+set_tests_properties(fireEngineTutorialAnimatedCubeSmoke PROPERTIES
+    WORKING_DIRECTORY "${FIRE_ENGINE_SMOKE_WORKING_DIRECTORY}"
+)
