@@ -46,9 +46,11 @@ enum class RenderResult : std::uint8_t
 /**
  * @brief Owns Vulkan and compiles Vulkan-free scene descriptions for drawing.
  *
- * The public surface intentionally contains no Vulkan types. Stable mesh and
- * material descriptions are uploaded explicitly by prepare(), while drawFrame()
- * consumes current scene transforms and records a fresh command buffer.
+ * The public surface intentionally contains no Vulkan types. Stable mesh,
+ * image, texture, and material descriptions are uploaded explicitly by
+ * prepare(), while drawFrame() consumes current scene transforms and records a
+ * fresh command buffer. Presentation resources can be replaced independently,
+ * preserving compiled scene resources across window changes.
  */
 class Renderer final
 {

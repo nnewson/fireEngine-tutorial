@@ -29,7 +29,7 @@ FrameInFlight::FrameInFlight(const Device& device, const MemoryAllocator& alloca
 
     // A primary command buffer can be submitted directly to the graphics
     // queue. Secondary command buffers are instead executed from a primary one
-    // and would add indirection that a single-triangle tutorial does not need.
+    // and would add indirection that this single-frame tutorial does not need.
     const vk::CommandBufferAllocateInfo commandBufferInfo{
         .commandPool = *commandPool_,
         .level = vk::CommandBufferLevel::ePrimary,

@@ -26,15 +26,22 @@ cmake --build --preset default
 Debug builds enable Vulkan validation when the standard validation layer is
 installed. Validation is disabled for every other build configuration.
 
-The interactive application renders until its window closes. A positive frame
-limit is available for automation and quick validation:
+The interactive application loads the committed Khronos AnimatedCube glTF,
+uploads its mesh and base-color texture, and plays its imported rotation
+animation until the window closes. The copied build-tree asset path is used for
+both direct runs and CTest, so execution never depends on the working directory.
+
+A positive frame limit remains available for quick validation:
 
 ```sh
 ./build/fireEngineTutorial --frames 1
 ```
 
-CTest runs the Vulkan-free Catch2 unit tests and uses that bounded mode for a
-one-frame integration test without waiting for user input:
+CTest runs the Vulkan-free Catch2 suite plus four bounded device scenarios:
+normal AnimatedCube animation, replacement after changed preparation inputs,
+an untextured fallback draw, and repeated swapchain recreation. The same paths
+can be selected directly with `--smoke basic`, `--smoke prepare-twice`,
+`--smoke untextured`, or `--smoke resize`.
 
 ```sh
 ctest --preset default
@@ -70,16 +77,21 @@ variable `PUBLISH_DOXYGEN` to `true`. Generated HTML remains under `build/` and
 is not checked into source control.
 
 The project builds a reusable engine library, a small event-loop executable, and
-a Catch2 test executable. `RenderAssets` owns the application's Vulkan-free
-`Mesh`, `Material`, and `RenderObject` descriptions; `Scene` owns only the
-`SceneNode` hierarchy that instances them. `Renderer::prepare()` validates those
-relationships through a cached `RenderPreparation` compiler and uploads each
-distinct indexed mesh required by the current `SceneDrawList`. Scene traversal
-hashes only ordered render-object dependencies, so transform changes reuse the
-same preparation plan while still producing current per-frame draws. Meanwhile,
-`Renderer::drawFrame()` traverses the current scene transforms and records the
-resulting draws. Device, allocator, swapchain, pipeline, and frame resources all
-remain hidden behind the renderer facade.
+a Catch2 test executable. `GltfLoader` produces format-neutral `SceneContent`:
+`RenderAssets` owns meshes, decoded images, textures, materials, and render-object
+relationships; `Scene` owns the hierarchy that instances them; and `Animation`
+stores reusable rotation channels. The committed sample and its CC0 attribution
+live under `assets/AnimatedCube`, so builds and tests require no network access.
+
+`Renderer::prepare()` validates those relationships through a cached
+`RenderPreparation` compiler and uploads only the resources selected by the
+current `SceneDrawList`. The internal `CompiledResources` subsystem owns mesh
+buffers, sampled images, samplers, the persistent white fallback texture, and
+setup-time upload machinery. Scene traversal hashes only ordered render-object
+dependencies, so animation-only transform changes reuse the same preparation
+plan while `Renderer::drawFrame()` records current transforms. Device,
+allocator, compiled resources, presentation state, and frame resources remain
+hidden behind the renderer facade.
 
 Mathematical coordinates use `Vec3` and `Vec4`, while graphics colors use the
 separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain
@@ -87,21 +99,23 @@ the tightly packed float layout required by the shader interface without giving
 color values unrelated vector operations.
 
 The executable links the Vulkan loader supplied by vcpkg and uses GLFW to create
-its window surface. Vulkan Memory Allocator owns host-writable vertex, index, and
-frame-uniform buffers. A Vulkan driver must still be installed on the machine,
-and must expose Vulkan 1.4, dynamic rendering, synchronization 2, push
-descriptors, maintenance5, and swapchain presentation support. Because Vulkan
-1.4 folded maintenance5 into the core API, pipeline creation reads the compiled
-SPIR-V directly and no `VkShaderModule` is ever created.
+its window surface. Vulkan Memory Allocator owns vertex, index, staging,
+frame-uniform, sampled-image, and depth-image allocations. A Vulkan driver must
+still be installed on the machine and expose Vulkan 1.4, dynamic rendering,
+synchronization 2, push descriptors, maintenance5, swapchain presentation, and
+the KHR or equivalent EXT swapchain-maintenance path used for presentation
+fences. Pipeline creation reads the compiled `scene.spv` directly through
+maintenance5, so no `VkShaderModule` is created.
 
 Each event-loop iteration waits for the previous frame, acquires a swapchain
 image, recycles the command pool, and records dynamic-rendering draws from the
-scene. The command buffer uses synchronization-2 barriers to discard the
-previous image contents, clear the color attachment, bind each compiled mesh's
-vertex and index buffers, push the node transform and material color, and
-transition the completed image for presentation. `submit2` orders rendering
-after acquisition, then the presentation queue waits for the semaphore belonging
-to that acquired image.
+scene. The command buffer uses synchronization-2 barriers to discard prior
+attachment contents, clear color and depth, bind compiled mesh and texture
+resources, push the node transform and material factor, and transition the
+completed image for presentation. The Slang scene shader applies the current
+view-projection and samples the glTF base-color texture. `submit2` orders
+rendering after acquisition, then the presentation queue waits for the semaphore
+belonging to that acquired image.
 
 Synchronization objects are split by what indexes them, which is the boundary
 that makes both swapchain recreation and multiple frames in flight tractable
@@ -111,8 +125,15 @@ CPU when the frame's submitted work has finished executing. `Swapchain` owns wha
 belongs to an image: one render-finished semaphore each, so presentation cannot
 still be waiting on a semaphore when a later frame signals it again. The frame
 fence cannot cover that case, because presentation runs after the submission the
-fence tracks. The event loop exercises both sides of that ownership boundary on
-every frame.
+fence tracks. A presentation fence supplied through swapchain maintenance proves
+when each presented image and semaphore can be retired.
+
+The swapchain, depth image, format-compatible pipeline, render-finished
+semaphores, and presentation fences form one replaceable `PresentationState`.
+Framebuffer callbacks request replacement after resize; zero-sized minimized
+windows wait for an event instead of spinning. Recreation passes the retired
+swapchain to Vulkan, updates the projection for the new extent, and leaves
+compiled meshes and textures intact.
 
 On macOS, this tutorial targets the KosmicKrisp technical preview from the
 [LunarG Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/1.4.357.0/mac/getting_started.html).
@@ -124,8 +145,6 @@ compilation likewise uses `slangc` supplied by vcpkg rather than an SDK tool in
 the environment.
 
 The executable does not directly link KosmicKrisp or enable the unsupported
-Vulkan portability extensions. It displays the colored triangle until the user
-closes the window. Swapchain recreation remains deliberately separate: if the
-surface becomes out of date or suboptimal, the loop waits for the device to
-become idle and exits cleanly so a later tutorial can introduce replacement of
-the swapchain and format-dependent pipeline together.
+Vulkan portability extensions. It displays the textured, depth-tested
+AnimatedCube and continues rendering across resize, minimize/restore, and
+out-of-date or suboptimal presentation results.
