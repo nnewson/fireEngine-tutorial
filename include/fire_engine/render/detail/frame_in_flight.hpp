@@ -34,15 +34,17 @@ static_assert(alignof(FrameUniforms) == 16);
 /**
  * @brief Owns the command and synchronization objects for one frame in flight.
  *
- * Everything here is indexed by frame rather than by swapchain image: one
- * primary command buffer that is recorded again for each frame, the semaphore
- * that orders image acquisition before rendering, the fence that tells the CPU
- * when the frame's submitted work has finished, and the uniform buffer whose
- * contents may be changed once that fence signals. Going from one frame in
- * flight to several means creating one instance per frame slot and cycling
- * through them, with nothing here needing to change. A std::array holds them
- * well: the count is known at compile time, and guaranteed copy elision
- * constructs the elements in place despite this type being immovable.
+ * The current serial implementation combines one submission slot with one
+ * recording context: a primary command buffer owns the frame boundaries, a
+ * secondary records the dynamic-rendering geometry pass, a semaphore orders
+ * image acquisition, a fence reports submission completion, and a uniform
+ * buffer holds values that may change after that fence signals.
+ *
+ * This combined ownership is deliberately interim. Submission synchronization
+ * and uniform storage are indexed by frame, while parallel recording requires
+ * command buffers and independently synchronized pools indexed by recording
+ * context. Separating those lifetimes does not change the secondary-buffer
+ * inheritance contract proved here.
  *
  * The matching render-finished semaphores are deliberately not here. Those are
  * indexed by swapchain image, so Swapchain owns them; see its documentation for
@@ -52,7 +54,7 @@ class FrameInFlight final
 {
 public:
     /**
-     * @brief Creates one command buffer and this frame's synchronization state.
+     * @brief Creates the command buffers and this frame's synchronization state.
      * @param device Logical device and graphics queue family used by this frame.
      * @param allocator VMA owner used for the frame's uniform buffer.
      * @param initialUniforms Initial shader values written before construction completes.
@@ -62,7 +64,7 @@ public:
     FrameInFlight(const Device& device, const MemoryAllocator& allocator,
                   const FrameUniforms& initialUniforms);
 
-    /** @brief Releases the uniform, synchronization objects, command buffer, and pool. */
+    /** @brief Releases the uniform, synchronization objects, command buffers, and pool. */
     ~FrameInFlight() = default;
 
     /// @brief Copy construction is disabled because Vulkan handles have unique ownership.
@@ -75,7 +77,7 @@ public:
     FrameInFlight& operator=(FrameInFlight&&) = delete;
 
     /**
-     * @brief Recycles the pool so its command buffer can be recorded again.
+     * @brief Recycles the pool so its command buffers can be recorded again.
      *
      * The previous submission must have completed first, which the frame loop
      * guarantees by waiting on frameFinished(). Resetting a pool whose commands
@@ -100,6 +102,12 @@ public:
      * @return Reference to the command buffer allocated from the graphics pool.
      */
     [[nodiscard]] const vk::raii::CommandBuffer& commandBuffer() const noexcept;
+
+    /**
+     * @brief Returns the secondary command buffer executed by the primary geometry pass.
+     * @return Reference to the command buffer allocated from the graphics pool.
+     */
+    [[nodiscard]] const vk::raii::CommandBuffer& secondaryCommandBuffer() const noexcept;
 
     /**
      * @brief Returns the semaphore signaled when a swapchain image is acquired.
@@ -141,8 +149,9 @@ private:
     // freed before that pool is destroyed.
     vk::raii::CommandPool commandPool_{nullptr};       ///< Graphics pool recycled by resetCommands.
     vk::raii::CommandBuffers commandBuffers_{nullptr}; ///< Contains one primary command buffer.
-    vk::raii::Semaphore imageAvailable_{nullptr};      ///< Signals swapchain-image acquisition.
-    vk::raii::Fence frameFinished_{nullptr};           ///< Signals completion of submitted work.
+    vk::raii::CommandBuffers secondaryCommandBuffers_{nullptr}; ///< Contains one secondary buffer.
+    vk::raii::Semaphore imageAvailable_{nullptr}; ///< Signals swapchain-image acquisition.
+    vk::raii::Fence frameFinished_{nullptr};      ///< Signals completion of submitted work.
 };
 /** @endcond */
 } // namespace fire_engine::detail

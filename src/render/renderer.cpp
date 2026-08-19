@@ -169,12 +169,18 @@ private:
     void transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const;
 
     /**
-     * @brief Begins dynamic rendering and binds state shared by every draw.
-     * @param commandBuffer Command buffer receiving rendering and binding commands.
+     * @brief Begins dynamic rendering whose contents come from secondary command buffers.
+     * @param commandBuffer Primary command buffer receiving the rendering boundary.
      * @param imageIndex Acquired swapchain-image index used as the color attachment.
      */
     void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer,
                            std::uint32_t imageIndex) const;
+
+    /**
+     * @brief Records inherited state shared by every draw in the secondary command buffer.
+     * @param commandBuffer Secondary command buffer continuing the dynamic-rendering pass.
+     */
+    void bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const;
 
     /**
      * @brief Records the mesh bindings, constants, and indexed draw for each item.
@@ -477,19 +483,41 @@ RendererInfo Renderer::Impl::info() const
 void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
                                     const std::vector<DrawItem>& drawItems) const
 {
-    const vk::raii::CommandBuffer& commandBuffer = frame_.commandBuffer();
-    const vk::CommandBufferBeginInfo beginInfo{
+    const vk::raii::CommandBuffer& secondaryCommandBuffer = frame_.secondaryCommandBuffer();
+    const vk::Format colorFormat = presentation_->swapchain().imageFormat();
+    const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &colorFormat,
+        .depthAttachmentFormat = presentation_->depthBuffer().format(),
+        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+    };
+    const vk::CommandBufferInheritanceInfo inheritanceInfo{
+        .pNext = &renderingInheritance,
+    };
+    const vk::CommandBufferBeginInfo secondaryBeginInfo{
+        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit |
+                 vk::CommandBufferUsageFlagBits::eRenderPassContinue,
+        .pInheritanceInfo = &inheritanceInfo,
+    };
+    secondaryCommandBuffer.begin(secondaryBeginInfo);
+    bindGeometryState(secondaryCommandBuffer);
+    recordDraws(secondaryCommandBuffer, drawItems);
+    secondaryCommandBuffer.end();
+
+    const vk::raii::CommandBuffer& primaryCommandBuffer = frame_.commandBuffer();
+    const vk::CommandBufferBeginInfo primaryBeginInfo{
         .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
     };
-    commandBuffer.begin(beginInfo);
+    primaryCommandBuffer.begin(primaryBeginInfo);
 
-    transitionToAttachment(commandBuffer, imageIndex);
-    transitionDepthToAttachment(commandBuffer);
-    beginGeometryPass(commandBuffer, imageIndex);
-    recordDraws(commandBuffer, drawItems);
-    commandBuffer.endRendering();
-    transitionToPresent(commandBuffer, imageIndex);
-    commandBuffer.end();
+    transitionToAttachment(primaryCommandBuffer, imageIndex);
+    transitionDepthToAttachment(primaryCommandBuffer);
+    beginGeometryPass(primaryCommandBuffer, imageIndex);
+    const std::array secondaryCommands{*secondaryCommandBuffer};
+    primaryCommandBuffer.executeCommands(secondaryCommands);
+    primaryCommandBuffer.endRendering();
+    transitionToPresent(primaryCommandBuffer, imageIndex);
+    primaryCommandBuffer.end();
 }
 
 void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const
@@ -566,6 +594,7 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .clearValue = depthClear,
     };
     const vk::RenderingInfo renderingInfo{
+        .flags = vk::RenderingFlagBits::eContentsSecondaryCommandBuffers,
         .renderArea =
             {
                 .offset = {.x = 0, .y = 0},
@@ -577,6 +606,10 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .pDepthAttachment = &depthAttachment,
     };
     commandBuffer.beginRendering(renderingInfo);
+}
+
+void Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const
+{
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                *presentation_->pipeline().pipeline());
 

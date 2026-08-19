@@ -27,15 +27,24 @@ FrameInFlight::FrameInFlight(const Device& device, const MemoryAllocator& alloca
     };
     commandPool_ = vk::raii::CommandPool{device.logicalDevice(), commandPoolInfo};
 
-    // A primary command buffer can be submitted directly to the graphics
-    // queue. Secondary command buffers are instead executed from a primary one
-    // and would add indirection that this single-frame tutorial does not need.
+    // The primary buffer is submitted directly and owns the frame boundaries.
+    // The secondary is the independently recordable geometry unit needed for
+    // parallel recording under dynamic rendering. Both share this pool only
+    // while recording remains serial; each future recording context must own
+    // its own pool because Vulkan externally synchronizes pool access.
     const vk::CommandBufferAllocateInfo commandBufferInfo{
         .commandPool = *commandPool_,
         .level = vk::CommandBufferLevel::ePrimary,
         .commandBufferCount = 1,
     };
     commandBuffers_ = vk::raii::CommandBuffers{device.logicalDevice(), commandBufferInfo};
+    const vk::CommandBufferAllocateInfo secondaryCommandBufferInfo{
+        .commandPool = *commandPool_,
+        .level = vk::CommandBufferLevel::eSecondary,
+        .commandBufferCount = 1,
+    };
+    secondaryCommandBuffers_ =
+        vk::raii::CommandBuffers{device.logicalDevice(), secondaryCommandBufferInfo};
 
     // With no VkSemaphoreTypeCreateInfo in its pNext chain, Vulkan creates a
     // binary semaphore. Swapchain acquisition and presentation both require
@@ -68,6 +77,11 @@ const vk::raii::CommandBuffer& FrameInFlight::commandBuffer() const noexcept
     // Successful allocation returns exactly the one command buffer requested
     // above, so this container is never empty.
     return commandBuffers_.front();
+}
+
+const vk::raii::CommandBuffer& FrameInFlight::secondaryCommandBuffer() const noexcept
+{
+    return secondaryCommandBuffers_.front();
 }
 
 const vk::raii::Semaphore& FrameInFlight::imageAvailable() const noexcept
