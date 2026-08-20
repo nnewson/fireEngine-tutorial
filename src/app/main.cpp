@@ -1,7 +1,9 @@
 /**
  * @file
- * @brief Program entry point, AnimatedCube integration scenarios, and platform event loop.
+ * @brief Program entry point, benchmark, AnimatedCube scenarios, and platform event loop.
  */
+
+#include "benchmark.hpp"
 
 #include <array>
 #include <charconv>
@@ -9,6 +11,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -56,6 +59,7 @@ struct RunOptions
     std::optional<std::uint64_t> frameLimit; ///< Presented frames requested before exit.
     std::optional<std::uint64_t>
         reprepareAfterFrame; ///< Presented-frame count that triggers repeated preparation.
+    std::optional<std::size_t> benchmarkInstanceCount;  ///< Repeated cubes in benchmark mode.
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
 };
@@ -109,13 +113,23 @@ constexpr std::array<SmokeDefinition, 4> kSmokeDefinitions{{
 /* --- File-local function declarations --- */
 
 /**
- * @brief Reads the optional frame limit and presentation-recreation smoke mode.
+ * @brief Reads the optional benchmark, frame limit, and integration-scenario mode.
  * @param argumentCount Number of command-line arguments including the executable.
  * @param arguments Null-terminated argument strings supplied by the host environment.
  * @return Parsed controls, or interactive defaults when no arguments are supplied.
  * @throws std::invalid_argument if the command line does not match the documented usage.
  */
 [[nodiscard]] RunOptions parseOptions(int argumentCount, char* arguments[]);
+
+/**
+ * @brief Parses a positive integer used by one command-line option.
+ * @param text Complete argument text to parse.
+ * @param optionName Option named in the failure diagnostic.
+ * @return Parsed positive value.
+ * @throws std::invalid_argument if text is not a positive integer.
+ */
+[[nodiscard]] std::uint64_t parsePositiveInteger(std::string_view text,
+                                                 std::string_view optionName);
 
 /**
  * @brief Adds an untextured render object that reuses AnimatedCube's imported mesh.
@@ -169,7 +183,12 @@ try
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
         std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
 
-    if (options.smokeScenario == SmokeScenario::eUntextured)
+    std::optional<fire_engine::tutorial::BenchmarkRun> benchmark;
+    if (options.benchmarkInstanceCount.has_value())
+    {
+        benchmark.emplace(content, *options.benchmarkInstanceCount);
+    }
+    else if (options.smokeScenario == SmokeScenario::eUntextured)
     {
         selectUntexturedScene(content);
     }
@@ -178,6 +197,7 @@ try
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
     std::println("Selected Vulkan 1.4 device: {}", rendererInfo.deviceName);
+    std::println("Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("Graphics queue family: {}", rendererInfo.graphicsQueueFamily);
     std::println("Present queue family: {}", rendererInfo.presentQueueFamily);
     std::println("Logical device, queues, and VMA allocator created.");
@@ -186,13 +206,21 @@ try
                  rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode, rendererInfo.depthFormat,
                  rendererInfo.presentationSemaphoreCount);
-    std::println("AnimatedCube content prepared for drawing.");
+    std::println("{} content prepared for drawing.",
+                 benchmark.has_value() ? "Synthetic benchmark" : "AnimatedCube");
 
     std::uint64_t renderedFrameCount = 0;
     bool repeatedPreparationComplete = false;
     auto previousFrameTime = std::chrono::steady_clock::now();
-    while (!window.shouldClose() &&
-           (!options.frameLimit.has_value() || renderedFrameCount < *options.frameLimit))
+    const auto runIncomplete = [&]()
+    {
+        if (benchmark.has_value())
+        {
+            return !benchmark->complete();
+        }
+        return !options.frameLimit.has_value() || renderedFrameCount < *options.frameLimit;
+    };
+    while (!window.shouldClose() && runIncomplete())
     {
         window.pollEvents();
         if (window.shouldClose())
@@ -200,14 +228,26 @@ try
             break;
         }
 
-        const auto currentFrameTime = std::chrono::steady_clock::now();
-        const float elapsedSeconds =
-            options.smokeScenario == SmokeScenario::eNone
-                ? std::chrono::duration<float>{currentFrameTime - previousFrameTime}.count()
-                : kSmokeAnimationStepSeconds;
-        previousFrameTime = currentFrameTime;
-        fire_engine::advanceAnimations(content.scene, content.animations, elapsedSeconds);
-        content.scene.updateWorldTransforms();
+        std::chrono::nanoseconds transformUpdate{};
+        if (benchmark.has_value())
+        {
+            benchmark->advanceScene(content.scene);
+            const auto transformStart = std::chrono::steady_clock::now();
+            content.scene.updateWorldTransforms();
+            transformUpdate = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - transformStart);
+        }
+        else
+        {
+            const auto currentFrameTime = std::chrono::steady_clock::now();
+            const float elapsedSeconds =
+                options.smokeScenario == SmokeScenario::eNone
+                    ? std::chrono::duration<float>{currentFrameTime - previousFrameTime}.count()
+                    : kSmokeAnimationStepSeconds;
+            previousFrameTime = currentFrameTime;
+            fire_engine::advanceAnimations(content.scene, content.animations, elapsedSeconds);
+            content.scene.updateWorldTransforms();
+        }
 
         if (window.consumeFramebufferResize())
         {
@@ -217,7 +257,13 @@ try
             }
         }
 
-        const fire_engine::RenderResult result = renderer.drawFrame(content.scene);
+        fire_engine::RendererCpuTimings rendererTimings;
+        const fire_engine::RenderResult result =
+            renderer.drawFrame(content.scene, benchmark.has_value() ? &rendererTimings : nullptr);
+        if (benchmark.has_value())
+        {
+            benchmark->record(result, transformUpdate, rendererTimings);
+        }
         if (result != fire_engine::RenderResult::eNotPresented)
         {
             ++renderedFrameCount;
@@ -249,7 +295,15 @@ try
     // Together they make submitted and presentation resources safe to destroy.
     renderer.waitIdle();
 
-    if (options.frameLimit.has_value() && renderedFrameCount != *options.frameLimit)
+    if (benchmark.has_value())
+    {
+        if (!benchmark->complete())
+        {
+            throw std::runtime_error("The benchmark ended before collecting every measured frame");
+        }
+        benchmark->printReport(rendererInfo);
+    }
+    else if (options.frameLimit.has_value() && renderedFrameCount != *options.frameLimit)
     {
         throw std::runtime_error("The smoke test ended before presenting every requested frame");
     }
@@ -284,6 +338,7 @@ namespace
                 return {
                     .frameLimit = definition.frameLimit,
                     .reprepareAfterFrame = definition.reprepareAfterFrame,
+                    .benchmarkInstanceCount = std::nullopt,
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
                 };
@@ -296,26 +351,48 @@ namespace
         }
         throw std::invalid_argument{requirement};
     }
+    if (argumentCount == 3 && option == "--benchmark")
+    {
+        const std::uint64_t instanceCount = parsePositiveInteger(arguments[2], "--benchmark");
+        if (instanceCount > std::numeric_limits<std::size_t>::max())
+        {
+            throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
+        }
+        return {
+            .frameLimit = std::nullopt,
+            .reprepareAfterFrame = std::nullopt,
+            .benchmarkInstanceCount = static_cast<std::size_t>(instanceCount),
+            .smokeScenario = SmokeScenario::eNone,
+            .recreateEveryFrame = false,
+        };
+    }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
-        throw std::invalid_argument("Usage: fireEngineTutorial [--frames positive-count "
-                                    "[--recreate-every-frame] | --smoke scenario]");
+        throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances | "
+                                    "--frames positive-count [--recreate-every-frame] | "
+                                    "--smoke scenario]");
     }
 
-    const std::string_view valueText{arguments[2]};
-    std::uint64_t value = 0;
-    const auto [end, error] =
-        std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
-    if (error != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
-    {
-        throw std::invalid_argument("--frames requires a positive integer");
-    }
+    const std::uint64_t value = parsePositiveInteger(arguments[2], "--frames");
     return {
         .frameLimit = value,
         .reprepareAfterFrame = std::nullopt,
+        .benchmarkInstanceCount = std::nullopt,
+        .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
     };
+}
+
+[[nodiscard]] std::uint64_t parsePositiveInteger(std::string_view text, std::string_view optionName)
+{
+    std::uint64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value == 0)
+    {
+        throw std::invalid_argument(std::string{optionName} + " requires a positive integer");
+    }
+    return value;
 }
 
 [[nodiscard]] fire_engine::RenderObjectId

@@ -19,6 +19,7 @@
 #include <fire_engine/scene/scene.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -37,6 +38,40 @@ namespace
 {
 /** @cond INTERNAL */
 /* --- File-local classes --- */
+
+/** @brief Accumulates one optional host phase without adding renderer state. */
+class CpuPhaseTimer final
+{
+public:
+    /** @brief Starts timing when output is non-null. @param output Optional phase accumulator. */
+    explicit CpuPhaseTimer(std::chrono::nanoseconds* output) noexcept
+        : output_{output}
+    {
+        if (output_ != nullptr)
+        {
+            start_ = std::chrono::steady_clock::now();
+        }
+    }
+
+    /** @brief Adds elapsed host time to the supplied accumulator. */
+    ~CpuPhaseTimer() noexcept
+    {
+        if (output_ != nullptr)
+        {
+            *output_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start_);
+        }
+    }
+
+    CpuPhaseTimer(const CpuPhaseTimer&) = delete;
+    CpuPhaseTimer& operator=(const CpuPhaseTimer&) = delete;
+    CpuPhaseTimer(CpuPhaseTimer&&) = delete;
+    CpuPhaseTimer& operator=(CpuPhaseTimer&&) = delete;
+
+private:
+    std::chrono::nanoseconds* output_ = nullptr;    ///< Optional duration receiving elapsed time.
+    std::chrono::steady_clock::time_point start_{}; ///< Start sampled only when output exists.
+};
 
 /** @brief Replaceable swapchain, attachments, pipeline, and presentation completion state. */
 class PresentationState final
@@ -129,9 +164,10 @@ public:
     /**
      * @brief Records, submits, and presents the current scene once.
      * @param scene Prepared scene supplying current draw items and transforms.
+     * @param timings Optional output populated with host timings for this attempt.
      * @return Presentation outcome for the acquired swapchain image.
      */
-    [[nodiscard]] RenderResult drawFrame(const Scene& scene);
+    [[nodiscard]] RenderResult drawFrame(const Scene& scene, RendererCpuTimings* timings);
 
     /**
      * @brief Replaces the complete presentation-dependent ownership group.
@@ -151,8 +187,10 @@ private:
      * @brief Records the complete command-buffer sequence for one acquired image.
      * @param imageIndex Acquired swapchain-image index.
      * @param drawItems Current ordered scene draws.
+     * @param timings Optional output receiving the serial and secondary recording phases.
      */
-    void recordCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems) const;
+    void recordCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems,
+                        RendererCpuTimings* timings) const;
 
     /**
      * @brief Orders acquisition before the transition to color-attachment use.
@@ -234,9 +272,9 @@ void Renderer::prepare(const RenderAssets& assets, const Scene& scene)
     implementation_->prepare(assets, scene);
 }
 
-RenderResult Renderer::drawFrame(const Scene& scene)
+RenderResult Renderer::drawFrame(const Scene& scene, RendererCpuTimings* timings)
 {
-    return implementation_->drawFrame(scene);
+    return implementation_->drawFrame(scene, timings);
 }
 
 bool Renderer::recreatePresentation(const Window& window)
@@ -329,26 +367,41 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
     compiledGeneration_ = renderPreparation_.generation();
 }
 
-RenderResult Renderer::Impl::drawFrame(const Scene& scene)
+RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* timings)
 {
+    if (timings != nullptr)
+    {
+        *timings = {};
+    }
     if (!compiledGeneration_.has_value())
     {
         throw std::logic_error("Renderer::prepare must be called before drawFrame");
     }
     // Build and validate the transient draw list before acquiring an image.
     // A failure therefore cannot abandon a signaled acquisition semaphore.
-    const SceneDrawList drawList = scene.buildDrawItems();
-    for (const DrawItem& item : drawList.drawItems)
+    const SceneDrawList drawList = [&]()
     {
-        if (!compiledResources_.contains(item.renderObject))
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListBuild};
+        return scene.buildDrawItems();
+    }();
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListValidation};
+        for (const DrawItem& item : drawList.drawItems)
         {
-            throw std::logic_error("Scene refers to an object not compiled by prepare");
+            if (!compiledResources_.contains(item.renderObject))
+            {
+                throw std::logic_error("Scene refers to an object not compiled by prepare");
+            }
         }
     }
 
     const vk::raii::Device& logicalDevice = device_.logicalDevice();
-    const vk::Result fenceResult = logicalDevice.waitForFences(
-        *frame_.frameFinished(), vk::True, std::numeric_limits<std::uint64_t>::max());
+    vk::Result fenceResult = vk::Result::eSuccess;
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameFenceWait};
+        fenceResult = logicalDevice.waitForFences(*frame_.frameFinished(), vk::True,
+                                                  std::numeric_limits<std::uint64_t>::max());
+    }
     if (fenceResult != vk::Result::eSuccess)
     {
         throw vk::SystemError{vk::make_error_code(fenceResult), "Waiting for the frame fence"};
@@ -358,6 +411,7 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
     bool swapchainIsSuboptimal = false;
     try
     {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->imageAcquisitionWait};
         const auto [result, acquiredImageIndex] =
             presentation_->swapchain().handle().acquireNextImage(
                 std::numeric_limits<std::uint64_t>::max(), *frame_.imageAvailable());
@@ -371,34 +425,43 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
         return RenderResult::eNotPresented;
     }
 
-    presentation_->preparePresentFence(imageIndex);
-    frame_.resetCommands();
-    recordCommands(imageIndex, drawList.drawItems);
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->presentationFenceWait};
+        presentation_->preparePresentFence(imageIndex);
+    }
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->commandPoolReset};
+        frame_.resetCommands();
+    }
+    recordCommands(imageIndex, drawList.drawItems, timings);
 
     // Nothing intentionally abandons the frame after this reset: a
     // successful submission will signal the fence, while errors unwind.
-    logicalDevice.resetFences(*frame_.frameFinished());
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->queueSubmission};
+        logicalDevice.resetFences(*frame_.frameFinished());
 
-    const vk::SemaphoreSubmitInfo waitInfo{
-        .semaphore = *frame_.imageAvailable(),
-        .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-    };
-    const vk::CommandBufferSubmitInfo commandInfo{
-        .commandBuffer = *frame_.commandBuffer(),
-    };
-    const vk::SemaphoreSubmitInfo signalInfo{
-        .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
-        .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-    };
-    const vk::SubmitInfo2 submitInfo{
-        .waitSemaphoreInfoCount = 1,
-        .pWaitSemaphoreInfos = &waitInfo,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &commandInfo,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos = &signalInfo,
-    };
-    device_.graphicsQueue().submit2(submitInfo, *frame_.frameFinished());
+        const vk::SemaphoreSubmitInfo waitInfo{
+            .semaphore = *frame_.imageAvailable(),
+            .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        };
+        const vk::CommandBufferSubmitInfo commandInfo{
+            .commandBuffer = *frame_.commandBuffer(),
+        };
+        const vk::SemaphoreSubmitInfo signalInfo{
+            .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
+            .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        };
+        const vk::SubmitInfo2 submitInfo{
+            .waitSemaphoreInfoCount = 1,
+            .pWaitSemaphoreInfos = &waitInfo,
+            .commandBufferInfoCount = 1,
+            .pCommandBufferInfos = &commandInfo,
+            .signalSemaphoreInfoCount = 1,
+            .pSignalSemaphoreInfos = &signalInfo,
+        };
+        device_.graphicsQueue().submit2(submitInfo, *frame_.frameFinished());
+    }
     workMayBePending_ = true;
 
     const vk::Semaphore renderFinished = *presentation_->swapchain().renderFinished(imageIndex);
@@ -419,6 +482,7 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene)
 
     try
     {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->presentation};
         if (device_.presentQueue().presentKHR(presentInfo) == vk::Result::eSuboptimalKHR)
         {
             swapchainIsSuboptimal = true;
@@ -468,6 +532,8 @@ RendererInfo Renderer::Impl::info() const
 {
     return {
         .deviceName = device_.name(),
+        .driverName = device_.driverName(),
+        .driverInfo = device_.driverInfo(),
         .graphicsQueueFamily = device_.graphicsQueueFamily(),
         .presentQueueFamily = device_.presentQueueFamily(),
         .swapchainImageCount = presentation_->swapchain().imageCount(),
@@ -481,43 +547,56 @@ RendererInfo Renderer::Impl::info() const
 }
 
 void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
-                                    const std::vector<DrawItem>& drawItems) const
+                                    const std::vector<DrawItem>& drawItems,
+                                    RendererCpuTimings* timings) const
 {
     const vk::raii::CommandBuffer& secondaryCommandBuffer = frame_.secondaryCommandBuffer();
-    const vk::Format colorFormat = presentation_->swapchain().imageFormat();
-    const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
-        .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &colorFormat,
-        .depthAttachmentFormat = presentation_->depthBuffer().format(),
-        .rasterizationSamples = vk::SampleCountFlagBits::e1,
-    };
-    const vk::CommandBufferInheritanceInfo inheritanceInfo{
-        .pNext = &renderingInheritance,
-    };
-    const vk::CommandBufferBeginInfo secondaryBeginInfo{
-        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit |
-                 vk::CommandBufferUsageFlagBits::eRenderPassContinue,
-        .pInheritanceInfo = &inheritanceInfo,
-    };
-    secondaryCommandBuffer.begin(secondaryBeginInfo);
-    bindGeometryState(secondaryCommandBuffer);
-    recordDraws(secondaryCommandBuffer, drawItems);
-    secondaryCommandBuffer.end();
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandRecording};
+        const vk::Format colorFormat = presentation_->swapchain().imageFormat();
+        const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &colorFormat,
+            .depthAttachmentFormat = presentation_->depthBuffer().format(),
+            .rasterizationSamples = vk::SampleCountFlagBits::e1,
+        };
+        const vk::CommandBufferInheritanceInfo inheritanceInfo{
+            .pNext = &renderingInheritance,
+        };
+        const vk::CommandBufferBeginInfo secondaryBeginInfo{
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit |
+                     vk::CommandBufferUsageFlagBits::eRenderPassContinue,
+            .pInheritanceInfo = &inheritanceInfo,
+        };
+        secondaryCommandBuffer.begin(secondaryBeginInfo);
+        bindGeometryState(secondaryCommandBuffer);
+        recordDraws(secondaryCommandBuffer, drawItems);
+        secondaryCommandBuffer.end();
+    }
 
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame_.commandBuffer();
-    const vk::CommandBufferBeginInfo primaryBeginInfo{
-        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
-    };
-    primaryCommandBuffer.begin(primaryBeginInfo);
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
+        const vk::CommandBufferBeginInfo primaryBeginInfo{
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        };
+        primaryCommandBuffer.begin(primaryBeginInfo);
 
-    transitionToAttachment(primaryCommandBuffer, imageIndex);
-    transitionDepthToAttachment(primaryCommandBuffer);
-    beginGeometryPass(primaryCommandBuffer, imageIndex);
-    const std::array secondaryCommands{*secondaryCommandBuffer};
-    primaryCommandBuffer.executeCommands(secondaryCommands);
-    primaryCommandBuffer.endRendering();
-    transitionToPresent(primaryCommandBuffer, imageIndex);
-    primaryCommandBuffer.end();
+        transitionToAttachment(primaryCommandBuffer, imageIndex);
+        transitionDepthToAttachment(primaryCommandBuffer);
+        beginGeometryPass(primaryCommandBuffer, imageIndex);
+    }
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandExecution};
+        const std::array secondaryCommands{*secondaryCommandBuffer};
+        primaryCommandBuffer.executeCommands(secondaryCommands);
+    }
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
+        primaryCommandBuffer.endRendering();
+        transitionToPresent(primaryCommandBuffer, imageIndex);
+        primaryCommandBuffer.end();
+    }
 }
 
 void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const

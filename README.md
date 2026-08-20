@@ -37,15 +37,42 @@ A positive frame limit remains available for quick validation:
 ./build/fireEngineTutorial --frames 1
 ```
 
-CTest runs the Vulkan-free Catch2 suite plus four bounded device scenarios:
+CTest runs the Vulkan-free Catch2 suite plus five bounded device scenarios:
 normal AnimatedCube animation, replacement after changed preparation inputs,
-an untextured fallback draw, and repeated swapchain recreation. The same paths
-can be selected directly with `--smoke basic`, `--smoke prepare-twice`,
-`--smoke untextured`, or `--smoke resize`.
+an untextured fallback draw, repeated swapchain recreation, and a one-instance
+benchmark correctness run. The four smoke paths can be selected directly with
+`--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`, or
+`--smoke resize`.
 
 ```sh
 ctest --preset default
 ```
+
+## Performance benchmark
+
+The executable can replace AnimatedCube's imported hierarchy with a
+deterministic synthetic scene containing any positive number of instances of
+its cube geometry:
+
+```sh
+./build/fireEngineTutorial --benchmark 10000
+```
+
+After 16 warm-up frames it measures 64 cleanly presented frames and reports
+mean, median, and 95th-percentile CPU durations for transform resolution,
+draw-list construction, draw-list validation, command-pool reset, primary and
+secondary recording, submission, and presentation waits. It also reports the
+measured share that secondary-recording workers could divide and ideal speedup
+ceilings when only that measured region divides. The current combined command
+pool prevents assigning its reset cost to primary or worker recording until
+those owners are separated. Frames affected by out-of-date or suboptimal
+presentation are excluded from the measured sample set.
+
+Use a Release build for performance results. Values are comparable only for
+the same workload, build configuration, machine, and Vulkan driver; hosted CI
+and software-renderer timings are not performance gates. The one-instance
+CTest scenario checks only that scene generation, measurement, aggregation,
+reporting, and Vulkan validation complete successfully.
 
 ## Documentation
 
