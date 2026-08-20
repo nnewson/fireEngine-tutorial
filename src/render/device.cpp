@@ -104,6 +104,26 @@ std::string Device::name() const
     return physicalDevice_.getProperties().deviceName.data();
 }
 
+std::string Device::driverName() const
+{
+    vk::PhysicalDeviceDriverProperties driverProperties;
+    vk::PhysicalDeviceProperties2 properties{
+        .pNext = &driverProperties,
+    };
+    physicalDevice_.getProperties2(&properties);
+    return driverProperties.driverName.data();
+}
+
+std::string Device::driverInfo() const
+{
+    vk::PhysicalDeviceDriverProperties driverProperties;
+    vk::PhysicalDeviceProperties2 properties{
+        .pNext = &driverProperties,
+    };
+    physicalDevice_.getProperties2(&properties);
+    return driverProperties.driverInfo.data();
+}
+
 const vk::raii::Instance& Device::instance() const noexcept
 {
     return instance_;

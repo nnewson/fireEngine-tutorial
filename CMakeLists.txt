@@ -77,7 +77,10 @@ target_include_directories(fireEngineTutorialEngine PUBLIC include)
 target_include_directories(fireEngineTutorialEngine PRIVATE ${Stb_INCLUDE_DIR})
 
 # The application owns only its event loop and high-level scene construction.
-add_executable(fireEngineTutorial src/main.cpp)
+add_executable(fireEngineTutorial
+    src/app/benchmark.cpp
+    src/app/main.cpp
+)
 target_link_libraries(fireEngineTutorial PRIVATE fireEngineTutorialEngine)
 
 # State the language requirement on every first-party target so each remains
@@ -114,6 +117,7 @@ target_compile_definitions(fireEngineTutorialEngine PRIVATE
 set(FIRE_ENGINE_ASSET_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/assets")
 target_compile_definitions(fireEngineTutorial PRIVATE
     FIRE_ENGINE_ASSET_DIRECTORY="${FIRE_ENGINE_ASSET_OUTPUT_DIRECTORY}"
+    FIRE_ENGINE_BUILD_CONFIGURATION="$<CONFIG>"
 )
 
 # Validation is most useful while developing and has a runtime cost, so it is
@@ -255,6 +259,9 @@ add_test(NAME fireEngineTutorialUntexturedSmoke
 add_test(NAME fireEngineTutorialRecreationSmoke
     COMMAND fireEngineTutorial --smoke resize
 )
+add_test(NAME fireEngineTutorialBenchmarkCorrectness
+    COMMAND fireEngineTutorial --benchmark 1
+)
 
 # Synchronization validation is compiled into Debug configurations only. Keep
 # its device scenarios out of Release test lists instead of registering silent
@@ -287,11 +294,15 @@ set_tests_properties(
     fireEngineTutorialPrepareTwiceSmoke
     fireEngineTutorialUntexturedSmoke
     fireEngineTutorialRecreationSmoke
+    fireEngineTutorialBenchmarkCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
         RESOURCE_LOCK fireEngineTutorialVulkan
         TIMEOUT 30
+)
+set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Workload: instances=1, nodes=2, draws=1"
 )
 # Run one scenario away from the executable and copied assets to prove that the
 # compiled absolute asset and shader paths do not depend on the working folder.

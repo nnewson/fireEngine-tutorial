@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -20,6 +21,8 @@ class Window;
 struct RendererInfo
 {
     std::string deviceName;                 ///< Vulkan-reported physical-device name.
+    std::string driverName;                 ///< Vulkan-reported driver name.
+    std::string driverInfo;                 ///< Driver-specific version and build information.
     std::uint32_t graphicsQueueFamily;      ///< Queue family used for graphics work.
     std::uint32_t presentQueueFamily;       ///< Queue family used for presentation.
     std::size_t swapchainImageCount;        ///< Number of presentable images.
@@ -29,6 +32,21 @@ struct RendererInfo
     std::string imageFormat;                ///< Human-readable Vulkan image format.
     std::string depthFormat;                ///< Human-readable depth attachment format.
     std::string presentMode;                ///< Human-readable Vulkan presentation mode.
+};
+
+/** @brief Host timings for the CPU phases inside one drawFrame() attempt. */
+struct RendererCpuTimings
+{
+    std::chrono::nanoseconds drawListBuildAndValidation{}; ///< Snapshot allocation and proof.
+    std::chrono::nanoseconds frameFenceWait{};             ///< Reusable-frame completion wait.
+    std::chrono::nanoseconds imageAcquisitionWait{};       ///< Presentable-image acquisition.
+    std::chrono::nanoseconds presentationFenceWait{};      ///< Per-image retirement wait.
+    std::chrono::nanoseconds commandPoolReset{};           ///< Serial reusable-pool reset.
+    std::chrono::nanoseconds secondaryCommandRecording{};  ///< Worker-candidate draw recording.
+    std::chrono::nanoseconds primaryCommandRecording{};   ///< Serial pass and transition recording.
+    std::chrono::nanoseconds secondaryCommandExecution{}; ///< Serial secondary execution call.
+    std::chrono::nanoseconds queueSubmission{};           ///< Fence reset and graphics submission.
+    std::chrono::nanoseconds presentation{};              ///< Host presentation call.
 };
 
 /* --- Enums --- */
@@ -87,11 +105,12 @@ public:
     /**
      * @brief Records current scene draws, submits them, and presents one image.
      * @param scene Prepared scene whose world transforms have been updated.
+     * @param timings Optional output populated with host timings for this attempt.
      * @return Whether an image was presented and whether the swapchain remains suitable.
      * @throws std::logic_error if prepare() has not run or a scene reference was not prepared.
      * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */
-    [[nodiscard]] RenderResult drawFrame(const Scene& scene);
+    [[nodiscard]] RenderResult drawFrame(const Scene& scene, RendererCpuTimings* timings = nullptr);
 
     /**
      * @brief Replaces presentation resources for the window's current framebuffer.

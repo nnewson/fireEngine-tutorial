@@ -258,6 +258,29 @@ jobs:
       - name: Test
         run: xvfb-run --auto-servernum ctest --preset default
 
+      # Validation is useful for correctness but would distort the host-call
+      # ratios this observation exists to expose. Reuse the installed vcpkg
+      # tree in a separate Release build and publish values without thresholds.
+      - name: Configure Release benchmark
+        run: >-
+          cmake --preset vcpkg -B build-benchmark
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF
+          -DVCPKG_INSTALLED_DIR=${{ github.workspace }}/build/vcpkg_installed
+
+      - name: Build Release benchmark
+        run: cmake --build build-benchmark --target fireEngineTutorial
+
+      - name: Record Lavapipe 1,000-draw benchmark ratios
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
+
+      - name: Record Lavapipe 10,000-draw benchmark ratios
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
+
   # KosmicKrisp requires Apple Silicon, macOS 26, and an SDK installation that
   # includes the preview driver. CI therefore verifies only the macOS/AppleClang
   # C++23 build.

@@ -55,6 +55,15 @@ public:
      */
     [[nodiscard]] std::string name() const;
 
+    /** @brief Returns the Vulkan-reported driver name. @return A copy of the driver name. */
+    [[nodiscard]] std::string driverName() const;
+
+    /**
+     * @brief Returns driver-specific version and build information.
+     * @return A copy of the Vulkan-reported driver information.
+     */
+    [[nodiscard]] std::string driverInfo() const;
+
     /**
      * @brief Returns the Vulkan instance used by this device setup.
      * @return Reference to the owned instance.
