@@ -60,10 +60,12 @@ its cube geometry:
 
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
-draw-list construction and validation, command-pool reset, primary and
+draw-list construction, draw-list validation, command-pool reset, primary and
 secondary recording, submission, and presentation waits. It also reports the
 measured share that secondary-recording workers could divide and ideal speedup
-ceilings for that boundary. Frames affected by out-of-date or suboptimal
+ceilings when only that measured region divides. The current combined command
+pool prevents assigning its reset cost to primary or worker recording until
+those owners are separated. Frames affected by out-of-date or suboptimal
 presentation are excluded from the measured sample set.
 
 Use a Release build for performance results. Values are comparable only for

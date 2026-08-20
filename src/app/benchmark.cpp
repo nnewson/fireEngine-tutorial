@@ -251,8 +251,10 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     };
 
     printPhase("transform update", &Sample::transformUpdate);
-    printPhase("draw-list build and validation",
-               [](const Sample& sample) { return sample.renderer.drawListBuildAndValidation; });
+    printPhase("draw-list build",
+               [](const Sample& sample) { return sample.renderer.drawListBuild; });
+    printPhase("draw-list validation",
+               [](const Sample& sample) { return sample.renderer.drawListValidation; });
     printPhase("command-pool reset",
                [](const Sample& sample) { return sample.renderer.commandPoolReset; });
     printPhase("secondary command recording",
@@ -281,8 +283,9 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::chrono::nanoseconds activeWork{};
     for (const Sample& sample : samples_)
     {
-        const std::chrono::nanoseconds sampleSnapshot =
-            sample.transformUpdate + sample.renderer.drawListBuildAndValidation;
+        const std::chrono::nanoseconds sampleSnapshot = sample.transformUpdate +
+                                                        sample.renderer.drawListBuild +
+                                                        sample.renderer.drawListValidation;
         snapshot += sampleSnapshot;
         commandPoolReset += sample.renderer.commandPoolReset;
         secondaryRecording += sample.renderer.secondaryCommandRecording;
@@ -316,13 +319,15 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                  percentageOfActive(secondaryExecution));
     std::println("  Parallelizable secondary-recording share: {:.2f}%",
                  percentageOfActive(secondaryRecording));
-    std::println("  Serial share for the planned 0.9 boundary: {:.2f}%",
+    std::println("  Current serial share outside secondary recording: {:.2f}%",
                  percentageOfActive(serialWork));
-    std::println("  Ideal two-recording-worker active-work ceiling: {:.2f}x", twoWorkerCeiling);
-    std::println("  Ideal unlimited-recording-worker active-work ceiling: {:.2f}x",
+    std::println("  Two-worker ceiling if only secondary recording divides: {:.2f}x",
+                 twoWorkerCeiling);
+    std::println("  Unlimited-worker ceiling if only secondary recording divides: {:.2f}x",
                  unlimitedWorkerCeiling);
     std::println("  Fence, acquisition, and presentation durations are reported separately.");
-    std::println("  Ceilings assume perfect division of the current secondary-recording work.");
+    std::println("  The combined command pool prevents attributing reset cost to either buffer.");
+    std::println("  Ceilings assume perfect division of only the measured secondary recording.");
     std::println("  Repeated shared bindings also expose a cheaper state-hoisting opportunity.");
 }
 

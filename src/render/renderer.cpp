@@ -381,17 +381,19 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
     // A failure therefore cannot abandon a signaled acquisition semaphore.
     const SceneDrawList drawList = [&]()
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListBuildAndValidation};
-        SceneDrawList result = scene.buildDrawItems();
-        for (const DrawItem& item : result.drawItems)
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListBuild};
+        return scene.buildDrawItems();
+    }();
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListValidation};
+        for (const DrawItem& item : drawList.drawItems)
         {
             if (!compiledResources_.contains(item.renderObject))
             {
                 throw std::logic_error("Scene refers to an object not compiled by prepare");
             }
         }
-        return result;
-    }();
+    }
 
     const vk::raii::Device& logicalDevice = device_.logicalDevice();
     vk::Result fenceResult = vk::Result::eSuccess;
