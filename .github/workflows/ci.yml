@@ -281,6 +281,20 @@ jobs:
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
 
+      - name: Record Lavapipe 1,000-draw direct-primary control
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 1000 --direct-primary
+
+      - name: Record Lavapipe 10,000-draw direct-primary control
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 10000 --direct-primary
+
   # KosmicKrisp requires Apple Silicon, macOS 26, and an SDK installation that
   # includes the preview driver. CI therefore verifies only the macOS/AppleClang
   # C++23 build.

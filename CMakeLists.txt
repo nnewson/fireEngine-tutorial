@@ -62,6 +62,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/compiled_resources.cpp
     src/render/depth_buffer.cpp
     src/render/device.cpp
+    src/render/draw_binding_state.cpp
     src/render/frame_in_flight.cpp
     src/render/image.cpp
     src/render/pipeline.cpp
@@ -226,6 +227,7 @@ add_executable(fireEngineTutorialTests
     tests/graphics/test_asset_validation.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
+    tests/render/test_draw_binding_state.cpp
     tests/render/test_spirv_loader.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
@@ -262,6 +264,9 @@ add_test(NAME fireEngineTutorialRecreationSmoke
 add_test(NAME fireEngineTutorialBenchmarkCorrectness
     COMMAND fireEngineTutorial --benchmark 1
 )
+add_test(NAME fireEngineTutorialDirectPrimaryBenchmarkCorrectness
+    COMMAND fireEngineTutorial --benchmark 1 --direct-primary
+)
 
 # Synchronization validation is compiled into Debug configurations only. Keep
 # its device scenarios out of Release test lists instead of registering silent
@@ -280,9 +285,16 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND fireEngineTutorial --smoke resize
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
+    add_test(NAME fireEngineTutorialDirectPrimarySyncValidation
+        COMMAND fireEngineTutorial --benchmark 1 --direct-primary
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    # The ordinary direct-primary benchmark checks CLI/reporting and standard
+    # validation; this separate run deliberately enables synchronization checks.
     set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
         fireEngineTutorialPrepareTwiceSyncValidation
         fireEngineTutorialRecreationSyncValidation
+        fireEngineTutorialDirectPrimarySyncValidation
     )
     set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
         ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
@@ -295,6 +307,7 @@ set_tests_properties(
     fireEngineTutorialUntexturedSmoke
     fireEngineTutorialRecreationSmoke
     fireEngineTutorialBenchmarkCorrectness
+    fireEngineTutorialDirectPrimaryBenchmarkCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
@@ -303,6 +316,9 @@ set_tests_properties(
 )
 set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Workload: instances=1, nodes=2, draws=1"
+)
+set_tests_properties(fireEngineTutorialDirectPrimaryBenchmarkCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Recording path: direct primary command buffer"
 )
 # Run one scenario away from the executable and copied assets to prove that the
 # compiled absolute asset and shader paths do not depend on the working folder.

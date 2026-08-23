@@ -75,6 +75,23 @@ struct PhaseStatistics
 }
 
 /**
+ * @brief Names one command-buffer structure in benchmark output.
+ * @param mode Recording mode selected when the renderer was constructed.
+ * @return Stable human-readable label for comparisons between reports.
+ */
+[[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode)
+{
+    switch (mode)
+    {
+    case CommandRecordingMode::eSecondaryCommandBuffer:
+        return "secondary command buffer";
+    case CommandRecordingMode::eDirectPrimary:
+        return "direct primary command buffer";
+    }
+    throw std::logic_error("Benchmark encountered an unknown command recording mode");
+}
+
+/**
  * @brief Summarizes one non-empty collection of phase durations.
  * @param durations Durations to sort and aggregate.
  * @return Mean, median, and nearest-rank 95th percentile.
@@ -228,6 +245,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Build configuration: {}", FIRE_ENGINE_BUILD_CONFIGURATION);
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
+    std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode);
     std::println("  Workload: instances={}, nodes={}, draws={}", instanceCount_, nodeCount_,
@@ -297,38 +315,53 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                       sample.renderer.primaryCommandRecording +
                       sample.renderer.secondaryCommandExecution + sample.renderer.queueSubmission;
     }
-    const std::chrono::nanoseconds serialWork =
-        snapshot + commandPoolReset + primaryRecording + secondaryExecution + submission;
-    if (activeWork.count() == 0 || serialWork.count() == 0)
+    if (activeWork.count() == 0)
     {
-        throw std::logic_error("The benchmark recorded no active or serial CPU work");
+        throw std::logic_error("The benchmark recorded no active CPU work");
     }
     const double activeCount = static_cast<double>(activeWork.count());
     const auto percentageOfActive = [activeCount](std::chrono::nanoseconds duration)
     { return 100.0 * static_cast<double>(duration.count()) / activeCount; };
-    const double twoWorkerCeiling =
-        activeCount / (static_cast<double>(serialWork.count()) +
-                       static_cast<double>(secondaryRecording.count()) / 2.0);
-    const double unlimitedWorkerCeiling = activeCount / static_cast<double>(serialWork.count());
 
     std::println("\n  Snapshot share of measured active work: {:.2f}%",
                  percentageOfActive(snapshot));
     std::println("  Queue-submission share of measured active work: {:.2f}%",
                  percentageOfActive(submission));
-    std::println("  Secondary-execution share of measured active work: {:.2f}%",
-                 percentageOfActive(secondaryExecution));
-    std::println("  Parallelizable secondary-recording share: {:.2f}%",
-                 percentageOfActive(secondaryRecording));
-    std::println("  Current serial share outside secondary recording: {:.2f}%",
-                 percentageOfActive(serialWork));
-    std::println("  Two-worker ceiling if only secondary recording divides: {:.2f}x",
-                 twoWorkerCeiling);
-    std::println("  Unlimited-worker ceiling if only secondary recording divides: {:.2f}x",
-                 unlimitedWorkerCeiling);
     std::println("  Fence, acquisition, and presentation durations are reported separately.");
-    std::println("  The combined command pool prevents attributing reset cost to either buffer.");
-    std::println("  Ceilings assume perfect division of only the measured secondary recording.");
-    std::println("  Repeated shared bindings also expose a cheaper state-hoisting opportunity.");
+    if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
+    {
+        const std::chrono::nanoseconds serialWork =
+            snapshot + commandPoolReset + primaryRecording + secondaryExecution + submission;
+        if (serialWork.count() == 0)
+        {
+            throw std::logic_error("The benchmark recorded no serial CPU work");
+        }
+        const double twoWorkerCeiling =
+            activeCount / (static_cast<double>(serialWork.count()) +
+                           static_cast<double>(secondaryRecording.count()) / 2.0);
+        const double unlimitedWorkerCeiling = activeCount / static_cast<double>(serialWork.count());
+
+        std::println("  Secondary-execution share of measured active work: {:.2f}%",
+                     percentageOfActive(secondaryExecution));
+        std::println("  Parallelizable secondary-recording share: {:.2f}%",
+                     percentageOfActive(secondaryRecording));
+        std::println("  Current serial share outside secondary recording: {:.2f}%",
+                     percentageOfActive(serialWork));
+        std::println("  Two-worker ceiling if only secondary recording divides: {:.2f}x",
+                     twoWorkerCeiling);
+        std::println("  Unlimited-worker ceiling if only secondary recording divides: {:.2f}x",
+                     unlimitedWorkerCeiling);
+        std::println(
+            "  The combined command pool prevents attributing reset cost to either buffer.");
+        std::println(
+            "  Ceilings assume perfect division of only the measured secondary recording.");
+    }
+    else
+    {
+        std::println(
+            "  The direct-primary control has no worker-divisible secondary-recording phase.");
+    }
+    std::println("  Draw bindings are cached independently inside each recorded command buffer.");
 }
 
 /** @endcond */
