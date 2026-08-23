@@ -15,23 +15,40 @@ class RenderAssets;
 class Scene;
 class Window;
 
+/* --- Enums --- */
+
+/** @brief Command-buffer structure used to record one geometry pass. */
+enum class CommandRecordingMode : std::uint8_t
+{
+    eSecondaryCommandBuffer, ///< Record draws in a secondary executed by the primary.
+    eDirectPrimary,          ///< Record draws directly for attribution benchmarks.
+};
+
 /* --- POD structs --- */
+
+/** @brief Construction-time renderer choices that remain fixed for its lifetime. */
+struct RendererConfiguration
+{
+    CommandRecordingMode commandRecordingMode =
+        CommandRecordingMode::eSecondaryCommandBuffer; ///< Geometry recording structure.
+};
 
 /** @brief Vulkan-free summary of the renderer selected for this window. */
 struct RendererInfo
 {
-    std::string deviceName;                 ///< Vulkan-reported physical-device name.
-    std::string driverName;                 ///< Vulkan-reported driver name.
-    std::string driverInfo;                 ///< Driver-specific version and build information.
-    std::uint32_t graphicsQueueFamily;      ///< Queue family used for graphics work.
-    std::uint32_t presentQueueFamily;       ///< Queue family used for presentation.
-    std::size_t swapchainImageCount;        ///< Number of presentable images.
-    std::size_t presentationSemaphoreCount; ///< One render-finished semaphore per image.
-    std::uint32_t width;                    ///< Swapchain width in physical pixels.
-    std::uint32_t height;                   ///< Swapchain height in physical pixels.
-    std::string imageFormat;                ///< Human-readable Vulkan image format.
-    std::string depthFormat;                ///< Human-readable depth attachment format.
-    std::string presentMode;                ///< Human-readable Vulkan presentation mode.
+    std::string deviceName;                    ///< Vulkan-reported physical-device name.
+    std::string driverName;                    ///< Vulkan-reported driver name.
+    std::string driverInfo;                    ///< Driver-specific version and build information.
+    std::uint32_t graphicsQueueFamily;         ///< Queue family used for graphics work.
+    std::uint32_t presentQueueFamily;          ///< Queue family used for presentation.
+    std::size_t swapchainImageCount;           ///< Number of presentable images.
+    std::size_t presentationSemaphoreCount;    ///< One render-finished semaphore per image.
+    std::uint32_t width;                       ///< Swapchain width in physical pixels.
+    std::uint32_t height;                      ///< Swapchain height in physical pixels.
+    std::string imageFormat;                   ///< Human-readable Vulkan image format.
+    std::string depthFormat;                   ///< Human-readable depth attachment format.
+    std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
+    CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
 };
 
 /** @brief Host timings for the CPU phases inside one drawFrame() attempt. */
@@ -79,9 +96,11 @@ public:
      * @param glfw Initialized GLFW lifetime owner.
      * @param window Window used to create and size the presentation surface.
      * @param applicationName Name reported to the Vulkan runtime.
+     * @param configuration Fixed command-recording choices for this renderer.
      * @throws std::runtime_error if no suitable Vulkan configuration can be created.
      */
-    Renderer(const Glfw& glfw, const Window& window, const std::string& applicationName);
+    Renderer(const Glfw& glfw, const Window& window, const std::string& applicationName,
+             RendererConfiguration configuration = {});
 
     /** @brief Releases prepared resources and the Vulkan ownership tree. */
     ~Renderer() noexcept;

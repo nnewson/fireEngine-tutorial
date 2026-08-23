@@ -62,6 +62,7 @@ struct RunOptions
     std::optional<std::size_t> benchmarkInstanceCount;  ///< Repeated cubes in benchmark mode.
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
+    bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -146,10 +147,10 @@ addUntexturedRenderObject(fire_engine::SceneContent& content);
 void selectUntexturedScene(fire_engine::SceneContent& content);
 
 /**
- * @brief Adds an untextured instance so a second prepare changes assets and dependencies.
- * @param content Loaded AnimatedCube content extended for the repeated-preparation smoke path.
+ * @brief Adds A/A/B draws so repeated preparation exercises binding reuse and changes.
+ * @param content Loaded AnimatedCube content extended with mixed-resource instances.
  */
-void addUntexturedInstance(fire_engine::SceneContent& content);
+void addMixedResourceInstances(fire_engine::SceneContent& content);
 
 /**
  * @brief Waits without spinning and retries recreation until the framebuffer is drawable.
@@ -179,7 +180,12 @@ try
 
     fire_engine::Glfw glfw;
     fire_engine::Window window{800, 600, applicationName};
-    fire_engine::Renderer renderer{glfw, window, applicationName};
+    const fire_engine::RendererConfiguration rendererConfiguration{
+        .commandRecordingMode = options.recordDirectly
+                                    ? fire_engine::CommandRecordingMode::eDirectPrimary
+                                    : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
+    };
+    fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
         std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
 
@@ -272,7 +278,7 @@ try
         {
             // Replace compiled resources only after a submitted frame has used
             // the original set, exercising prepare()'s retirement wait.
-            addUntexturedInstance(content);
+            addMixedResourceInstances(content);
             content.scene.updateWorldTransforms();
             renderer.prepare(content.assets, content.scene);
             repeatedPreparationComplete = true;
@@ -341,6 +347,7 @@ namespace
                     .benchmarkInstanceCount = std::nullopt,
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
+                    .recordDirectly = false,
                 };
             }
         }
@@ -351,7 +358,9 @@ namespace
         }
         throw std::invalid_argument{requirement};
     }
-    if (argumentCount == 3 && option == "--benchmark")
+    if (option == "--benchmark" &&
+        (argumentCount == 3 ||
+         (argumentCount == 4 && std::string_view{arguments[3]} == "--direct-primary")))
     {
         const std::uint64_t instanceCount = parsePositiveInteger(arguments[2], "--benchmark");
         if (instanceCount > std::numeric_limits<std::size_t>::max())
@@ -364,12 +373,14 @@ namespace
             .benchmarkInstanceCount = static_cast<std::size_t>(instanceCount),
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
+            .recordDirectly = argumentCount == 4,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
-        throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances | "
+        throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
+                                    "[--direct-primary] | "
                                     "--frames positive-count [--recreate-every-frame] | "
                                     "--smoke scenario]");
     }
@@ -381,6 +392,7 @@ namespace
         .benchmarkInstanceCount = std::nullopt,
         .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
+        .recordDirectly = false,
     };
 }
 
@@ -423,14 +435,36 @@ void selectUntexturedScene(fire_engine::SceneContent& content)
     content.animations.clear();
 }
 
-void addUntexturedInstance(fire_engine::SceneContent& content)
+void addMixedResourceInstances(fire_engine::SceneContent& content)
 {
-    const fire_engine::RenderObjectId object = addUntexturedRenderObject(content);
-    fire_engine::SceneNode& node = content.scene.addRoot("Untextured fallback instance");
-    node.localTransform(fire_engine::Transform{
+    if (content.assets.meshes().size() != 1 || content.assets.renderObjects().size() != 1)
+    {
+        throw std::logic_error(
+            "The AnimatedCube mixed-resource fixture requires one mesh and render object");
+    }
+
+    const fire_engine::RenderObjectId repeatedObject{.value = 0};
+    fire_engine::SceneNode& repeatedNode = content.scene.addRoot("Repeated resource instance");
+    repeatedNode.localTransform(fire_engine::Transform{
+        .translation = {.x = -1.5f, .y = 0.0f, .z = 0.0f},
+    });
+    repeatedNode.component(repeatedObject);
+
+    fire_engine::Mesh duplicatedMesh = content.assets.meshes().front();
+    const fire_engine::MeshId duplicatedMeshId = content.assets.addMesh(std::move(duplicatedMesh));
+    const fire_engine::MaterialId material = content.assets.addMaterial({
+        .baseColor = {.r = 0.25f, .g = 0.7f, .b = 1.0f, .a = 1.0f},
+        .baseColorTexture = std::nullopt,
+    });
+    const fire_engine::RenderObjectId differentObject = content.assets.addRenderObject({
+        .mesh = duplicatedMeshId,
+        .material = material,
+    });
+    fire_engine::SceneNode& differentNode = content.scene.addRoot("Different resource instance");
+    differentNode.localTransform(fire_engine::Transform{
         .translation = {.x = 1.5f, .y = 0.0f, .z = 0.0f},
     });
-    node.component(object);
+    differentNode.component(differentObject);
 }
 
 [[nodiscard]] bool recreateWhenDrawable(fire_engine::Renderer& renderer,

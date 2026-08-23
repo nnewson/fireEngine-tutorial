@@ -11,6 +11,7 @@
 #include <fire_engine/render/detail/compiled_resources.hpp>
 #include <fire_engine/render/detail/depth_buffer.hpp>
 #include <fire_engine/render/detail/device.hpp>
+#include <fire_engine/render/detail/draw_binding_state.hpp>
 #include <fire_engine/render/detail/draw_constants.hpp>
 #include <fire_engine/render/detail/frame_in_flight.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
@@ -143,8 +144,10 @@ public:
      * @param glfw Initialized platform lifetime owner.
      * @param window Window used for surface and swapchain creation.
      * @param applicationName Name reported to Vulkan.
+     * @param configuration Fixed command-recording choices for this renderer.
      */
-    Impl(const Glfw& glfw, const Window& window, const std::string& applicationName);
+    Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
+         RendererConfiguration configuration);
 
     /** @brief Waits defensively for pending work during exceptional unwinding. */
     ~Impl() noexcept;
@@ -193,6 +196,41 @@ private:
                         RendererCpuTimings* timings) const;
 
     /**
+     * @brief Records inherited draws and executes them from one primary geometry pass.
+     * @param imageIndex Acquired swapchain-image index.
+     * @param drawItems Current ordered scene draws.
+     * @param timings Optional output receiving both command-buffer recording phases.
+     */
+    void recordSecondaryCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems,
+                                 RendererCpuTimings* timings) const;
+
+    /**
+     * @brief Records the complete geometry pass directly into one primary command buffer.
+     * @param imageIndex Acquired swapchain-image index.
+     * @param drawItems Current ordered scene draws.
+     * @param timings Optional output receiving the direct primary recording phase.
+     */
+    void recordDirectCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems,
+                              RendererCpuTimings* timings) const;
+
+    /**
+     * @brief Begins a primary command buffer and its geometry rendering instance.
+     * @param commandBuffer Primary command buffer receiving the frame prefix.
+     * @param imageIndex Acquired swapchain-image index used as the color attachment.
+     * @param flags Rendering flags selecting direct or secondary-command contents.
+     */
+    void beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
+                               std::uint32_t imageIndex, vk::RenderingFlags flags) const;
+
+    /**
+     * @brief Ends the geometry instance and records the primary command-buffer suffix.
+     * @param commandBuffer Primary command buffer receiving the frame suffix.
+     * @param imageIndex Acquired swapchain-image index transitioned for presentation.
+     */
+    void endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
+                             std::uint32_t imageIndex) const;
+
+    /**
      * @brief Orders acquisition before the transition to color-attachment use.
      * @param commandBuffer Command buffer receiving the image barrier.
      * @param imageIndex Acquired swapchain-image index.
@@ -207,26 +245,31 @@ private:
     void transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const;
 
     /**
-     * @brief Begins dynamic rendering whose contents come from secondary command buffers.
+     * @brief Begins dynamic rendering for direct or secondary-command contents.
      * @param commandBuffer Primary command buffer receiving the rendering boundary.
      * @param imageIndex Acquired swapchain-image index used as the color attachment.
+     * @param flags Rendering flags selecting direct or secondary-command contents.
      */
-    void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer,
-                           std::uint32_t imageIndex) const;
+    void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer, std::uint32_t imageIndex,
+                           vk::RenderingFlags flags) const;
 
     /**
-     * @brief Records inherited state shared by every draw in the secondary command buffer.
-     * @param commandBuffer Secondary command buffer continuing the dynamic-rendering pass.
+     * @brief Records fixed state shared by every draw in one command buffer.
+     * @param commandBuffer Primary or secondary command buffer receiving the state.
+     * @return Fresh draw-binding cache scoped to the established descriptor state.
      */
-    void bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const;
+    [[nodiscard]] detail::DrawBindingState
+    bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const;
 
     /**
      * @brief Records the mesh bindings, constants, and indexed draw for each item.
      * @param commandBuffer Command buffer inside the active color pass.
      * @param drawItems Current ordered scene draws.
+     * @param bindingState Cache created when the complete geometry state was established.
      */
     void recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                     const std::vector<DrawItem>& drawItems) const;
+                     const std::vector<DrawItem>& drawItems,
+                     detail::DrawBindingState bindingState) const;
 
     /**
      * @brief Orders color writes before the transition to presentation.
@@ -240,8 +283,9 @@ private:
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
     // Foundational long-lived state.
-    detail::Device device_;             ///< Vulkan instance, surface, device, and queues.
-    detail::MemoryAllocator allocator_; ///< VMA owner created from the logical device.
+    CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
+    detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
+    detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
 
     // Presentation-dependent state replaced as one ownership group.
     std::unique_ptr<PresentationState> presentation_; ///< Swapchain-compatible resources.
@@ -260,8 +304,9 @@ private:
 
 /* --- Public member functions --- */
 
-Renderer::Renderer(const Glfw& glfw, const Window& window, const std::string& applicationName)
-    : implementation_{std::make_unique<Impl>(glfw, window, applicationName)}
+Renderer::Renderer(const Glfw& glfw, const Window& window, const std::string& applicationName,
+                   RendererConfiguration configuration)
+    : implementation_{std::make_unique<Impl>(glfw, window, applicationName, configuration)}
 {
 }
 
@@ -295,8 +340,10 @@ RendererInfo Renderer::info() const
 /** @cond INTERNAL */
 /* --- Private implementation member functions --- */
 
-Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName)
-    : device_{glfw, window, applicationName},
+Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
+                     RendererConfiguration configuration)
+    : commandRecordingMode_{configuration.commandRecordingMode},
+      device_{glfw, window, applicationName},
       allocator_{device_},
       presentation_{std::make_unique<PresentationState>(device_, allocator_, window)},
       frame_{device_, allocator_,
@@ -543,12 +590,25 @@ RendererInfo Renderer::Impl::info() const
         .imageFormat = vk::to_string(presentation_->swapchain().imageFormat()),
         .depthFormat = vk::to_string(presentation_->depthBuffer().format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
+        .commandRecordingMode = commandRecordingMode_,
     };
 }
 
 void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
                                     const std::vector<DrawItem>& drawItems,
                                     RendererCpuTimings* timings) const
+{
+    if (commandRecordingMode_ == CommandRecordingMode::eDirectPrimary)
+    {
+        recordDirectCommands(imageIndex, drawItems, timings);
+        return;
+    }
+    recordSecondaryCommands(imageIndex, drawItems, timings);
+}
+
+void Renderer::Impl::recordSecondaryCommands(std::uint32_t imageIndex,
+                                             const std::vector<DrawItem>& drawItems,
+                                             RendererCpuTimings* timings) const
 {
     const vk::raii::CommandBuffer& secondaryCommandBuffer = frame_.secondaryCommandBuffer();
     {
@@ -569,22 +629,16 @@ void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
             .pInheritanceInfo = &inheritanceInfo,
         };
         secondaryCommandBuffer.begin(secondaryBeginInfo);
-        bindGeometryState(secondaryCommandBuffer);
-        recordDraws(secondaryCommandBuffer, drawItems);
+        detail::DrawBindingState bindingState = bindGeometryState(secondaryCommandBuffer);
+        recordDraws(secondaryCommandBuffer, drawItems, std::move(bindingState));
         secondaryCommandBuffer.end();
     }
 
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame_.commandBuffer();
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
-        const vk::CommandBufferBeginInfo primaryBeginInfo{
-            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
-        };
-        primaryCommandBuffer.begin(primaryBeginInfo);
-
-        transitionToAttachment(primaryCommandBuffer, imageIndex);
-        transitionDepthToAttachment(primaryCommandBuffer);
-        beginGeometryPass(primaryCommandBuffer, imageIndex);
+        beginPrimaryRecording(primaryCommandBuffer, imageIndex,
+                              vk::RenderingFlagBits::eContentsSecondaryCommandBuffers);
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandExecution};
@@ -593,10 +647,40 @@ void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
-        primaryCommandBuffer.endRendering();
-        transitionToPresent(primaryCommandBuffer, imageIndex);
-        primaryCommandBuffer.end();
+        endPrimaryRecording(primaryCommandBuffer, imageIndex);
     }
+}
+
+void Renderer::Impl::recordDirectCommands(std::uint32_t imageIndex,
+                                          const std::vector<DrawItem>& drawItems,
+                                          RendererCpuTimings* timings) const
+{
+    CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
+    const vk::raii::CommandBuffer& primaryCommandBuffer = frame_.commandBuffer();
+    beginPrimaryRecording(primaryCommandBuffer, imageIndex, {});
+    detail::DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer);
+    recordDraws(primaryCommandBuffer, drawItems, std::move(bindingState));
+    endPrimaryRecording(primaryCommandBuffer, imageIndex);
+}
+
+void Renderer::Impl::beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
+                                           std::uint32_t imageIndex, vk::RenderingFlags flags) const
+{
+    const vk::CommandBufferBeginInfo beginInfo{
+        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+    };
+    commandBuffer.begin(beginInfo);
+    transitionToAttachment(commandBuffer, imageIndex);
+    transitionDepthToAttachment(commandBuffer);
+    beginGeometryPass(commandBuffer, imageIndex, flags);
+}
+
+void Renderer::Impl::endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
+                                         std::uint32_t imageIndex) const
+{
+    commandBuffer.endRendering();
+    transitionToPresent(commandBuffer, imageIndex);
+    commandBuffer.end();
 }
 
 void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const
@@ -650,7 +734,7 @@ void Renderer::Impl::transitionToAttachment(const vk::raii::CommandBuffer& comma
 }
 
 void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer,
-                                       std::uint32_t imageIndex) const
+                                       std::uint32_t imageIndex, vk::RenderingFlags flags) const
 {
     const vk::ClearValue clearValue{
         .color = {.float32 = std::array{0.015f, 0.02f, 0.03f, 1.0f}},
@@ -673,7 +757,7 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .clearValue = depthClear,
     };
     const vk::RenderingInfo renderingInfo{
-        .flags = vk::RenderingFlagBits::eContentsSecondaryCommandBuffers,
+        .flags = flags,
         .renderArea =
             {
                 .offset = {.x = 0, .y = 0},
@@ -687,7 +771,8 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
     commandBuffer.beginRendering(renderingInfo);
 }
 
-void Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const
+detail::DrawBindingState
+Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const
 {
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                *presentation_->pipeline().pipeline());
@@ -720,32 +805,41 @@ void Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuf
     };
     commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
                                     *presentation_->pipeline().pipelineLayout(), 0, uniformWrite);
+    return {};
 }
 
 void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                                 const std::vector<DrawItem>& drawItems) const
+                                 const std::vector<DrawItem>& drawItems,
+                                 detail::DrawBindingState bindingState) const
 {
     constexpr vk::DeviceSize bufferOffset = 0;
     for (const DrawItem& item : drawItems)
     {
         const detail::CompiledDraw draw = compiledResources_.draw(item.renderObject);
-        commandBuffer.bindVertexBuffers(0, draw.vertexBuffer, bufferOffset);
-        commandBuffer.bindIndexBuffer(draw.indexBuffer, 0, vk::IndexType::eUint32);
-
-        const vk::DescriptorImageInfo textureInfo{
-            .sampler = draw.sampler,
-            .imageView = draw.imageView,
-            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-        };
-        const vk::WriteDescriptorSet textureWrite{
-            .dstBinding = 1,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-            .pImageInfo = &textureInfo,
-        };
-        commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
-                                        *presentation_->pipeline().pipelineLayout(), 0,
-                                        textureWrite);
+        const detail::DrawBindingChanges changes =
+            bindingState.update(draw.vertexBuffer, draw.indexBuffer, draw.sampler, draw.imageView);
+        if (changes.geometry)
+        {
+            commandBuffer.bindVertexBuffers(0, draw.vertexBuffer, bufferOffset);
+            commandBuffer.bindIndexBuffer(draw.indexBuffer, 0, vk::IndexType::eUint32);
+        }
+        if (changes.texture)
+        {
+            const vk::DescriptorImageInfo textureInfo{
+                .sampler = draw.sampler,
+                .imageView = draw.imageView,
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            };
+            const vk::WriteDescriptorSet textureWrite{
+                .dstBinding = 1,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+                .pImageInfo = &textureInfo,
+            };
+            commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
+                                            *presentation_->pipeline().pipelineLayout(), 0,
+                                            textureWrite);
+        }
 
         const detail::DrawConstants constants{
             .model = item.world,

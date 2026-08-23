@@ -58,6 +58,14 @@ its cube geometry:
 ./build/fireEngineTutorial --benchmark 10000
 ```
 
+Add `--direct-primary` to record the same workload directly into the primary
+command buffer. This is an attribution control for comparing driver work around
+secondary command buffers, not an alternative production renderer:
+
+```sh
+./build/fireEngineTutorial --benchmark 10000 --direct-primary
+```
+
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
 draw-list construction, draw-list validation, command-pool reset, primary and
