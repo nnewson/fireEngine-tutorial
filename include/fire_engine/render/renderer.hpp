@@ -24,13 +24,6 @@ enum class CommandRecordingMode : std::uint8_t
     eDirectPrimary,          ///< Record draws directly for attribution benchmarks.
 };
 
-/** @brief Temporary command-pool topology used by the Step-2b attribution experiment. */
-enum class CommandPoolTopology : std::uint8_t
-{
-    eCombined,         ///< Allocate primary and secondary commands from one pool.
-    eSplitAttribution, ///< Give coordinator and worker-shaped recording separate pools.
-};
-
 /* --- POD structs --- */
 
 /** @brief Construction-time renderer choices that remain fixed for its lifetime. */
@@ -38,8 +31,6 @@ struct RendererConfiguration
 {
     CommandRecordingMode commandRecordingMode =
         CommandRecordingMode::eSecondaryCommandBuffer; ///< Geometry recording structure.
-    CommandPoolTopology commandPoolTopology =
-        CommandPoolTopology::eCombined; ///< Temporary combined/split attribution control.
 };
 
 /** @brief Vulkan-free summary of the renderer selected for this window. */
@@ -58,21 +49,18 @@ struct RendererInfo
     std::string depthFormat;                   ///< Human-readable depth attachment format.
     std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
     CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
-    CommandPoolTopology commandPoolTopology;   ///< Command-pool attribution topology in use.
 };
 
 /** @brief Host timings for the CPU phases inside one drawFrame() attempt. */
 struct RendererCpuTimings
 {
-    std::chrono::nanoseconds drawListBuild{};               ///< Snapshot allocation and traversal.
-    std::chrono::nanoseconds drawListValidation{};          ///< Prepared-resource membership proof.
-    std::chrono::nanoseconds frameFenceWait{};              ///< Reusable-frame completion wait.
-    std::chrono::nanoseconds imageAcquisitionWait{};        ///< Presentable-image acquisition.
-    std::chrono::nanoseconds presentationFenceWait{};       ///< Per-image retirement wait.
-    std::chrono::nanoseconds commandPoolReset{};            ///< Total across active command pools.
-    std::chrono::nanoseconds coordinatorCommandPoolReset{}; ///< Primary-owning pool reset.
-    std::chrono::nanoseconds workerCommandPoolReset{};      ///< Worker-shaped pool reset.
-    std::chrono::nanoseconds secondaryCommandRecording{};   ///< Worker-candidate draw recording.
+    std::chrono::nanoseconds drawListBuild{};             ///< Snapshot allocation and traversal.
+    std::chrono::nanoseconds drawListValidation{};        ///< Prepared-resource membership proof.
+    std::chrono::nanoseconds frameFenceWait{};            ///< Reusable-frame completion wait.
+    std::chrono::nanoseconds imageAcquisitionWait{};      ///< Presentable-image acquisition.
+    std::chrono::nanoseconds presentationFenceWait{};     ///< Per-image retirement wait.
+    std::chrono::nanoseconds commandPoolReset{};          ///< Serial reusable-pool reset.
+    std::chrono::nanoseconds secondaryCommandRecording{}; ///< Worker-candidate draw recording.
     std::chrono::nanoseconds primaryCommandRecording{};   ///< Serial pass and transition recording.
     std::chrono::nanoseconds secondaryCommandExecution{}; ///< Serial secondary execution call.
     std::chrono::nanoseconds queueSubmission{};           ///< Fence reset and graphics submission.
