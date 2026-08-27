@@ -63,6 +63,7 @@ struct RunOptions
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
+    bool splitCommandPools = false; ///< Whether the benchmark enables the Step-2b pool control.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -184,6 +185,9 @@ try
         .commandRecordingMode = options.recordDirectly
                                     ? fire_engine::CommandRecordingMode::eDirectPrimary
                                     : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
+        .commandPoolTopology = options.splitCommandPools
+                                   ? fire_engine::CommandPoolTopology::eSplitAttribution
+                                   : fire_engine::CommandPoolTopology::eCombined,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
@@ -348,6 +352,7 @@ namespace
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
                     .recordDirectly = false,
+                    .splitCommandPools = false,
                 };
             }
         }
@@ -358,14 +363,33 @@ namespace
         }
         throw std::invalid_argument{requirement};
     }
-    if (option == "--benchmark" &&
-        (argumentCount == 3 ||
-         (argumentCount == 4 && std::string_view{arguments[3]} == "--direct-primary")))
+    if (option == "--benchmark" && argumentCount >= 3 && argumentCount <= 5)
     {
         const std::uint64_t instanceCount = parsePositiveInteger(arguments[2], "--benchmark");
         if (instanceCount > std::numeric_limits<std::size_t>::max())
         {
             throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
+        }
+
+        bool recordDirectly = false;
+        bool splitCommandPools = false;
+        for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
+        {
+            const std::string_view benchmarkOption{arguments[argumentIndex]};
+            if (benchmarkOption == "--direct-primary" && !recordDirectly)
+            {
+                recordDirectly = true;
+            }
+            else if (benchmarkOption == "--split-command-pools" && !splitCommandPools)
+            {
+                splitCommandPools = true;
+            }
+            else
+            {
+                throw std::invalid_argument(
+                    "Benchmark flags must be unique and chosen from --direct-primary and "
+                    "--split-command-pools");
+            }
         }
         return {
             .frameLimit = std::nullopt,
@@ -373,14 +397,15 @@ namespace
             .benchmarkInstanceCount = static_cast<std::size_t>(instanceCount),
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
-            .recordDirectly = argumentCount == 4,
+            .recordDirectly = recordDirectly,
+            .splitCommandPools = splitCommandPools,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
         throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
-                                    "[--direct-primary] | "
+                                    "[--direct-primary] [--split-command-pools] | "
                                     "--frames positive-count [--recreate-every-frame] | "
                                     "--smoke scenario]");
     }
@@ -393,6 +418,7 @@ namespace
         .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
         .recordDirectly = false,
+        .splitCommandPools = false,
     };
 }
 

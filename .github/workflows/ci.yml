@@ -271,24 +271,72 @@ jobs:
       - name: Build Release benchmark
         run: cmake --build build-benchmark --target fireEngineTutorial
 
-      - name: Record Lavapipe 1,000-draw benchmark ratios
+      # Keep each combined/split pair adjacent in one job so hosted-runner
+      # session noise is less likely to masquerade as a pool-topology cost.
+      # Repeat the 10,000-draw direct combined control after its split run so
+      # drift can be compared with the small empty-worker-pool delta.
+      # The one-draw split-secondary run estimates fixed reset cost with an
+      # allocated and minimally recorded worker command buffer.
+      - name: Record Lavapipe one-draw split-secondary fixed-cost estimate
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 1 --split-command-pools
+
+      - name: Record Lavapipe 1,000-draw combined secondary control
         continue-on-error: true
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
 
-      - name: Record Lavapipe 10,000-draw benchmark ratios
+      - name: Record Lavapipe 1,000-draw split secondary attribution
         continue-on-error: true
         timeout-minutes: 20
-        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 1000 --split-command-pools
 
-      - name: Record Lavapipe 1,000-draw direct-primary control
+      - name: Record Lavapipe 1,000-draw combined direct-primary control
         continue-on-error: true
         timeout-minutes: 20
         run: >-
           xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
           --benchmark 1000 --direct-primary
 
-      - name: Record Lavapipe 10,000-draw direct-primary control
+      - name: Record Lavapipe 1,000-draw split direct-primary attribution
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 1000 --direct-primary --split-command-pools
+
+      - name: Record Lavapipe 10,000-draw combined secondary control
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
+
+      - name: Record Lavapipe 10,000-draw split secondary attribution
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 10000 --split-command-pools
+
+      - name: Record Lavapipe 10,000-draw combined direct-primary control
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 10000 --direct-primary
+
+      - name: Record Lavapipe 10,000-draw split direct-primary attribution
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 10000 --direct-primary --split-command-pools
+
+      - name: Repeat Lavapipe 10,000-draw combined direct-primary drift control
         continue-on-error: true
         timeout-minutes: 20
         run: >-

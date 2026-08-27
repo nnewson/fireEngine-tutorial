@@ -421,7 +421,7 @@ CompiledTexture::CompiledTexture(const Device& device, const CompiledImage& imag
 void uploadImages(const Device& device, FrameInFlight& frame,
                   std::span<const PendingImageUpload> uploads)
 {
-    frame.resetCommands();
+    frame.resetPrimaryCommands();
     const vk::raii::CommandBuffer& commandBuffer = frame.commandBuffer();
     const vk::CommandBufferBeginInfo beginInfo{
         .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,

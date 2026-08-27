@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <vulkan/vulkan_raii.hpp>
 
 #include <fire_engine/math/mat4.hpp>
@@ -12,6 +14,15 @@ namespace fire_engine::detail
 
 class Device;
 class MemoryAllocator;
+
+/* --- Enums --- */
+
+/** @brief Placement of the secondary command buffer for the Step-2b pool experiment. */
+enum class SecondaryCommandPoolMode : std::uint8_t
+{
+    eCombined, ///< Allocate secondary commands from the primary-owning pool.
+    eSeparate, ///< Allocate secondary commands from a separate worker-shaped pool.
+};
 
 /* --- POD structs --- */
 
@@ -35,16 +46,17 @@ static_assert(alignof(FrameUniforms) == 16);
  * @brief Owns the command and synchronization objects for one frame in flight.
  *
  * The current serial implementation combines one submission slot with one
- * recording context: a primary command buffer owns the frame boundaries, a
- * secondary records the dynamic-rendering geometry pass, a semaphore orders
- * image acquisition, a fence reports submission completion, and a uniform
- * buffer holds values that may change after that fence signals.
+ * recording context: a primary command buffer owns the frame boundaries, an
+ * optional secondary records the dynamic-rendering geometry pass, a semaphore
+ * orders image acquisition, a fence reports submission completion, and a
+ * uniform buffer holds values that may change after that fence signals.
  *
  * This combined ownership is deliberately interim. Submission synchronization
  * and uniform storage are indexed by frame, while parallel recording requires
  * command buffers and independently synchronized pools indexed by recording
- * context. Separating those lifetimes does not change the secondary-buffer
- * inheritance contract proved here.
+ * context. Step 2b may temporarily place the secondary in another pool for
+ * attribution, but it does not yet separate these responsibilities into their
+ * permanent owners.
  *
  * The matching render-finished semaphores are deliberately not here. Those are
  * indexed by swapchain image, so Swapchain owns them; see its documentation for
@@ -58,13 +70,16 @@ public:
      * @param device Logical device and graphics queue family used by this frame.
      * @param allocator VMA owner used for the frame's uniform buffer.
      * @param initialUniforms Initial shader values written before construction completes.
+     * @param secondaryPoolMode Whether secondary commands share the primary-owning pool.
+     * @param allocateSecondaryCommandBuffer Whether this recording path needs a secondary buffer.
      * @throws vk::SystemError if Vulkan cannot create or allocate an object.
      * @throws std::runtime_error if VMA cannot create or populate the uniform buffer.
      */
     FrameInFlight(const Device& device, const MemoryAllocator& allocator,
-                  const FrameUniforms& initialUniforms);
+                  const FrameUniforms& initialUniforms, SecondaryCommandPoolMode secondaryPoolMode,
+                  bool allocateSecondaryCommandBuffer);
 
-    /** @brief Releases the uniform, synchronization objects, command buffers, and pool. */
+    /** @brief Releases the uniform, synchronization objects, command buffers, and pools. */
     ~FrameInFlight() = default;
 
     /// @brief Copy construction is disabled because Vulkan handles have unique ownership.
@@ -77,16 +92,18 @@ public:
     FrameInFlight& operator=(FrameInFlight&&) = delete;
 
     /**
-     * @brief Recycles the pool so its command buffers can be recorded again.
+     * @brief Recycles the primary-owning pool so its command buffers can be recorded again.
      *
      * The previous submission must have completed first, which the frame loop
      * guarantees by waiting on frameFinished(). Resetting a pool whose commands
      * are still executing is undefined behavior.
      *
-     * Resetting the pool returns every command buffer allocated from it to the
-     * initial state. The pool is created without eResetCommandBuffer, so this is
-     * the only legal way to re-record: resetting the buffer on its own, or
-     * relying on begin() to reset it implicitly, both require that flag.
+     * Resetting the pool returns every command buffer allocated from that pool
+     * to the initial state. This includes the secondary in combined mode, but
+     * only the primary in split mode. The pool is created without
+     * eResetCommandBuffer, so this is the only legal way to re-record: resetting
+     * the buffer on its own, or relying on begin() to reset it implicitly, both
+     * require that flag.
      *
      * This is const because what changes lives in driver memory rather than in
      * this object, the same reason Vulkan-Hpp declares the underlying pool reset
@@ -95,7 +112,18 @@ public:
      *
      * @throws vk::SystemError if the device cannot reset the pool.
      */
-    void resetCommands() const;
+    void resetPrimaryCommands() const;
+
+    /**
+     * @brief Recycles the separate worker-shaped pool used by the attribution experiment.
+     *
+     * Call only when construction selected SecondaryCommandPoolMode::eSeparate. The pool exists
+     * even for direct-primary recording, where resetting it measures an empty worker-pool cost.
+     *
+     * @pre Construction selected SecondaryCommandPoolMode::eSeparate.
+     * @throws vk::SystemError if the device cannot reset the pool.
+     */
+    void resetSecondaryCommands() const;
 
     /**
      * @brief Returns the primary command buffer reused for every frame.
@@ -106,6 +134,7 @@ public:
     /**
      * @brief Returns the secondary command buffer executed by the primary geometry pass.
      * @return Reference to the command buffer allocated from the graphics pool.
+     * @pre Construction requested a secondary command buffer.
      */
     [[nodiscard]] const vk::raii::CommandBuffer& secondaryCommandBuffer() const noexcept;
 
@@ -147,8 +176,9 @@ private:
     // Members are destroyed in reverse declaration order. Command buffers must
     // therefore follow the pool from which they were allocated so they are
     // freed before that pool is destroyed.
-    vk::raii::CommandPool commandPool_{nullptr};       ///< Graphics pool recycled by resetCommands.
-    vk::raii::CommandBuffers commandBuffers_{nullptr}; ///< Contains one primary command buffer.
+    vk::raii::CommandPool commandPool_{nullptr}; ///< Primary-owning or combined graphics pool.
+    vk::raii::CommandBuffers commandBuffers_{nullptr};    ///< Contains one primary command buffer.
+    vk::raii::CommandPool secondaryCommandPool_{nullptr}; ///< Optional worker-shaped pool.
     vk::raii::CommandBuffers secondaryCommandBuffers_{nullptr}; ///< Contains one secondary buffer.
     vk::raii::Semaphore imageAvailable_{nullptr}; ///< Signals swapchain-image acquisition.
     vk::raii::Fence frameFinished_{nullptr};      ///< Signals completion of submitted work.
