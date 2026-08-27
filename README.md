@@ -66,38 +66,21 @@ secondary command buffers, not an alternative production renderer:
 ./build/fireEngineTutorial --benchmark 10000 --direct-primary
 ```
 
-The temporary Step-2b attribution experiment accepts
-`--split-command-pools`. It allocates the primary and secondary paths from
-separate pools and reports their reset costs independently. Combine it with
-`--direct-primary` to measure the same topology with an empty worker pool:
-
-```sh
-./build/fireEngineTutorial --benchmark 10000 --split-command-pools
-./build/fireEngineTutorial --benchmark 10000 --direct-primary --split-command-pools
-```
-
-A one-draw split-secondary Release run provides the experiment's closer
-fixed-reset estimate: unlike the empty direct-primary worker pool, this pool has
-an allocated and minimally recorded secondary command buffer.
-
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
 draw-list construction, draw-list validation, command-pool reset, primary and
 secondary recording, submission, and presentation waits. It also reports the
 measured share that secondary-recording workers could divide and ideal speedup
-ceilings when only that measured region divides. The default combined command
-pool prevents assigning its reset cost to primary or worker recording; the
-temporary split control attributes the reset components without claiming that
-workers have yet divided them. Frames affected by out-of-date or suboptimal
+ceilings when only that measured region divides. The current combined command
+pool prevents assigning its reset cost to primary or worker recording until
+those owners are separated. Frames affected by out-of-date or suboptimal
 presentation are excluded from the measured sample set.
 
 Use a Release build for performance results. Values are comparable only for
-the same workload, build configuration, machine, and Vulkan driver. Hosted CI
-timings never receive automated pass/fail thresholds; the concurrency plan
-separately documents how versioned observations inform its manually reviewed
-architectural gates. The one-instance CTest scenario checks only that scene
-generation, measurement, aggregation, reporting, and Vulkan validation complete
-successfully.
+the same workload, build configuration, machine, and Vulkan driver; hosted CI
+and software-renderer timings are not performance gates. The one-instance
+CTest scenario checks only that scene generation, measurement, aggregation,
+reporting, and Vulkan validation complete successfully.
 
 ## Documentation
 
