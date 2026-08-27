@@ -267,6 +267,12 @@ add_test(NAME fireEngineTutorialBenchmarkCorrectness
 add_test(NAME fireEngineTutorialDirectPrimaryBenchmarkCorrectness
     COMMAND fireEngineTutorial --benchmark 1 --direct-primary
 )
+add_test(NAME fireEngineTutorialSplitPoolBenchmarkCorrectness
+    COMMAND fireEngineTutorial --benchmark 1 --split-command-pools
+)
+add_test(NAME fireEngineTutorialSplitPoolDirectPrimaryBenchmarkCorrectness
+    COMMAND fireEngineTutorial --benchmark 1 --direct-primary --split-command-pools
+)
 
 # Synchronization validation is compiled into Debug configurations only. Keep
 # its device scenarios out of Release test lists instead of registering silent
@@ -289,12 +295,22 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND fireEngineTutorial --benchmark 1 --direct-primary
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
-    # The ordinary direct-primary benchmark checks CLI/reporting and standard
-    # validation; this separate run deliberately enables synchronization checks.
+    add_test(NAME fireEngineTutorialSplitPoolSyncValidation
+        COMMAND fireEngineTutorial --benchmark 1 --split-command-pools
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    add_test(NAME fireEngineTutorialSplitPoolDirectPrimarySyncValidation
+        COMMAND fireEngineTutorial --benchmark 1 --direct-primary --split-command-pools
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    # The ordinary benchmark controls check CLI/reporting and standard
+    # validation; these separate runs deliberately enable synchronization checks.
     set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
         fireEngineTutorialPrepareTwiceSyncValidation
         fireEngineTutorialRecreationSyncValidation
         fireEngineTutorialDirectPrimarySyncValidation
+        fireEngineTutorialSplitPoolSyncValidation
+        fireEngineTutorialSplitPoolDirectPrimarySyncValidation
     )
     set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
         ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
@@ -308,6 +324,8 @@ set_tests_properties(
     fireEngineTutorialRecreationSmoke
     fireEngineTutorialBenchmarkCorrectness
     fireEngineTutorialDirectPrimaryBenchmarkCorrectness
+    fireEngineTutorialSplitPoolBenchmarkCorrectness
+    fireEngineTutorialSplitPoolDirectPrimaryBenchmarkCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
@@ -319,6 +337,14 @@ set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
 )
 set_tests_properties(fireEngineTutorialDirectPrimaryBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Recording path: direct primary command buffer"
+)
+set_tests_properties(
+    fireEngineTutorialSplitPoolBenchmarkCorrectness
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION "Command pools: split coordinator and worker"
+)
+set_tests_properties(fireEngineTutorialSplitPoolDirectPrimaryBenchmarkCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Its worker pool has no command-buffer allocations or recorded work"
 )
 # Run one scenario away from the executable and copied assets to prove that the
 # compiled absolute asset and shader paths do not depend on the working folder.

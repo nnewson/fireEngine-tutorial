@@ -284,6 +284,7 @@ private:
 
     // Foundational long-lived state.
     CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
+    CommandPoolTopology commandPoolTopology_;   ///< Temporary pool-attribution topology.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
 
@@ -343,12 +344,17 @@ RendererInfo Renderer::info() const
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
                      RendererConfiguration configuration)
     : commandRecordingMode_{configuration.commandRecordingMode},
+      commandPoolTopology_{configuration.commandPoolTopology},
       device_{glfw, window, applicationName},
       allocator_{device_},
       presentation_{std::make_unique<PresentationState>(device_, allocator_, window)},
       frame_{device_, allocator_,
              detail::FrameUniforms{.viewProjection =
-                                       createViewProjection(presentation_->swapchain().extent())}}
+                                       createViewProjection(presentation_->swapchain().extent())},
+             commandPoolTopology_ == CommandPoolTopology::eSplitAttribution
+                 ? detail::SecondaryCommandPoolMode::eSeparate
+                 : detail::SecondaryCommandPoolMode::eCombined,
+             commandRecordingMode_ == CommandRecordingMode::eSecondaryCommandBuffer}
 {
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
@@ -476,9 +482,33 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->presentationFenceWait};
         presentation_->preparePresentFence(imageIndex);
     }
+    const bool measureReset = timings != nullptr;
+    const auto resetStart =
+        measureReset ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    frame_.resetPrimaryCommands();
+    const auto coordinatorResetEnd =
+        measureReset ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    if (commandPoolTopology_ == CommandPoolTopology::eSplitAttribution)
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->commandPoolReset};
-        frame_.resetCommands();
+        frame_.resetSecondaryCommands();
+    }
+    // Three samples keep the split components equal to the total without a
+    // fourth clock read disproportionately biasing the empty-pool measurement.
+    const auto resetEnd =
+        measureReset && commandPoolTopology_ == CommandPoolTopology::eSplitAttribution
+            ? std::chrono::steady_clock::now()
+            : coordinatorResetEnd;
+    if (measureReset)
+    {
+        timings->coordinatorCommandPoolReset =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(coordinatorResetEnd - resetStart);
+        if (commandPoolTopology_ == CommandPoolTopology::eSplitAttribution)
+        {
+            timings->workerCommandPoolReset = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                resetEnd - coordinatorResetEnd);
+        }
+        timings->commandPoolReset =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(resetEnd - resetStart);
     }
     recordCommands(imageIndex, drawList.drawItems, timings);
 
@@ -591,6 +621,7 @@ RendererInfo Renderer::Impl::info() const
         .depthFormat = vk::to_string(presentation_->depthBuffer().format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
         .commandRecordingMode = commandRecordingMode_,
+        .commandPoolTopology = commandPoolTopology_,
     };
 }
 
