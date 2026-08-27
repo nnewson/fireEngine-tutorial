@@ -32,64 +32,35 @@ struct PhaseStatistics
     double p95Microseconds = 0.0;    ///< Nearest-rank 95th percentile.
 };
 
-/* --- File-local functions --- */
+/* --- File-local function declarations --- */
 
 /**
  * @brief Counts a subtree without consulting Scene's private dense registry.
  * @param node Root of the subtree to count.
  * @return Number of nodes reachable from node, including node itself.
  */
-[[nodiscard]] std::size_t countSubtree(const SceneNode& node)
-{
-    std::size_t count = 1;
-    for (const std::unique_ptr<SceneNode>& child : node.children())
-    {
-        count += countSubtree(*child);
-    }
-    return count;
-}
+[[nodiscard]] std::size_t countSubtree(const SceneNode& node);
 
 /**
  * @brief Counts every observable node owned by a scene.
  * @param scene Scene whose roots and descendants are traversed.
  * @return Number of nodes owned by the scene.
  */
-[[nodiscard]] std::size_t countNodes(const Scene& scene)
-{
-    std::size_t count = 0;
-    for (const std::unique_ptr<SceneNode>& root : scene.roots())
-    {
-        count += countSubtree(*root);
-    }
-    return count;
-}
+[[nodiscard]] std::size_t countNodes(const Scene& scene);
 
 /**
  * @brief Converts one duration to fractional microseconds.
  * @param duration Nanosecond duration to convert.
  * @return Equivalent fractional number of microseconds.
  */
-[[nodiscard]] double microseconds(std::chrono::nanoseconds duration)
-{
-    return std::chrono::duration<double, std::micro>{duration}.count();
-}
+[[nodiscard]] double microseconds(std::chrono::nanoseconds duration);
 
 /**
  * @brief Names one command-buffer structure in benchmark output.
  * @param mode Recording mode selected when the renderer was constructed.
  * @return Stable human-readable label for comparisons between reports.
  */
-[[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode)
-{
-    switch (mode)
-    {
-    case CommandRecordingMode::eSecondaryCommandBuffer:
-        return "secondary command buffer";
-    case CommandRecordingMode::eDirectPrimary:
-        return "direct primary command buffer";
-    }
-    throw std::logic_error("Benchmark encountered an unknown command recording mode");
-}
+[[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode);
 
 /**
  * @brief Summarizes one non-empty collection of phase durations.
@@ -97,32 +68,7 @@ struct PhaseStatistics
  * @return Mean, median, and nearest-rank 95th percentile.
  * @throws std::logic_error if durations is empty.
  */
-[[nodiscard]] PhaseStatistics summarize(std::vector<std::chrono::nanoseconds> durations)
-{
-    if (durations.empty())
-    {
-        throw std::logic_error("Benchmark phase statistics require at least one sample");
-    }
-    std::ranges::sort(durations);
-
-    std::chrono::nanoseconds total{};
-    for (const std::chrono::nanoseconds duration : durations)
-    {
-        total += duration;
-    }
-
-    const std::size_t middle = durations.size() / 2;
-    const double median =
-        durations.size() % 2 == 0
-            ? (microseconds(durations[middle - 1]) + microseconds(durations[middle])) / 2.0
-            : microseconds(durations[middle]);
-    const std::size_t p95Index = (durations.size() * 95 + 99) / 100 - 1;
-    return {
-        .meanMicroseconds = microseconds(total) / static_cast<double>(durations.size()),
-        .medianMicroseconds = median,
-        .p95Microseconds = microseconds(durations[p95Index]),
-    };
-}
+[[nodiscard]] PhaseStatistics summarize(std::vector<std::chrono::nanoseconds> durations);
 
 /** @endcond */
 } // namespace
@@ -365,4 +311,76 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
 }
 
 /** @endcond */
+
+namespace
+{
+/** @cond INTERNAL */
+/* --- File-local functions --- */
+
+[[nodiscard]] std::size_t countSubtree(const SceneNode& node)
+{
+    std::size_t count = 1;
+    for (const std::unique_ptr<SceneNode>& child : node.children())
+    {
+        count += countSubtree(*child);
+    }
+    return count;
+}
+
+[[nodiscard]] std::size_t countNodes(const Scene& scene)
+{
+    std::size_t count = 0;
+    for (const std::unique_ptr<SceneNode>& root : scene.roots())
+    {
+        count += countSubtree(*root);
+    }
+    return count;
+}
+
+[[nodiscard]] double microseconds(std::chrono::nanoseconds duration)
+{
+    return std::chrono::duration<double, std::micro>{duration}.count();
+}
+
+[[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode)
+{
+    switch (mode)
+    {
+    case CommandRecordingMode::eSecondaryCommandBuffer:
+        return "secondary command buffer";
+    case CommandRecordingMode::eDirectPrimary:
+        return "direct primary command buffer";
+    }
+    throw std::logic_error("Benchmark encountered an unknown command recording mode");
+}
+
+[[nodiscard]] PhaseStatistics summarize(std::vector<std::chrono::nanoseconds> durations)
+{
+    if (durations.empty())
+    {
+        throw std::logic_error("Benchmark phase statistics require at least one sample");
+    }
+    std::ranges::sort(durations);
+
+    std::chrono::nanoseconds total{};
+    for (const std::chrono::nanoseconds duration : durations)
+    {
+        total += duration;
+    }
+
+    const std::size_t middle = durations.size() / 2;
+    const double median =
+        durations.size() % 2 == 0
+            ? (microseconds(durations[middle - 1]) + microseconds(durations[middle])) / 2.0
+            : microseconds(durations[middle]);
+    const std::size_t p95Index = (durations.size() * 95 + 99) / 100 - 1;
+    return {
+        .meanMicroseconds = microseconds(total) / static_cast<double>(durations.size()),
+        .medianMicroseconds = median,
+        .p95Microseconds = microseconds(durations[p95Index]),
+    };
+}
+/** @endcond */
+} // namespace
+
 } // namespace fire_engine::tutorial

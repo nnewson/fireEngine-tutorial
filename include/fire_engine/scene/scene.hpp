@@ -52,7 +52,8 @@ public:
      * @brief Adds an owned root node.
      * @param root Node whose lifetime becomes part of this scene.
      * @return Reference stable until the scene is destroyed.
-     * @throws std::invalid_argument if root is null.
+     * @throws std::invalid_argument if root is null or contains an already registered node.
+     * @throws std::length_error if the subtree cannot fit in the scene registry.
      */
     SceneNode& addRoot(std::unique_ptr<SceneNode> root);
 
@@ -64,7 +65,29 @@ public:
     SceneNode& addRoot(std::string name);
 
     /**
-     * @brief Registers new descendants and recomputes world transforms from the roots downward.
+     * @brief Attaches and registers an owned subtree under one scene-local parent.
+     * @param parent ID of a node owned by this scene.
+     * @param child Detached subtree whose lifetime becomes part of this scene.
+     * @return Reference stable until the scene is destroyed.
+     * @throws std::invalid_argument if parent is invalid, child is null, or the subtree is already
+     * registered.
+     * @throws std::length_error if the subtree cannot fit in the scene registry.
+     */
+    SceneNode& addChild(SceneNodeId parent, std::unique_ptr<SceneNode> child);
+
+    /**
+     * @brief Attaches and registers an owned subtree under one scene-owned parent.
+     * @param parent Node whose identity and address must belong to this scene.
+     * @param child Detached subtree whose lifetime becomes part of this scene.
+     * @return Reference stable until the scene is destroyed.
+     * @throws std::invalid_argument if parent is foreign, child is null, or the subtree is already
+     * registered.
+     * @throws std::length_error if the subtree cannot fit in the scene registry.
+     */
+    SceneNode& addChild(SceneNode& parent, std::unique_ptr<SceneNode> child);
+
+    /**
+     * @brief Recomputes world transforms from the roots downward.
      */
     void updateWorldTransforms();
 
@@ -96,8 +119,16 @@ public:
 
 private:
     /**
-     * @brief Assigns IDs to unregistered nodes in one hierarchy.
-     * @param node Root of the subtree inspected for new nodes.
+     * @brief Validates a detached subtree and grows registry capacity geometrically when needed.
+     * @param node Root of the incoming subtree.
+     * @throws std::invalid_argument if any node is already registered.
+     * @throws std::length_error if the subtree cannot fit in the scene registry.
+     */
+    void prepareSubtreeRegistration(const SceneNode& node);
+
+    /**
+     * @brief Assigns dense scene-local IDs to one prepared subtree.
+     * @param node Root of the subtree entering this scene.
      */
     void registerSubtree(SceneNode& node);
 

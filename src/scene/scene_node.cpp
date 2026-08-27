@@ -53,10 +53,13 @@ SceneNode& SceneNode::addChild(std::unique_ptr<SceneNode> child)
     {
         throw std::invalid_argument("A scene child cannot be null");
     }
+    if (id_.has_value())
+    {
+        throw std::logic_error(
+            "Children of a registered scene node must be added with Scene::addChild()");
+    }
 
-    SceneNode& result = *child;
-    children_.push_back(std::move(child));
-    return result;
+    return attachChild(std::move(child));
 }
 
 SceneNode& SceneNode::addChild(std::string name)
@@ -70,6 +73,13 @@ const std::vector<std::unique_ptr<SceneNode>>& SceneNode::children() const noexc
 }
 
 /* --- Private member functions --- */
+
+SceneNode& SceneNode::attachChild(std::unique_ptr<SceneNode> child)
+{
+    SceneNode& result = *child;
+    children_.push_back(std::move(child));
+    return result;
+}
 
 void SceneNode::assignId(SceneNodeId id) noexcept
 {
