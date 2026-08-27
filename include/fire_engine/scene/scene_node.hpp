@@ -80,17 +80,19 @@ public:
     void component(SceneComponent component) noexcept;
 
     /**
-     * @brief Adds an owned child node.
+     * @brief Adds an owned child node to a detached subtree.
      * @param child Node whose lifetime becomes part of this subtree.
      * @return Reference stable until this parent is destroyed.
      * @throws std::invalid_argument if child is null.
+     * @throws std::logic_error if this node is already registered; use Scene::addChild() then.
      */
     SceneNode& addChild(std::unique_ptr<SceneNode> child);
 
     /**
-     * @brief Creates and adds one named child node.
+     * @brief Creates and adds one named child node to a detached subtree.
      * @param name Name assigned to the new child.
      * @return Reference stable until this parent is destroyed.
+     * @throws std::logic_error if this node is already registered; use Scene::addChild() then.
      */
     SceneNode& addChild(std::string name);
 
@@ -102,6 +104,13 @@ public:
 
 private:
     friend class Scene;
+
+    /**
+     * @brief Attaches a child after the caller has validated the ownership transition.
+     * @param child Non-null subtree becoming owned by this node.
+     * @return Reference stable until this parent is destroyed.
+     */
+    SceneNode& attachChild(std::unique_ptr<SceneNode> child);
 
     /**
      * @brief Assigns this node its dense scene-local identity.

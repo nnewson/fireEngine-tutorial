@@ -11,6 +11,7 @@ namespace fire_engine::detail
 namespace
 {
 /** @cond INTERNAL */
+/* --- File-local function declarations --- */
 
 /**
  * @brief Selects the first supported depth-only attachment format.
@@ -18,23 +19,7 @@ namespace
  * @return Supported format suitable for depth attachment use.
  * @throws std::runtime_error if neither tutorial depth format is supported.
  */
-[[nodiscard]] vk::Format chooseDepthFormat(const vk::raii::PhysicalDevice& physicalDevice)
-{
-    constexpr std::array candidates = {
-        vk::Format::eD32Sfloat,
-        vk::Format::eD16Unorm,
-    };
-    for (const vk::Format candidate : candidates)
-    {
-        const vk::FormatProperties properties = physicalDevice.getFormatProperties(candidate);
-        if ((properties.optimalTilingFeatures &
-             vk::FormatFeatureFlagBits::eDepthStencilAttachment) != vk::FormatFeatureFlags{})
-        {
-            return candidate;
-        }
-    }
-    throw std::runtime_error("The selected device supports no depth-only attachment format");
-}
+[[nodiscard]] vk::Format chooseDepthFormat(const vk::raii::PhysicalDevice& physicalDevice);
 /** @endcond */
 } // namespace
 
@@ -68,4 +53,30 @@ const vk::raii::ImageView& DepthBuffer::view() const noexcept
 {
     return view_;
 }
+
+namespace
+{
+/** @cond INTERNAL */
+/* --- File-local functions --- */
+
+[[nodiscard]] vk::Format chooseDepthFormat(const vk::raii::PhysicalDevice& physicalDevice)
+{
+    constexpr std::array candidates = {
+        vk::Format::eD32Sfloat,
+        vk::Format::eD16Unorm,
+    };
+    for (const vk::Format candidate : candidates)
+    {
+        const vk::FormatProperties properties = physicalDevice.getFormatProperties(candidate);
+        if ((properties.optimalTilingFeatures &
+             vk::FormatFeatureFlagBits::eDepthStencilAttachment) != vk::FormatFeatureFlags{})
+        {
+            return candidate;
+        }
+    }
+    throw std::runtime_error("The selected device supports no depth-only attachment format");
+}
+/** @endcond */
+} // namespace
+
 } // namespace fire_engine::detail

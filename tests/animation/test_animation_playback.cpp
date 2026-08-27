@@ -142,7 +142,7 @@ TEST_CASE("Animation changes transforms without invalidating render preparation"
     Scene scene;
     SceneNode& animated = scene.addRoot("animator");
     animated.component(makeAnimator());
-    animated.addChild("renderable").component(object);
+    scene.addChild(animated, std::make_unique<SceneNode>("renderable")).component(object);
     scene.updateWorldTransforms();
 
     RenderPreparation preparation;
