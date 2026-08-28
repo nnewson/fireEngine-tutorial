@@ -318,7 +318,8 @@ set_tests_properties(
 )
 
 set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Ownership: separated frame slot and recording contexts \\(Step 4\\)
+    PASS_REGULAR_EXPRESSION "Ownership: cycled frame slots with per-slot recording contexts \\(Step 5\\)
+  Frames in flight: 2
   Presentation: [^\n]*
   Workload: instances=1, nodes=2, draws=1"
 )

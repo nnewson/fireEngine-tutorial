@@ -14,7 +14,7 @@ class MemoryAllocator;
 
 /* --- Classes --- */
 
-/** @brief Owns the extent-dependent depth attachment paired with one swapchain. */
+/** @brief Owns one frame-slot-local depth attachment for a swapchain extent. */
 class DepthBuffer final
 {
 public:

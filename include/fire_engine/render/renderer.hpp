@@ -43,6 +43,7 @@ struct RendererInfo
     std::string driverInfo;                    ///< Driver-specific version and build information.
     std::uint32_t graphicsQueueFamily;         ///< Queue family used for graphics work.
     std::uint32_t presentQueueFamily;          ///< Queue family used for presentation.
+    std::size_t frameSlotCount;                ///< Submission slots cycled independently.
     std::size_t swapchainImageCount;           ///< Number of presentable images.
     std::size_t presentationSemaphoreCount;    ///< One render-finished semaphore per image.
     std::uint32_t width;                       ///< Swapchain width in physical pixels.

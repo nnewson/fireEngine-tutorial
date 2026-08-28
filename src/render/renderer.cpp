@@ -47,6 +47,9 @@ namespace
 /** @brief Vulkan-free mesh layout required by the tutorial scene pipeline. */
 constexpr PipelineDescription kScenePipelineDescription{};
 
+/** @brief Submission slots cycled independently of acquired swapchain images. */
+constexpr std::size_t kFrameSlotCount = 2;
+
 /* --- File-local classes --- */
 
 /** @brief Accumulates one optional host phase without adding renderer state. */
@@ -83,6 +86,14 @@ private:
     std::chrono::steady_clock::time_point start_{}; ///< Start sampled only when output exists.
 };
 
+/** @brief Presentation-independent submission and recording state for one frame slot. */
+struct FrameResources final
+{
+    detail::FrameSlot slot;               ///< Synchronization and uniform state for the slot.
+    detail::RecordingContext coordinator; ///< Primary-command recording state for the slot.
+    detail::RecordingContext worker;      ///< Worker-local recording state for the slot.
+};
+
 /** @brief Replaceable swapchain, attachments, pipeline, and presentation completion state. */
 class PresentationState final
 {
@@ -99,8 +110,13 @@ public:
 
     /** @brief Returns the owned swapchain. @return Presentation images and semaphores. */
     [[nodiscard]] const detail::Swapchain& swapchain() const noexcept;
-    /** @brief Returns the extent-matched depth attachment. @return Owned depth state. */
-    [[nodiscard]] const detail::DepthBuffer& depthBuffer() const noexcept;
+    /**
+     * @brief Returns the depth attachment belonging to one submission slot.
+     * @param frameSlotIndex Cycled submission-slot index, independent of the acquired image.
+     * @return Extent-matched depth state safe for that slot's submitted work.
+     * @throws std::out_of_range if frameSlotIndex does not identify a submission slot.
+     */
+    [[nodiscard]] const detail::DepthBuffer& depthBuffer(std::size_t frameSlotIndex) const;
     /** @brief Returns the attachment-compatible graphics pipeline. @return Owned pipeline. */
     [[nodiscard]] const detail::Pipeline& pipeline() const noexcept;
 
@@ -130,9 +146,12 @@ private:
     // Reverse destruction releases fences and the pipeline before attachment
     // resources, and releases the depth allocation before the swapchain.
     const vk::raii::Device* logicalDevice_ = nullptr; ///< Borrowed owner used for fence waits.
-    detail::Swapchain swapchain_;     ///< Images, views, and per-image binary semaphores.
-    detail::DepthBuffer depthBuffer_; ///< Extent-matched depth image and view.
-    detail::Pipeline pipeline_;       ///< Compatible color/depth graphics pipeline.
+    detail::Swapchain swapchain_; ///< Images, views, and per-image binary semaphores.
+    // Every entry selects the same device depth format. Pipeline creation and
+    // public reporting may therefore use the first entry's format.
+    std::array<detail::DepthBuffer, kFrameSlotCount>
+        depthBuffers_;          ///< Presentation-dependent attachment per submission slot.
+    detail::Pipeline pipeline_; ///< Compatible color/depth graphics pipeline.
     std::vector<vk::raii::Fence> presentFences_; ///< Completion fence per image.
     std::vector<std::uint8_t> presentSubmitted_; ///< Whether each fence has pending work.
 };
@@ -198,39 +217,46 @@ public:
 private:
     /**
      * @brief Records the complete command-buffer sequence for one acquired image.
+     * @param frameSlotIndex Cycled submission slot whose command buffers are reusable.
      * @param imageIndex Acquired swapchain-image index.
      * @param drawItems Current ordered scene draws.
      * @param timings Optional output receiving the serial and secondary recording phases.
      */
-    void recordCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems,
-                        RendererCpuTimings* timings) const;
+    void recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
+                        const std::vector<DrawItem>& drawItems, RendererCpuTimings* timings) const;
 
     /**
      * @brief Records inherited draws and executes them from one primary geometry pass.
+     * @param frameSlotIndex Cycled submission slot owning this frame's recording contexts.
      * @param imageIndex Acquired swapchain-image index.
      * @param drawItems Current ordered scene draws.
      * @param timings Optional output receiving both command-buffer recording phases.
      */
-    void recordSecondaryCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems,
+    void recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
+                                 const std::vector<DrawItem>& drawItems,
                                  RendererCpuTimings* timings) const;
 
     /**
      * @brief Records the complete geometry pass directly into one primary command buffer.
+     * @param frameSlotIndex Cycled submission slot owning this frame's recording context.
      * @param imageIndex Acquired swapchain-image index.
      * @param drawItems Current ordered scene draws.
      * @param timings Optional output receiving the direct primary recording phase.
      */
-    void recordDirectCommands(std::uint32_t imageIndex, const std::vector<DrawItem>& drawItems,
+    void recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
+                              const std::vector<DrawItem>& drawItems,
                               RendererCpuTimings* timings) const;
 
     /**
      * @brief Begins a primary command buffer and its geometry rendering instance.
      * @param commandBuffer Primary command buffer receiving the frame prefix.
+     * @param frameSlotIndex Cycled submission slot selecting its depth attachment.
      * @param imageIndex Acquired swapchain-image index used as the color attachment.
      * @param flags Rendering flags selecting direct or secondary-command contents.
      */
     void beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
-                               std::uint32_t imageIndex, vk::RenderingFlags flags) const;
+                               std::size_t frameSlotIndex, std::uint32_t imageIndex,
+                               vk::RenderingFlags flags) const;
 
     /**
      * @brief Ends the geometry instance and records the primary command-buffer suffix.
@@ -251,25 +277,33 @@ private:
     /**
      * @brief Discards earlier depth and transitions it for this frame's writes.
      * @param commandBuffer Command buffer receiving the image barrier.
+     * @param frameSlotIndex Cycled submission slot selecting its depth attachment.
      */
-    void transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const;
+    void transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer,
+                                     std::size_t frameSlotIndex) const;
 
     /**
      * @brief Begins dynamic rendering for direct or secondary-command contents.
      * @param commandBuffer Primary command buffer receiving the rendering boundary.
+     * @param frameSlotIndex Cycled submission slot selecting its depth attachment.
      * @param imageIndex Acquired swapchain-image index used as the color attachment.
      * @param flags Rendering flags selecting direct or secondary-command contents.
      */
-    void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer, std::uint32_t imageIndex,
-                           vk::RenderingFlags flags) const;
+    void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer, std::size_t frameSlotIndex,
+                           std::uint32_t imageIndex, vk::RenderingFlags flags) const;
 
     /**
      * @brief Records fixed state shared by every draw in one command buffer.
      * @param commandBuffer Primary or secondary command buffer receiving the state.
+     * @param uniformBuffer Slot-local shader values used by the submitted command buffer.
      * @return Fresh draw-binding cache scoped to the established descriptor state.
      */
     [[nodiscard]] detail::DrawBindingState
-    bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const;
+    bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
+                      const detail::AllocatedBuffer& uniformBuffer) const;
+
+    /** @brief Reports whether any submission slot may still be in use. @return Pending state. */
+    [[nodiscard]] bool workMayBePending() const noexcept;
 
     /**
      * @brief Records the mesh bindings, constants, and indexed draw for each item.
@@ -301,9 +335,8 @@ private:
     // Presentation-dependent state replaced as one ownership group.
     std::unique_ptr<PresentationState> presentation_; ///< Swapchain-compatible resources.
 
-    detail::FrameSlot frameSlot_;                   ///< Per-frame submission state.
-    detail::RecordingContext coordinatorRecording_; ///< Primary command recording state.
-    detail::RecordingContext workerRecording_;      ///< Worker-local command recording state.
+    std::array<FrameResources, kFrameSlotCount> frames_; ///< Presentation-independent slot state.
+    std::size_t nextFrameSlotIndex_ = 0; ///< Slot selected independently of acquired images.
 
     // Prepared state compiled from the current scene dependencies.
     RenderPreparation renderPreparation_;           ///< Vulkan-free validation and plan cache.
@@ -359,15 +392,32 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
       presentation_{
           std::make_unique<PresentationState>(device_, allocator_, window.framebufferExtent())},
       // Frame storage depends on the presentation extent sampled here, so the
-      // presentation owner must be constructed before the frame slot.
-      frameSlot_{device_, allocator_,
-                 detail::FrameUniforms{
-                     .viewProjection = createViewProjection(presentation_->swapchain().extent())}},
-      coordinatorRecording_{device_, detail::RecordingBufferKind::ePrimary},
-      workerRecording_{device_,
-                       commandRecordingMode_ == CommandRecordingMode::eSecondaryCommandBuffer
-                           ? detail::RecordingBufferKind::eSecondary
-                           : detail::RecordingBufferKind::eNone}
+      // presentation owner must be constructed before the submission slots.
+      frames_{
+          FrameResources{
+              .slot = detail::FrameSlot{device_, allocator_,
+                                        detail::FrameUniforms{
+                                            .viewProjection = createViewProjection(
+                                                presentation_->swapchain().extent())}},
+              .coordinator =
+                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+              .worker =
+                  detail::RecordingContext{device_,
+                                           commandRecordingMode_ ==
+                                                   CommandRecordingMode::eSecondaryCommandBuffer
+                                               ? detail::RecordingBufferKind::eSecondary
+                                               : detail::RecordingBufferKind::eNone}},
+          FrameResources{
+              .slot = detail::FrameSlot{device_, allocator_,
+                                        detail::FrameUniforms{
+                                            .viewProjection = createViewProjection(
+                                                presentation_->swapchain().extent())}},
+              .coordinator =
+                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+              .worker = detail::RecordingContext{
+                  device_, commandRecordingMode_ == CommandRecordingMode::eSecondaryCommandBuffer
+                               ? detail::RecordingBufferKind::eSecondary
+                               : detail::RecordingBufferKind::eNone}}}
 {
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
@@ -377,15 +427,18 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
     {
         throw std::runtime_error("VMA returned a null allocator");
     }
-    if (frameSlot_.frameFinished().getStatus() != vk::Result::eSuccess)
+    for (const FrameResources& frame : frames_)
     {
-        throw std::runtime_error("The frame-finished fence was not initially signaled");
+        if (frame.slot.frameFinished().getStatus() != vk::Result::eSuccess)
+        {
+            throw std::runtime_error("A frame-finished fence was not initially signaled");
+        }
     }
 }
 
 Renderer::Impl::~Impl() noexcept
 {
-    if (!frameSlot_.workMayBePending())
+    if (!workMayBePending())
     {
         return;
     }
@@ -425,7 +478,7 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
     // Replacing compiled buffers requires earlier submissions to have
     // finished using them. Identical preparation inputs return above and
     // avoid both this wait and every allocation below.
-    if (frameSlot_.workMayBePending())
+    if (workMayBePending())
     {
         waitIdle();
     }
@@ -465,10 +518,13 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
     }
 
     const vk::raii::Device& logicalDevice = device_.logicalDevice();
+    const std::size_t frameSlotIndex = nextFrameSlotIndex_;
+    FrameResources& frame = frames_[frameSlotIndex];
+    detail::FrameSlot& frameSlot = frame.slot;
     vk::Result fenceResult = vk::Result::eSuccess;
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameFenceWait};
-        fenceResult = logicalDevice.waitForFences(*frameSlot_.frameFinished(), vk::True,
+        fenceResult = logicalDevice.waitForFences(*frameSlot.frameFinished(), vk::True,
                                                   std::numeric_limits<std::uint64_t>::max());
     }
     if (fenceResult != vk::Result::eSuccess)
@@ -483,14 +539,14 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->imageAcquisitionWait};
         const auto [result, acquiredImageIndex] =
             presentation_->swapchain().handle().acquireNextImage(
-                std::numeric_limits<std::uint64_t>::max(), *frameSlot_.imageAvailable());
+                std::numeric_limits<std::uint64_t>::max(), *frameSlot.imageAvailable());
         imageIndex = acquiredImageIndex;
         swapchainIsSuboptimal = result == vk::Result::eSuboptimalKHR;
     }
     catch (const vk::OutOfDateKHRError&)
     {
         // The fence is still signaled because acquisition happens before
-        // its reset, so eventual recreation can reuse this frame slot.
+        // its reset. Do not advance the cycle when this slot submitted nothing.
         return RenderResult::eNotPresented;
     }
 
@@ -500,9 +556,9 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->coordinatorCommandPoolReset};
-        coordinatorRecording_.resetCommands();
+        frame.coordinator.resetCommands();
     }
-    recordCommands(imageIndex, drawList.drawItems, timings);
+    recordCommands(frameSlotIndex, imageIndex, drawList.drawItems, timings);
     if (timings != nullptr)
     {
         timings->commandPoolReset =
@@ -513,14 +569,14 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
     // successful submission will signal the fence, while errors unwind.
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->queueSubmission};
-        logicalDevice.resetFences(*frameSlot_.frameFinished());
+        logicalDevice.resetFences(*frameSlot.frameFinished());
 
         const vk::SemaphoreSubmitInfo waitInfo{
-            .semaphore = *frameSlot_.imageAvailable(),
+            .semaphore = *frameSlot.imageAvailable(),
             .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         };
         const vk::CommandBufferSubmitInfo commandInfo{
-            .commandBuffer = *coordinatorRecording_.commandBuffer(),
+            .commandBuffer = *frame.coordinator.commandBuffer(),
         };
         const vk::SemaphoreSubmitInfo signalInfo{
             .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
@@ -534,9 +590,10 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
             .signalSemaphoreInfoCount = 1,
             .pSignalSemaphoreInfos = &signalInfo,
         };
-        device_.graphicsQueue().submit2(submitInfo, *frameSlot_.frameFinished());
+        device_.graphicsQueue().submit2(submitInfo, *frameSlot.frameFinished());
     }
-    frameSlot_.markWorkPending();
+    frameSlot.markWorkPending();
+    nextFrameSlotIndex_ = (frameSlotIndex + 1) % kFrameSlotCount;
 
     const vk::Semaphore renderFinished = *presentation_->swapchain().renderFinished(imageIndex);
     const vk::SwapchainKHR swapchain = *presentation_->swapchain().handle();
@@ -577,7 +634,22 @@ void Renderer::Impl::waitIdle()
 {
     device_.logicalDevice().waitIdle();
     presentation_->waitForPresentations();
-    frameSlot_.clearPendingWork();
+    for (FrameResources& frame : frames_)
+    {
+        frame.slot.clearPendingWork();
+    }
+}
+
+bool Renderer::Impl::workMayBePending() const noexcept
+{
+    for (const FrameResources& frame : frames_)
+    {
+        if (frame.slot.workMayBePending())
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
@@ -594,9 +666,13 @@ bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
     const vk::SwapchainKHR oldSwapchain = *presentation_->swapchain().handle();
     auto replacement =
         std::make_unique<PresentationState>(device_, allocator_, framebufferExtent, oldSwapchain);
-    frameSlot_.writeUniforms(detail::FrameUniforms{
+    const detail::FrameUniforms uniforms{
         .viewProjection = createViewProjection(replacement->swapchain().extent()),
-    });
+    };
+    for (const FrameResources& frame : frames_)
+    {
+        frame.slot.writeUniforms(uniforms);
+    }
     presentation_ = std::move(replacement);
     return true;
 }
@@ -609,45 +685,49 @@ RendererInfo Renderer::Impl::info() const
         .driverInfo = device_.driverInfo(),
         .graphicsQueueFamily = device_.graphicsQueueFamily(),
         .presentQueueFamily = device_.presentQueueFamily(),
+        .frameSlotCount = frames_.size(),
         .swapchainImageCount = presentation_->swapchain().imageCount(),
         .presentationSemaphoreCount = presentation_->swapchain().renderFinished().size(),
         .width = presentation_->swapchain().extent().width,
         .height = presentation_->swapchain().extent().height,
         .imageFormat = vk::to_string(presentation_->swapchain().imageFormat()),
-        .depthFormat = vk::to_string(presentation_->depthBuffer().format()),
+        .depthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
         .commandRecordingMode = commandRecordingMode_,
     };
 }
 
-void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
+void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                     const std::vector<DrawItem>& drawItems,
                                     RendererCpuTimings* timings) const
 {
+    const detail::RecordingContext& workerRecording = frames_[frameSlotIndex].worker;
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->workerCommandPoolReset};
-        workerRecording_.resetCommands();
+        workerRecording.resetCommands();
     }
     if (commandRecordingMode_ == CommandRecordingMode::eDirectPrimary)
     {
-        recordDirectCommands(imageIndex, drawItems, timings);
+        recordDirectCommands(frameSlotIndex, imageIndex, drawItems, timings);
         return;
     }
-    recordSecondaryCommands(imageIndex, drawItems, timings);
+    recordSecondaryCommands(frameSlotIndex, imageIndex, drawItems, timings);
 }
 
-void Renderer::Impl::recordSecondaryCommands(std::uint32_t imageIndex,
+void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                              const std::vector<DrawItem>& drawItems,
                                              RendererCpuTimings* timings) const
 {
-    const vk::raii::CommandBuffer& secondaryCommandBuffer = workerRecording_.commandBuffer();
+    const FrameResources& frame = frames_[frameSlotIndex];
+    const vk::raii::CommandBuffer& secondaryCommandBuffer = frame.worker.commandBuffer();
+    const detail::AllocatedBuffer& uniformBuffer = frame.slot.uniformBuffer();
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandRecording};
         const vk::Format colorFormat = presentation_->swapchain().imageFormat();
         const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
             .colorAttachmentCount = 1,
             .pColorAttachmentFormats = &colorFormat,
-            .depthAttachmentFormat = presentation_->depthBuffer().format(),
+            .depthAttachmentFormat = presentation_->depthBuffer(frameSlotIndex).format(),
             .rasterizationSamples = vk::SampleCountFlagBits::e1,
         };
         const vk::CommandBufferInheritanceInfo inheritanceInfo{
@@ -659,15 +739,16 @@ void Renderer::Impl::recordSecondaryCommands(std::uint32_t imageIndex,
             .pInheritanceInfo = &inheritanceInfo,
         };
         secondaryCommandBuffer.begin(secondaryBeginInfo);
-        detail::DrawBindingState bindingState = bindGeometryState(secondaryCommandBuffer);
+        detail::DrawBindingState bindingState =
+            bindGeometryState(secondaryCommandBuffer, uniformBuffer);
         recordDraws(secondaryCommandBuffer, drawItems, std::move(bindingState));
         secondaryCommandBuffer.end();
     }
 
-    const vk::raii::CommandBuffer& primaryCommandBuffer = coordinatorRecording_.commandBuffer();
+    const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
-        beginPrimaryRecording(primaryCommandBuffer, imageIndex,
+        beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex,
                               vk::RenderingFlagBits::eContentsSecondaryCommandBuffers);
     }
     {
@@ -681,28 +762,31 @@ void Renderer::Impl::recordSecondaryCommands(std::uint32_t imageIndex,
     }
 }
 
-void Renderer::Impl::recordDirectCommands(std::uint32_t imageIndex,
+void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                           const std::vector<DrawItem>& drawItems,
                                           RendererCpuTimings* timings) const
 {
     CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
-    const vk::raii::CommandBuffer& primaryCommandBuffer = coordinatorRecording_.commandBuffer();
-    beginPrimaryRecording(primaryCommandBuffer, imageIndex, {});
-    detail::DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer);
+    const FrameResources& frame = frames_[frameSlotIndex];
+    const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
+    beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex, {});
+    detail::DrawBindingState bindingState =
+        bindGeometryState(primaryCommandBuffer, frame.slot.uniformBuffer());
     recordDraws(primaryCommandBuffer, drawItems, std::move(bindingState));
     endPrimaryRecording(primaryCommandBuffer, imageIndex);
 }
 
 void Renderer::Impl::beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
-                                           std::uint32_t imageIndex, vk::RenderingFlags flags) const
+                                           std::size_t frameSlotIndex, std::uint32_t imageIndex,
+                                           vk::RenderingFlags flags) const
 {
     const vk::CommandBufferBeginInfo beginInfo{
         .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
     };
     commandBuffer.begin(beginInfo);
     transitionToAttachment(commandBuffer, imageIndex);
-    transitionDepthToAttachment(commandBuffer);
-    beginGeometryPass(commandBuffer, imageIndex, flags);
+    transitionDepthToAttachment(commandBuffer, frameSlotIndex);
+    beginGeometryPass(commandBuffer, frameSlotIndex, imageIndex, flags);
 }
 
 void Renderer::Impl::endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
@@ -713,11 +797,12 @@ void Renderer::Impl::endPrimaryRecording(const vk::raii::CommandBuffer& commandB
     commandBuffer.end();
 }
 
-void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer) const
+void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer,
+                                                 std::size_t frameSlotIndex) const
 {
     // The depth value is cleared before every use, so no previous contents need
-    // preserving. The sole frame fence has completed before this command buffer
-    // is recorded, making it safe to discard the previous frame's depth writes.
+    // preserving. This slot's fence has completed before its command buffer is
+    // recorded, making it safe to discard that slot's previous depth writes.
     const vk::ImageMemoryBarrier2 toAttachment{
         .srcStageMask = vk::PipelineStageFlagBits2::eNone,
         .srcAccessMask = vk::AccessFlagBits2::eNone,
@@ -729,7 +814,7 @@ void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& 
         .newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = presentation_->depthBuffer().image(),
+        .image = presentation_->depthBuffer(frameSlotIndex).image(),
         .subresourceRange = detail::kDepthSubresourceRange,
     };
     const vk::DependencyInfo dependency{
@@ -764,7 +849,8 @@ void Renderer::Impl::transitionToAttachment(const vk::raii::CommandBuffer& comma
 }
 
 void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer,
-                                       std::uint32_t imageIndex, vk::RenderingFlags flags) const
+                                       std::size_t frameSlotIndex, std::uint32_t imageIndex,
+                                       vk::RenderingFlags flags) const
 {
     const vk::ClearValue clearValue{
         .color = {.float32 = std::array{0.015f, 0.02f, 0.03f, 1.0f}},
@@ -780,7 +866,7 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .depthStencil = {.depth = 1.0f, .stencil = 0},
     };
     const vk::RenderingAttachmentInfo depthAttachment{
-        .imageView = *presentation_->depthBuffer().view(),
+        .imageView = *presentation_->depthBuffer(frameSlotIndex).view(),
         .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
         .loadOp = vk::AttachmentLoadOp::eClear,
         .storeOp = vk::AttachmentStoreOp::eDontCare,
@@ -802,7 +888,8 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
 }
 
 detail::DrawBindingState
-Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) const
+Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
+                                  const detail::AllocatedBuffer& uniformBuffer) const
 {
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                *presentation_->pipeline().pipeline());
@@ -817,7 +904,7 @@ Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) 
     commandBuffer.setScissor(0, scissor);
 
     const vk::DescriptorBufferInfo uniformInfo{
-        .buffer = frameSlot_.uniformBuffer().handle(),
+        .buffer = uniformBuffer.handle(),
         .offset = 0,
         .range = sizeof(detail::FrameUniforms),
     };
@@ -909,8 +996,10 @@ PresentationState::PresentationState(const detail::Device& device,
                                      vk::SwapchainKHR oldSwapchain)
     : logicalDevice_{&device.logicalDevice()},
       swapchain_{device, framebufferExtent, oldSwapchain},
-      depthBuffer_{device, allocator, swapchain_.extent()},
-      pipeline_{device, kScenePipelineDescription, swapchain_.imageFormat(), depthBuffer_.format()},
+      depthBuffers_{detail::DepthBuffer{device, allocator, swapchain_.extent()},
+                    detail::DepthBuffer{device, allocator, swapchain_.extent()}},
+      pipeline_{device, kScenePipelineDescription, swapchain_.imageFormat(),
+                depthBuffers_.front().format()},
       presentSubmitted_(swapchain_.imageCount(), 0)
 {
     if (swapchain_.imageCount() == 0 ||
@@ -933,9 +1022,9 @@ const detail::Swapchain& PresentationState::swapchain() const noexcept
     return swapchain_;
 }
 
-const detail::DepthBuffer& PresentationState::depthBuffer() const noexcept
+const detail::DepthBuffer& PresentationState::depthBuffer(std::size_t frameSlotIndex) const
 {
-    return depthBuffer_;
+    return depthBuffers_.at(frameSlotIndex);
 }
 
 const detail::Pipeline& PresentationState::pipeline() const noexcept
