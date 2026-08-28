@@ -15,8 +15,10 @@
 #include <fire_engine/render/detail/draw_binding_state.hpp>
 #include <fire_engine/render/detail/draw_constants.hpp>
 #include <fire_engine/render/detail/frame_in_flight.hpp>
+#include <fire_engine/render/detail/frame_slot.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
 #include <fire_engine/render/detail/pipeline.hpp>
+#include <fire_engine/render/detail/recording_context.hpp>
 #include <fire_engine/render/detail/resource_compiler.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene.hpp>
@@ -195,6 +197,46 @@ public:
 
 private:
     /**
+     * @brief Returns the active frame's acquisition semaphore.
+     * @return Semaphore owned by the selected legacy frame or separated slot.
+     */
+    [[nodiscard]] const vk::raii::Semaphore& imageAvailable() const noexcept;
+    /**
+     * @brief Returns the active frame's submission fence.
+     * @return Fence owned by the selected legacy frame or separated slot.
+     */
+    [[nodiscard]] const vk::raii::Fence& frameFinished() const noexcept;
+    /**
+     * @brief Returns uniform storage selected by the active ownership path.
+     * @return Buffer owned by the selected legacy frame or separated slot.
+     */
+    [[nodiscard]] const detail::AllocatedBuffer& uniformBuffer() const noexcept;
+    /**
+     * @brief Returns the primary command buffer selected by the active ownership path.
+     * @return Buffer owned by the legacy frame or coordinator recording context.
+     */
+    [[nodiscard]] const vk::raii::CommandBuffer& primaryCommandBuffer() const noexcept;
+    /**
+     * @brief Returns the secondary command buffer selected by the active ownership path.
+     * @return Buffer owned by the legacy frame or worker recording context.
+     */
+    [[nodiscard]] const vk::raii::CommandBuffer& secondaryCommandBuffer() const noexcept;
+    /**
+     * @brief Replaces uniforms selected by the active ownership path.
+     * @param uniforms New shader values copied into the selected frame storage.
+     */
+    void writeUniforms(const detail::FrameUniforms& uniforms) const;
+    /**
+     * @brief Reports whether submitted work may still reference renderer resources.
+     * @return Pending state held by the legacy renderer or separated frame slot.
+     */
+    [[nodiscard]] bool workMayBePending() const noexcept;
+    /** @brief Marks the active frame arrangement as potentially in use. */
+    void markWorkPending() noexcept;
+    /** @brief Clears pending-work state after device retirement. */
+    void clearPendingWork() noexcept;
+
+    /**
      * @brief Records the complete command-buffer sequence for one acquired image.
      * @param imageIndex Acquired swapchain-image index.
      * @param drawItems Current ordered scene draws.
@@ -292,6 +334,7 @@ private:
 
     // Foundational long-lived state.
     CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
+    RendererOwnershipMode ownershipMode_;       ///< Permanent split or legacy paired control.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
     detail::ResourceCompiler resourceCompiler_; ///< Dedicated setup-time upload context.
@@ -299,10 +342,13 @@ private:
     // Presentation-dependent state replaced as one ownership group.
     std::unique_ptr<PresentationState> presentation_; ///< Swapchain-compatible resources.
 
-    // Per-frame submission state.
-    // Its initializer reads presentation_, so frame_ must remain declared after it.
-    detail::FrameInFlight frame_;   ///< Reusable resources for the current frame slot.
-    bool workMayBePending_ = false; ///< Whether destruction requires a defensive wait.
+    // Exactly one ownership arrangement is engaged. The legacy object remains
+    // complete so the paired control prices the ownership refactor, not merely pool count.
+    std::optional<detail::FrameInFlight> legacyFrame_; ///< Complete pre-Step-4 control.
+    bool legacyWorkMayBePending_ = false;              ///< Legacy renderer bookkeeping.
+    std::optional<detail::FrameSlot> frameSlot_;       ///< Permanent submission-slot state.
+    std::optional<detail::RecordingContext> coordinatorRecording_; ///< Primary context.
+    std::optional<detail::RecordingContext> workerRecording_;      ///< Worker-local context.
 
     // Prepared state compiled from the current scene dependencies.
     RenderPreparation renderPreparation_;           ///< Vulkan-free validation and plan cache.
@@ -352,13 +398,11 @@ RendererInfo Renderer::info() const
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
                      RendererConfiguration configuration)
     : commandRecordingMode_{configuration.commandRecordingMode},
+      ownershipMode_{configuration.ownershipMode},
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
-      presentation_{std::make_unique<PresentationState>(device_, allocator_, window)},
-      frame_{device_, allocator_,
-             detail::FrameUniforms{.viewProjection =
-                                       createViewProjection(presentation_->swapchain().extent())}}
+      presentation_{std::make_unique<PresentationState>(device_, allocator_, window)}
 {
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
@@ -368,7 +412,25 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
     {
         throw std::runtime_error("VMA returned a null allocator");
     }
-    if (frame_.frameFinished().getStatus() != vk::Result::eSuccess)
+    const detail::FrameUniforms initialUniforms{
+        .viewProjection = createViewProjection(presentation_->swapchain().extent()),
+    };
+    // Frame storage depends on the presentation extent sampled above, so the
+    // presentation owner must be constructed before either arrangement is emplaced.
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        legacyFrame_.emplace(device_, allocator_, initialUniforms);
+    }
+    else
+    {
+        frameSlot_.emplace(device_, allocator_, initialUniforms);
+        coordinatorRecording_.emplace(device_, detail::RecordingBufferKind::ePrimary);
+        workerRecording_.emplace(device_, commandRecordingMode_ ==
+                                                  CommandRecordingMode::eSecondaryCommandBuffer
+                                              ? detail::RecordingBufferKind::eSecondary
+                                              : detail::RecordingBufferKind::eNone);
+    }
+    if (frameFinished().getStatus() != vk::Result::eSuccess)
     {
         throw std::runtime_error("The frame-finished fence was not initially signaled");
     }
@@ -376,7 +438,7 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
 
 Renderer::Impl::~Impl() noexcept
 {
-    if (!workMayBePending_)
+    if (!workMayBePending())
     {
         return;
     }
@@ -416,7 +478,7 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
     // Replacing compiled buffers requires earlier submissions to have
     // finished using them. Identical preparation inputs return above and
     // avoid both this wait and every allocation below.
-    if (workMayBePending_)
+    if (workMayBePending())
     {
         waitIdle();
     }
@@ -459,7 +521,7 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
     vk::Result fenceResult = vk::Result::eSuccess;
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameFenceWait};
-        fenceResult = logicalDevice.waitForFences(*frame_.frameFinished(), vk::True,
+        fenceResult = logicalDevice.waitForFences(*frameFinished(), vk::True,
                                                   std::numeric_limits<std::uint64_t>::max());
     }
     if (fenceResult != vk::Result::eSuccess)
@@ -474,7 +536,7 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->imageAcquisitionWait};
         const auto [result, acquiredImageIndex] =
             presentation_->swapchain().handle().acquireNextImage(
-                std::numeric_limits<std::uint64_t>::max(), *frame_.imageAvailable());
+                std::numeric_limits<std::uint64_t>::max(), *imageAvailable());
         imageIndex = acquiredImageIndex;
         swapchainIsSuboptimal = result == vk::Result::eSuboptimalKHR;
     }
@@ -489,24 +551,37 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->presentationFenceWait};
         presentation_->preparePresentFence(imageIndex);
     }
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
     {
+        assert(legacyFrame_.has_value());
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->commandPoolReset};
-        frame_.resetCommands();
+        legacyFrame_->resetCommands();
+    }
+    else
+    {
+        assert(coordinatorRecording_.has_value());
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->coordinatorCommandPoolReset};
+        coordinatorRecording_->resetCommands();
     }
     recordCommands(imageIndex, drawList.drawItems, timings);
+    if (timings != nullptr && ownershipMode_ == RendererOwnershipMode::eSeparated)
+    {
+        timings->commandPoolReset =
+            timings->coordinatorCommandPoolReset + timings->workerCommandPoolReset;
+    }
 
     // Nothing intentionally abandons the frame after this reset: a
     // successful submission will signal the fence, while errors unwind.
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->queueSubmission};
-        logicalDevice.resetFences(*frame_.frameFinished());
+        logicalDevice.resetFences(*frameFinished());
 
         const vk::SemaphoreSubmitInfo waitInfo{
-            .semaphore = *frame_.imageAvailable(),
+            .semaphore = *imageAvailable(),
             .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         };
         const vk::CommandBufferSubmitInfo commandInfo{
-            .commandBuffer = *frame_.commandBuffer(),
+            .commandBuffer = *primaryCommandBuffer(),
         };
         const vk::SemaphoreSubmitInfo signalInfo{
             .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
@@ -520,9 +595,9 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
             .signalSemaphoreInfoCount = 1,
             .pSignalSemaphoreInfos = &signalInfo,
         };
-        device_.graphicsQueue().submit2(submitInfo, *frame_.frameFinished());
+        device_.graphicsQueue().submit2(submitInfo, *frameFinished());
     }
-    workMayBePending_ = true;
+    markWorkPending();
 
     const vk::Semaphore renderFinished = *presentation_->swapchain().renderFinished(imageIndex);
     const vk::SwapchainKHR swapchain = *presentation_->swapchain().handle();
@@ -563,7 +638,7 @@ void Renderer::Impl::waitIdle()
 {
     device_.logicalDevice().waitIdle();
     presentation_->waitForPresentations();
-    workMayBePending_ = false;
+    clearPendingWork();
 }
 
 bool Renderer::Impl::recreatePresentation(const Window& window)
@@ -581,7 +656,7 @@ bool Renderer::Impl::recreatePresentation(const Window& window)
     const vk::SwapchainKHR oldSwapchain = *presentation_->swapchain().handle();
     auto replacement =
         std::make_unique<PresentationState>(device_, allocator_, window, oldSwapchain);
-    frame_.writeUniforms(detail::FrameUniforms{
+    writeUniforms(detail::FrameUniforms{
         .viewProjection = createViewProjection(replacement->swapchain().extent()),
     });
     presentation_ = std::move(replacement);
@@ -604,13 +679,120 @@ RendererInfo Renderer::Impl::info() const
         .depthFormat = vk::to_string(presentation_->depthBuffer().format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
         .commandRecordingMode = commandRecordingMode_,
+        .ownershipMode = ownershipMode_,
     };
+}
+
+const vk::raii::Semaphore& Renderer::Impl::imageAvailable() const noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        assert(legacyFrame_.has_value());
+        return legacyFrame_->imageAvailable();
+    }
+    assert(frameSlot_.has_value());
+    return frameSlot_->imageAvailable();
+}
+
+const vk::raii::Fence& Renderer::Impl::frameFinished() const noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        assert(legacyFrame_.has_value());
+        return legacyFrame_->frameFinished();
+    }
+    assert(frameSlot_.has_value());
+    return frameSlot_->frameFinished();
+}
+
+const detail::AllocatedBuffer& Renderer::Impl::uniformBuffer() const noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        assert(legacyFrame_.has_value());
+        return legacyFrame_->uniformBuffer();
+    }
+    assert(frameSlot_.has_value());
+    return frameSlot_->uniformBuffer();
+}
+
+const vk::raii::CommandBuffer& Renderer::Impl::primaryCommandBuffer() const noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        assert(legacyFrame_.has_value());
+        return legacyFrame_->commandBuffer();
+    }
+    assert(coordinatorRecording_.has_value());
+    return coordinatorRecording_->commandBuffer();
+}
+
+const vk::raii::CommandBuffer& Renderer::Impl::secondaryCommandBuffer() const noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        assert(legacyFrame_.has_value());
+        return legacyFrame_->secondaryCommandBuffer();
+    }
+    assert(workerRecording_.has_value());
+    assert(workerRecording_->hasCommandBuffer());
+    return workerRecording_->commandBuffer();
+}
+
+void Renderer::Impl::writeUniforms(const detail::FrameUniforms& uniforms) const
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        assert(legacyFrame_.has_value());
+        legacyFrame_->writeUniforms(uniforms);
+        return;
+    }
+    assert(frameSlot_.has_value());
+    frameSlot_->writeUniforms(uniforms);
+}
+
+bool Renderer::Impl::workMayBePending() const noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        return legacyWorkMayBePending_;
+    }
+    assert(frameSlot_.has_value());
+    return frameSlot_->workMayBePending();
+}
+
+void Renderer::Impl::markWorkPending() noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        legacyWorkMayBePending_ = true;
+        return;
+    }
+    assert(frameSlot_.has_value());
+    frameSlot_->markWorkPending();
+}
+
+void Renderer::Impl::clearPendingWork() noexcept
+{
+    if (ownershipMode_ == RendererOwnershipMode::eLegacyCombinedControl)
+    {
+        legacyWorkMayBePending_ = false;
+        return;
+    }
+    assert(frameSlot_.has_value());
+    frameSlot_->clearPendingWork();
 }
 
 void Renderer::Impl::recordCommands(std::uint32_t imageIndex,
                                     const std::vector<DrawItem>& drawItems,
                                     RendererCpuTimings* timings) const
 {
+    if (ownershipMode_ == RendererOwnershipMode::eSeparated)
+    {
+        assert(workerRecording_.has_value());
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->workerCommandPoolReset};
+        workerRecording_->resetCommands();
+    }
     if (commandRecordingMode_ == CommandRecordingMode::eDirectPrimary)
     {
         recordDirectCommands(imageIndex, drawItems, timings);
@@ -623,7 +805,7 @@ void Renderer::Impl::recordSecondaryCommands(std::uint32_t imageIndex,
                                              const std::vector<DrawItem>& drawItems,
                                              RendererCpuTimings* timings) const
 {
-    const vk::raii::CommandBuffer& secondaryCommandBuffer = frame_.secondaryCommandBuffer();
+    const vk::raii::CommandBuffer& secondaryCommandBuffer = this->secondaryCommandBuffer();
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandRecording};
         const vk::Format colorFormat = presentation_->swapchain().imageFormat();
@@ -647,7 +829,7 @@ void Renderer::Impl::recordSecondaryCommands(std::uint32_t imageIndex,
         secondaryCommandBuffer.end();
     }
 
-    const vk::raii::CommandBuffer& primaryCommandBuffer = frame_.commandBuffer();
+    const vk::raii::CommandBuffer& primaryCommandBuffer = this->primaryCommandBuffer();
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
         beginPrimaryRecording(primaryCommandBuffer, imageIndex,
@@ -669,7 +851,7 @@ void Renderer::Impl::recordDirectCommands(std::uint32_t imageIndex,
                                           RendererCpuTimings* timings) const
 {
     CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
-    const vk::raii::CommandBuffer& primaryCommandBuffer = frame_.commandBuffer();
+    const vk::raii::CommandBuffer& primaryCommandBuffer = this->primaryCommandBuffer();
     beginPrimaryRecording(primaryCommandBuffer, imageIndex, {});
     detail::DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer);
     recordDraws(primaryCommandBuffer, drawItems, std::move(bindingState));
@@ -806,7 +988,7 @@ Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) 
     commandBuffer.setScissor(0, scissor);
 
     const vk::DescriptorBufferInfo uniformInfo{
-        .buffer = frame_.uniformBuffer().handle(),
+        .buffer = uniformBuffer().handle(),
         .offset = 0,
         .range = sizeof(detail::FrameUniforms),
     };

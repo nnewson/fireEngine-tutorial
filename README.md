@@ -66,15 +66,24 @@ secondary command buffers, not an alternative production renderer:
 ./build/fireEngineTutorial --benchmark 10000 --direct-primary
 ```
 
+During the Step-4 ownership measurement, add `--legacy-frame-in-flight` to run
+the complete pre-split `FrameInFlight` arrangement from the same binary. This is
+a temporary paired control; the default owns submission state in a `FrameSlot`
+and primary/worker command pools in separate recording contexts:
+
+```sh
+./build/fireEngineTutorial --benchmark 10000 --legacy-frame-in-flight
+```
+
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
-draw-list construction, draw-list validation, command-pool reset, primary and
-secondary recording, submission, and presentation waits. It also reports the
-measured share that secondary-recording workers could divide and ideal speedup
-ceilings when only that measured region divides. The current combined command
-pool prevents assigning its reset cost to primary or worker recording until
-those owners are separated. Frames affected by out-of-date or suboptimal
-presentation are excluded from the measured sample set.
+draw-list construction, draw-list validation, coordinator and worker command-
+pool reset, primary and secondary recording, submission, and presentation
+waits. The separated report attributes worker-owned reset and recording work;
+it does not claim a placement speedup before workers exist. The legacy control
+retains the combined-reset report and its secondary-recording-only ceilings.
+Frames affected by out-of-date or suboptimal presentation are excluded from
+the measured sample set.
 
 Use a Release build for performance results. Values are comparable only for
 the same workload, build configuration, machine, and Vulkan driver; hosted CI
@@ -156,9 +165,11 @@ belonging to that acquired image.
 
 Synchronization objects are split by what indexes them, which is the boundary
 that makes both swapchain recreation and multiple frames in flight tractable
-later. `FrameInFlight` owns what belongs to a frame: the image-available
-semaphore that orders acquisition before rendering, and the fence that tells the
-CPU when the frame's submitted work has finished executing. `Swapchain` owns what
+later. `FrameSlot` owns what belongs to a submission slot: uniform storage, the
+image-available semaphore that orders acquisition before rendering, the fence
+that tells the CPU when submitted work has finished, and pending-work state.
+Independent recording contexts own the coordinator's primary pool and the
+worker's secondary pool. `Swapchain` owns what
 belongs to an image: one render-finished semaphore each, so presentation cannot
 still be waiting on a semaphore when a later frame signals it again. The frame
 fence cannot cover that case, because presentation runs after the submission the
