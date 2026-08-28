@@ -3,6 +3,7 @@
 #include <fire_engine/core/detail/hash.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <functional>
 #include <limits>
 #include <stdexcept>
@@ -50,7 +51,7 @@ SceneNode& Scene::addRoot(std::unique_ptr<SceneNode> root)
     SceneNode& result = *root;
     prepareSubtreeRegistration(result);
     roots_.push_back(std::move(root));
-    registerSubtree(result);
+    registerSubtree(result, SceneNodeId{});
     return result;
 }
 
@@ -72,7 +73,7 @@ SceneNode& Scene::addChild(SceneNodeId parent, std::unique_ptr<SceneNode> child)
 
     prepareSubtreeRegistration(*child);
     SceneNode& result = nodes_[parent.value]->attachChild(std::move(child));
-    registerSubtree(result);
+    registerSubtree(result, parent);
     return result;
 }
 
@@ -101,12 +102,26 @@ void Scene::updateWorldTransforms()
     }
 }
 
-SceneDrawList Scene::buildDrawItems() const
+void Scene::updateWorldTransformsFlat()
 {
-    SceneDrawList output;
+    assert(nodes_.size() == parentIds_.size());
+    const Mat4 identity = Mat4::identity();
+    for (std::size_t index = 0; index < nodes_.size(); ++index)
+    {
+        SceneNode& node = *nodes_[index];
+        const SceneNodeId parent = parentIds_[index];
+        assert(!parent.valid() || parent.value < index);
+        const Mat4& parentWorld = parent.valid() ? nodes_[parent.value]->worldTransform_ : identity;
+        node.worldTransform_ = parentWorld * node.localTransform_.matrix();
+    }
+}
+
+SceneDrawList Scene::buildDrawItems(SceneDrawListArena& arena) const
+{
+    arena.drawItems_.clear();
     for (const std::unique_ptr<SceneNode>& root : roots_)
     {
-        root->appendDrawItems(output.drawItems);
+        root->appendDrawItems(arena.drawItems_);
     }
 
     // Hash only preparation dependencies. Exact IDs are retained in drawItems
@@ -114,14 +129,17 @@ SceneDrawList Scene::buildDrawItems() const
     constexpr std::size_t kHashCombineConstant = static_cast<std::size_t>(
         sizeof(std::size_t) == sizeof(std::uint64_t) ? detail::k64BitGoldenRatio
                                                      : detail::k32BitGoldenRatio);
-    output.dependencyHash = output.drawItems.size();
-    for (const DrawItem& drawItem : output.drawItems)
+    std::size_t dependencyHash = arena.drawItems_.size();
+    for (const DrawItem& drawItem : arena.drawItems_)
     {
         const std::size_t value = std::hash<std::size_t>{}(drawItem.renderObject.value);
-        output.dependencyHash ^= value + kHashCombineConstant + (output.dependencyHash << 6U) +
-                                 (output.dependencyHash >> 2U);
+        dependencyHash ^=
+            value + kHashCombineConstant + (dependencyHash << 6U) + (dependencyHash >> 2U);
     }
-    return output;
+    return {
+        .drawItems = arena.drawItems_,
+        .dependencyHash = dependencyHash,
+    };
 }
 
 const std::vector<std::unique_ptr<SceneNode>>& Scene::roots() const noexcept
@@ -152,24 +170,28 @@ std::optional<SceneNodeConstRef> Scene::findNode(SceneNodeId id) const noexcept
 void Scene::prepareSubtreeRegistration(const SceneNode& node)
 {
     const std::size_t subtreeSize = countDetachedNodes(node);
-    const std::size_t maximumSize = nodes_.max_size();
-    if (subtreeSize > maximumSize - nodes_.size())
+    const std::size_t maximumNodeCount = std::min(nodes_.max_size(), parentIds_.max_size());
+    if (subtreeSize > maximumNodeCount - nodes_.size())
     {
         throw std::length_error("A scene cannot register this many nodes");
     }
 
     const std::size_t requiredCapacity = nodes_.size() + subtreeSize;
-    nodes_.reserve(nextRegistryCapacity(nodes_.capacity(), requiredCapacity, maximumSize));
+    nodes_.reserve(nextRegistryCapacity(nodes_.capacity(), requiredCapacity, nodes_.max_size()));
+    parentIds_.reserve(
+        nextRegistryCapacity(parentIds_.capacity(), requiredCapacity, parentIds_.max_size()));
 }
 
-void Scene::registerSubtree(SceneNode& node)
+void Scene::registerSubtree(SceneNode& node, SceneNodeId parent)
 {
-    node.assignId(SceneNodeId{.value = nodes_.size()});
+    const SceneNodeId nodeId{.value = nodes_.size()};
+    node.assignId(nodeId);
     nodes_.push_back(&node);
+    parentIds_.push_back(parent);
 
     for (const std::unique_ptr<SceneNode>& child : node.children())
     {
-        registerSubtree(*child);
+        registerSubtree(*child, nodeId);
     }
 }
 

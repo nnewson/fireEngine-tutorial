@@ -63,6 +63,7 @@ struct RunOptions
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
+    bool flatTransformUpdate = false; ///< Whether the benchmark uses the flat resolution control.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -196,14 +197,22 @@ try
     std::optional<fire_engine::tutorial::BenchmarkRun> benchmark;
     if (options.benchmarkInstanceCount.has_value())
     {
-        benchmark.emplace(content, *options.benchmarkInstanceCount);
+        benchmark.emplace(content, *options.benchmarkInstanceCount, options.flatTransformUpdate);
     }
     else if (options.smokeScenario == SmokeScenario::eUntextured)
     {
         selectUntexturedScene(content);
     }
-    content.scene.updateWorldTransforms();
-    renderer.prepare(content.assets, content.scene);
+    fire_engine::SceneDrawListArena drawListArena;
+    if (benchmark.has_value())
+    {
+        benchmark->updateWorldTransforms(content.scene);
+    }
+    else
+    {
+        content.scene.updateWorldTransforms();
+    }
+    renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
     std::println("Selected Vulkan 1.4 device: {}", rendererInfo.deviceName);
@@ -244,7 +253,7 @@ try
         {
             benchmark->advanceScene(content.scene);
             const auto transformStart = std::chrono::steady_clock::now();
-            content.scene.updateWorldTransforms();
+            benchmark->updateWorldTransforms(content.scene);
             transformUpdate = std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - transformStart);
         }
@@ -268,12 +277,25 @@ try
             }
         }
 
-        fire_engine::RendererCpuTimings rendererTimings;
-        const fire_engine::RenderResult result =
-            renderer.drawFrame(content.scene, benchmark.has_value() ? &rendererTimings : nullptr);
+        std::chrono::steady_clock::time_point drawListStart;
         if (benchmark.has_value())
         {
-            benchmark->record(result, transformUpdate, rendererTimings);
+            drawListStart = std::chrono::steady_clock::now();
+        }
+        const fire_engine::SceneDrawList drawList = content.scene.buildDrawItems(drawListArena);
+        std::chrono::nanoseconds drawListBuild{};
+        if (benchmark.has_value())
+        {
+            drawListBuild = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - drawListStart);
+        }
+
+        fire_engine::RendererCpuTimings rendererTimings;
+        const fire_engine::RenderResult result =
+            renderer.drawFrame(drawList, benchmark.has_value() ? &rendererTimings : nullptr);
+        if (benchmark.has_value())
+        {
+            benchmark->record(result, transformUpdate, drawListBuild, rendererTimings);
         }
         if (result != fire_engine::RenderResult::eNotPresented)
         {
@@ -285,7 +307,7 @@ try
             // the original set, exercising prepare()'s retirement wait.
             addMixedResourceInstances(content);
             content.scene.updateWorldTransforms();
-            renderer.prepare(content.assets, content.scene);
+            renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
             repeatedPreparationComplete = true;
         }
         if (result != fire_engine::RenderResult::ePresented || options.recreateEveryFrame)
@@ -353,6 +375,7 @@ namespace
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
                     .recordDirectly = false,
+                    .flatTransformUpdate = false,
                 };
             }
         }
@@ -371,12 +394,17 @@ namespace
             throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
         }
         bool recordDirectly = false;
+        bool flatTransformUpdate = false;
         for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
         {
             const std::string_view benchmarkOption{arguments[argumentIndex]};
             if (benchmarkOption == "--direct-primary" && !recordDirectly)
             {
                 recordDirectly = true;
+            }
+            else if (benchmarkOption == "--flat-transforms" && !flatTransformUpdate)
+            {
+                flatTransformUpdate = true;
             }
             else
             {
@@ -391,13 +419,14 @@ namespace
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
             .recordDirectly = recordDirectly,
+            .flatTransformUpdate = flatTransformUpdate,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
         throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
-                                    "[--direct-primary] | "
+                                    "[--direct-primary] [--flat-transforms] | "
                                     "--frames positive-count [--recreate-every-frame] | "
                                     "--smoke scenario]");
     }
@@ -410,6 +439,7 @@ namespace
         .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
         .recordDirectly = false,
+        .flatTransformUpdate = false,
     };
 }
 

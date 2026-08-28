@@ -276,12 +276,36 @@ jobs:
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1
 
-      - name: Record Lavapipe 1,000-draw benchmark ratios
+      - name: Record Lavapipe 1,000-draw recursive control A
         continue-on-error: true
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
 
-      - name: Record Lavapipe 10,000-draw benchmark ratios
+      - name: Record Lavapipe 1,000-draw flat-transform control
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 1000 --flat-transforms
+
+      - name: Record Lavapipe 1,000-draw recursive control B
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
+
+      - name: Record Lavapipe 10,000-draw recursive control A
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
+
+      - name: Record Lavapipe 10,000-draw flat-transform control
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 10000 --flat-transforms
+
+      - name: Record Lavapipe 10,000-draw recursive control B
         continue-on-error: true
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000

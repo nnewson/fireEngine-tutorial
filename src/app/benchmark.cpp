@@ -76,8 +76,10 @@ struct PhaseStatistics
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-BenchmarkRun::BenchmarkRun(SceneContent& content, std::size_t instanceCount)
-    : instanceCount_{instanceCount}
+BenchmarkRun::BenchmarkRun(SceneContent& content, std::size_t instanceCount,
+                           bool flatTransformUpdate)
+    : instanceCount_{instanceCount},
+      flatTransformUpdate_{flatTransformUpdate}
 {
     if (instanceCount_ == 0)
     {
@@ -119,8 +121,9 @@ BenchmarkRun::BenchmarkRun(SceneContent& content, std::size_t instanceCount)
         throw std::logic_error("The synthetic benchmark root was not registered");
     }
     rootId_ = *registeredRootId;
-    scene.updateWorldTransforms();
-    const SceneDrawList drawList = scene.buildDrawItems();
+    updateWorldTransforms(scene);
+    SceneDrawListArena drawListArena;
+    const SceneDrawList drawList = scene.buildDrawItems(drawListArena);
     nodeCount_ = countNodes(scene);
     drawCount_ = drawList.drawItems.size();
     if (nodeCount_ != instanceCount_ + 1 || drawCount_ != instanceCount_)
@@ -154,7 +157,18 @@ void BenchmarkRun::advanceScene(Scene& scene) const
     root->get().localTransform(transform);
 }
 
+void BenchmarkRun::updateWorldTransforms(Scene& scene) const
+{
+    if (flatTransformUpdate_)
+    {
+        scene.updateWorldTransformsFlat();
+        return;
+    }
+    scene.updateWorldTransforms();
+}
+
 void BenchmarkRun::record(RenderResult result, std::chrono::nanoseconds transformUpdate,
+                          std::chrono::nanoseconds drawListBuild,
                           const RendererCpuTimings& renderer)
 {
     if (result != RenderResult::ePresented)
@@ -176,6 +190,7 @@ void BenchmarkRun::record(RenderResult result, std::chrono::nanoseconds transfor
     }
     samples_.push_back({
         .transformUpdate = transformUpdate,
+        .drawListBuild = drawListBuild,
         .renderer = renderer,
     });
 }
@@ -192,6 +207,8 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
+    std::println("  Transform path: {}",
+                 flatTransformUpdate_ ? "flat topological control" : "recursive baseline");
     std::println("  Ownership: cycled frame slots with per-slot recording contexts (Step 5)");
     std::println("  Frames in flight: {}", rendererInfo.frameSlotCount);
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,
@@ -217,8 +234,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     };
 
     printPhase("transform update", &Sample::transformUpdate);
-    printPhase("draw-list build",
-               [](const Sample& sample) { return sample.renderer.drawListBuild; });
+    printPhase("draw-list build", &Sample::drawListBuild);
     printPhase("draw-list validation",
                [](const Sample& sample) { return sample.renderer.drawListValidation; });
     printPhase("coordinator command-pool reset",
@@ -251,9 +267,8 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::chrono::nanoseconds activeWork{};
     for (const Sample& sample : samples_)
     {
-        const std::chrono::nanoseconds sampleSnapshot = sample.transformUpdate +
-                                                        sample.renderer.drawListBuild +
-                                                        sample.renderer.drawListValidation;
+        const std::chrono::nanoseconds sampleSnapshot =
+            sample.transformUpdate + sample.drawListBuild + sample.renderer.drawListValidation;
         snapshot += sampleSnapshot;
         workerCommandPoolReset += sample.renderer.workerCommandPoolReset;
         secondaryRecording += sample.renderer.secondaryCommandRecording;

@@ -14,8 +14,8 @@ namespace fire_engine
 
 class Glfw;
 class RenderAssets;
-class Scene;
 class Window;
+struct SceneDrawList;
 
 /* --- Enums --- */
 
@@ -54,10 +54,9 @@ struct RendererInfo
     CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
 };
 
-/** @brief Host timings for the CPU phases inside one drawFrame() attempt. */
+/** @brief Host timings for renderer-owned CPU phases inside one drawFrame() attempt. */
 struct RendererCpuTimings
 {
-    std::chrono::nanoseconds drawListBuild{};               ///< Snapshot allocation and traversal.
     std::chrono::nanoseconds drawListValidation{};          ///< Prepared-resource membership proof.
     std::chrono::nanoseconds frameFenceWait{};              ///< Reusable-frame completion wait.
     std::chrono::nanoseconds imageAcquisitionWait{};        ///< Presentable-image acquisition.
@@ -89,9 +88,9 @@ enum class RenderResult : std::uint8_t
  *
  * The public surface intentionally contains no Vulkan types. Stable mesh,
  * image, texture, and material descriptions are uploaded explicitly by
- * prepare(), while drawFrame() consumes current scene transforms and records a
- * fresh command buffer. Presentation resources can be replaced independently,
- * preserving compiled scene resources across window changes.
+ * prepare(), while drawFrame() consumes a frozen scene draw-list view and
+ * records a fresh command buffer. Presentation resources can be replaced
+ * independently, preserving compiled scene resources across window changes.
  */
 class Renderer final
 {
@@ -116,26 +115,27 @@ public:
     Renderer& operator=(Renderer&&) = delete;
 
     /**
-     * @brief Validates and uploads the stable assets belonging to a scene.
+     * @brief Validates and uploads stable assets required by a frozen draw list.
      * @param assets Vulkan-free render descriptions to compile.
-     * @param scene Hierarchy whose render-object references are validated.
+     * @param drawList Frozen draws whose render-object references are validated.
      * Repeating the same asset revision and scene dependencies reuses the
      * cached plan and GPU resources. Changed inputs replace the compiled subset.
      *
-     * @throws std::invalid_argument if the scene contains invalid data or references.
+     * @throws std::invalid_argument if assets or draw references are invalid.
      * @throws std::runtime_error if a GPU allocation or upload fails.
      */
-    void prepare(const RenderAssets& assets, const Scene& scene);
+    void prepare(const RenderAssets& assets, const SceneDrawList& drawList);
 
     /**
-     * @brief Records current scene draws, submits them, and presents one image.
-     * @param scene Prepared scene whose world transforms have been updated.
+     * @brief Records frozen scene draws, submits them, and presents one image.
+     * @param drawList Read-only draw view valid until this call returns.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Whether an image was presented and whether the swapchain remains suitable.
-     * @throws std::logic_error if prepare() has not run or a scene reference was not prepared.
+     * @throws std::logic_error if prepare() has not run or a draw reference was not prepared.
      * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */
-    [[nodiscard]] RenderResult drawFrame(const Scene& scene, RendererCpuTimings* timings = nullptr);
+    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+                                         RendererCpuTimings* timings = nullptr);
 
     /**
      * @brief Replaces presentation resources for a sampled framebuffer extent.

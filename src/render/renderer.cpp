@@ -20,7 +20,7 @@
 #include <fire_engine/render/detail/recording_context.hpp>
 #include <fire_engine/render/detail/resource_compiler.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
-#include <fire_engine/scene/scene.hpp>
+#include <fire_engine/scene/scene_draw_list.hpp>
 
 #include <array>
 #include <cassert>
@@ -33,6 +33,7 @@
 #include <memory>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -189,17 +190,18 @@ public:
     /**
      * @brief Compiles the asset subset referenced by the current scene.
      * @param assets Complete Vulkan-free asset catalog.
-     * @param scene Scene whose draw dependencies select the compiled subset.
+     * @param drawList Frozen draw dependencies selecting the compiled subset.
      */
-    void prepare(const RenderAssets& assets, const Scene& scene);
+    void prepare(const RenderAssets& assets, const SceneDrawList& drawList);
 
     /**
      * @brief Records, submits, and presents the current scene once.
-     * @param scene Prepared scene supplying current draw items and transforms.
+     * @param drawList Frozen draw items and transforms valid until this call returns.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Presentation outcome for the acquired swapchain image.
      */
-    [[nodiscard]] RenderResult drawFrame(const Scene& scene, RendererCpuTimings* timings);
+    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+                                         RendererCpuTimings* timings);
 
     /**
      * @brief Replaces the complete presentation-dependent ownership group.
@@ -223,7 +225,7 @@ private:
      * @param timings Optional output receiving the serial and secondary recording phases.
      */
     void recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                        const std::vector<DrawItem>& drawItems, RendererCpuTimings* timings) const;
+                        std::span<const DrawItem> drawItems, RendererCpuTimings* timings) const;
 
     /**
      * @brief Records inherited draws and executes them from one primary geometry pass.
@@ -233,7 +235,7 @@ private:
      * @param timings Optional output receiving both command-buffer recording phases.
      */
     void recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                 const std::vector<DrawItem>& drawItems,
+                                 std::span<const DrawItem> drawItems,
                                  RendererCpuTimings* timings) const;
 
     /**
@@ -244,7 +246,7 @@ private:
      * @param timings Optional output receiving the direct primary recording phase.
      */
     void recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                              const std::vector<DrawItem>& drawItems,
+                              std::span<const DrawItem> drawItems,
                               RendererCpuTimings* timings) const;
 
     /**
@@ -312,7 +314,7 @@ private:
      * @param bindingState Cache created when the complete geometry state was established.
      */
     void recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                     const std::vector<DrawItem>& drawItems,
+                     std::span<const DrawItem> drawItems,
                      detail::DrawBindingState bindingState) const;
 
     /**
@@ -355,14 +357,14 @@ Renderer::Renderer(const Glfw& glfw, const Window& window, const std::string& ap
 
 Renderer::~Renderer() noexcept = default;
 
-void Renderer::prepare(const RenderAssets& assets, const Scene& scene)
+void Renderer::prepare(const RenderAssets& assets, const SceneDrawList& drawList)
 {
-    implementation_->prepare(assets, scene);
+    implementation_->prepare(assets, drawList);
 }
 
-RenderResult Renderer::drawFrame(const Scene& scene, RendererCpuTimings* timings)
+RenderResult Renderer::drawFrame(const SceneDrawList& drawList, RendererCpuTimings* timings)
 {
-    return implementation_->drawFrame(scene, timings);
+    return implementation_->drawFrame(drawList, timings);
 }
 
 bool Renderer::recreatePresentation(FramebufferExtent framebufferExtent)
@@ -463,11 +465,10 @@ Renderer::Impl::~Impl() noexcept
     }
 }
 
-void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
+void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& drawList)
 {
     // Planning validates every CPU relationship before the first Vulkan
     // allocation, keeping malformed input failures deterministic and cheap.
-    const SceneDrawList drawList = scene.buildDrawItems();
     const RenderPreparationPlan& plan =
         renderPreparation_.build(assets, drawList, presentation_->pipeline().description());
     if (compiledGeneration_.has_value() && *compiledGeneration_ == renderPreparation_.generation())
@@ -489,7 +490,7 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
     compiledGeneration_ = renderPreparation_.generation();
 }
 
-RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* timings)
+RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, RendererCpuTimings* timings)
 {
     if (timings != nullptr)
     {
@@ -499,13 +500,8 @@ RenderResult Renderer::Impl::drawFrame(const Scene& scene, RendererCpuTimings* t
     {
         throw std::logic_error("Renderer::prepare must be called before drawFrame");
     }
-    // Build and validate the transient draw list before acquiring an image.
-    // A failure therefore cannot abandon a signaled acquisition semaphore.
-    const SceneDrawList drawList = [&]()
-    {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListBuild};
-        return scene.buildDrawItems();
-    }();
+    // Validate the transient draw list before acquiring an image. A failure
+    // therefore cannot abandon a signaled acquisition semaphore.
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListValidation};
         for (const DrawItem& item : drawList.drawItems)
@@ -698,7 +694,7 @@ RendererInfo Renderer::Impl::info() const
 }
 
 void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                    const std::vector<DrawItem>& drawItems,
+                                    std::span<const DrawItem> drawItems,
                                     RendererCpuTimings* timings) const
 {
     const detail::RecordingContext& workerRecording = frames_[frameSlotIndex].worker;
@@ -715,7 +711,7 @@ void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t im
 }
 
 void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                             const std::vector<DrawItem>& drawItems,
+                                             std::span<const DrawItem> drawItems,
                                              RendererCpuTimings* timings) const
 {
     const FrameResources& frame = frames_[frameSlotIndex];
@@ -763,7 +759,7 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
 }
 
 void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                          const std::vector<DrawItem>& drawItems,
+                                          std::span<const DrawItem> drawItems,
                                           RendererCpuTimings* timings) const
 {
     CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
@@ -920,7 +916,7 @@ Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
 }
 
 void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                                 const std::vector<DrawItem>& drawItems,
+                                 std::span<const DrawItem> drawItems,
                                  detail::DrawBindingState bindingState) const
 {
     constexpr vk::DeviceSize bufferOffset = 0;
