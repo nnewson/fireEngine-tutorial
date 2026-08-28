@@ -24,13 +24,6 @@ enum class CommandRecordingMode : std::uint8_t
     eDirectPrimary,          ///< Record draws directly for attribution benchmarks.
 };
 
-/** @brief Frame/submission and command-recording ownership selected for measurement. */
-enum class RendererOwnershipMode : std::uint8_t
-{
-    eSeparated,            ///< Independent frame slot and per-thread recording contexts.
-    eLegacyCombinedControl ///< Complete pre-Step-4 FrameInFlight attribution control.
-};
-
 /* --- POD structs --- */
 
 /** @brief Construction-time renderer choices that remain fixed for its lifetime. */
@@ -38,8 +31,6 @@ struct RendererConfiguration
 {
     CommandRecordingMode commandRecordingMode =
         CommandRecordingMode::eSecondaryCommandBuffer; ///< Geometry recording structure.
-    RendererOwnershipMode ownershipMode =
-        RendererOwnershipMode::eSeparated; ///< Permanent split or temporary paired control.
 };
 
 /** @brief Vulkan-free summary of the renderer selected for this window. */
@@ -58,7 +49,6 @@ struct RendererInfo
     std::string depthFormat;                   ///< Human-readable depth attachment format.
     std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
     CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
-    RendererOwnershipMode ownershipMode;       ///< Frame and recording ownership in use.
 };
 
 /** @brief Host timings for the CPU phases inside one drawFrame() attempt. */
