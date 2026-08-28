@@ -4,6 +4,7 @@
 #include <optional>
 #include <vector>
 
+#include <fire_engine/graphics/pipeline_description.hpp>
 #include <fire_engine/graphics/render_ids.hpp>
 
 namespace fire_engine
@@ -18,9 +19,10 @@ struct SceneDrawList;
 /** @brief Validated mesh/material relationship ready for GPU compilation. */
 struct PreparedRenderObject
 {
-    RenderObjectId id;   ///< Dense object ID retained for renderer lookup.
-    MeshId mesh;         ///< Validated source mesh.
-    MaterialId material; ///< Validated source material.
+    RenderObjectId id;            ///< Dense object ID retained for renderer lookup.
+    MeshId mesh;                  ///< Validated source mesh.
+    MaterialId material;          ///< Validated source material.
+    VertexLayoutKey vertexLayout; ///< Mesh/pipeline compatibility proved by preparation.
 };
 
 /** @brief Vulkan-free compilation plan for the current visible asset subset. */
@@ -31,7 +33,8 @@ struct RenderPreparationPlan
     std::vector<TextureId> textures;   ///< Distinct required textures in stable ID order.
     std::vector<MaterialId> materials; ///< Distinct required materials in stable ID order.
     std::vector<PreparedRenderObject> renderObjects; ///< Required relationships by ID.
-    std::size_t assetRevision = 0;                   ///< Asset revision represented by this plan.
+    PipelineDescription pipeline;   ///< Pipeline requirements proved compatible with every draw.
+    std::size_t assetRevision = 0;  ///< Asset revision represented by this plan.
     std::size_t dependencyHash = 0; ///< Transform-independent draw dependency hash.
 };
 
@@ -66,11 +69,12 @@ public:
      * @brief Returns a cached plan or compiles one for the supplied dependencies.
      * @param assets Complete catalog of Vulkan-free render descriptions.
      * @param drawList Current scene instances and dependency hash.
+     * @param pipeline Vulkan-free requirements selected for the compiled draw packets.
      * @return Reference valid until the next build() call that changes the plan.
      * @throws std::invalid_argument if an asset or draw dependency is invalid.
      */
-    [[nodiscard]] const RenderPreparationPlan& build(const RenderAssets& assets,
-                                                     const SceneDrawList& drawList);
+    [[nodiscard]] const RenderPreparationPlan&
+    build(const RenderAssets& assets, const SceneDrawList& drawList, PipelineDescription pipeline);
 
     /**
      * @brief Returns how many distinct plans this compiler has produced.
@@ -79,10 +83,11 @@ public:
     [[nodiscard]] std::size_t generation() const noexcept;
 
 private:
-    const RenderAssets* validatedAssets_ = nullptr;   ///< Collection associated with validation.
-    std::optional<std::size_t> validatedRevision_;    ///< Last fully validated asset revision.
-    std::vector<RenderObjectId> cachedDependencies_;  ///< Exact collision-proof plan key.
-    std::optional<RenderPreparationPlan> cachedPlan_; ///< Most recently compiled subset.
+    const RenderAssets* validatedAssets_ = nullptr;     ///< Collection associated with validation.
+    std::optional<std::size_t> validatedRevision_;      ///< Last fully validated asset revision.
+    std::vector<RenderObjectId> cachedDependencies_;    ///< Exact collision-proof plan key.
+    std::optional<PipelineDescription> cachedPipeline_; ///< Pipeline requirement in the plan key.
+    std::optional<RenderPreparationPlan> cachedPlan_;   ///< Most recently compiled subset.
     std::size_t generation_ = 0; ///< Number of cache misses compiled by build().
 };
 } // namespace fire_engine

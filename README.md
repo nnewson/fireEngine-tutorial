@@ -121,12 +121,14 @@ live under `assets/AnimatedCube`, so builds and tests require no network access.
 `Renderer::prepare()` validates those relationships through a cached
 `RenderPreparation` compiler and uploads only the resources selected by the
 current `SceneDrawList`. The internal `CompiledResources` subsystem owns mesh
-buffers, sampled images, samplers, the persistent white fallback texture, and
-setup-time upload machinery. Scene traversal hashes only ordered render-object
-dependencies, so animation-only transform changes reuse the same preparation
-plan while `Renderer::drawFrame()` records current transforms. Device,
-allocator, compiled resources, presentation state, and frame resources remain
-hidden behind the renderer facade.
+buffers, sampled images, samplers, and the persistent white fallback texture.
+The separate internal `ResourceCompiler` owns mutable compilation, staging, and
+its dedicated setup-time upload command pool and fence. Scene traversal hashes
+only ordered render-object dependencies, so animation-only transform changes
+reuse the same preparation plan while `Renderer::drawFrame()` records current
+transforms. Device, allocator, resource compiler, compiled resources,
+presentation state, and frame resources remain hidden behind the renderer
+facade.
 
 Mathematical coordinates use `Vec3` and `Vec4`, while graphics colors use the
 separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain

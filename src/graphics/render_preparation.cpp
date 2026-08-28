@@ -27,7 +27,8 @@ namespace
 /* --- Public member functions --- */
 
 const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets,
-                                                      const SceneDrawList& drawList)
+                                                      const SceneDrawList& drawList,
+                                                      PipelineDescription pipeline)
 {
     const bool assetsChanged = validatedAssets_ != &assets || !validatedRevision_.has_value() ||
                                *validatedRevision_ != assets.revision();
@@ -39,7 +40,7 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
     }
 
     std::vector<RenderObjectId> currentDependencies = dependencies(drawList);
-    if (!assetsChanged && cachedPlan_.has_value() &&
+    if (!assetsChanged && cachedPlan_.has_value() && cachedPipeline_ == pipeline &&
         cachedPlan_->dependencyHash == drawList.dependencyHash &&
         cachedDependencies_ == currentDependencies)
     {
@@ -57,6 +58,7 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
     }
 
     RenderPreparationPlan plan;
+    plan.pipeline = pipeline;
     plan.assetRevision = assets.revision();
     plan.dependencyHash = drawList.dependencyHash;
     std::vector<bool> usedMeshes(assets.meshes().size(), false);
@@ -72,12 +74,19 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
         }
 
         const RenderObject& renderObject = assets.renderObjects()[index];
+        const Mesh& mesh = assets.meshes()[renderObject.mesh.value];
+        if (mesh.vertexLayout != pipeline.vertexLayout)
+        {
+            throw std::invalid_argument(
+                "A render object mesh is incompatible with the selected pipeline");
+        }
         usedMeshes[renderObject.mesh.value] = true;
         usedMaterials[renderObject.material.value] = true;
         plan.renderObjects.push_back({
             .id = RenderObjectId{.value = index},
             .mesh = renderObject.mesh,
             .material = renderObject.material,
+            .vertexLayout = mesh.vertexLayout,
         });
     }
 
@@ -117,6 +126,7 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
     }
 
     cachedDependencies_ = std::move(currentDependencies);
+    cachedPipeline_ = pipeline;
     cachedPlan_ = std::move(plan);
     ++generation_;
     return *cachedPlan_;

@@ -66,6 +66,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/frame_in_flight.cpp
     src/render/image.cpp
     src/render/pipeline.cpp
+    src/render/resource_compiler.cpp
     src/render/renderer.cpp
     src/render/spirv_loader.cpp
     src/render/swapchain.cpp

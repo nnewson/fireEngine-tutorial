@@ -15,10 +15,12 @@ using fire_engine::Color4;
 using fire_engine::ImageData;
 using fire_engine::Material;
 using fire_engine::Mesh;
+using fire_engine::PipelineDescription;
 using fire_engine::RenderAssets;
 using fire_engine::RenderObject;
 using fire_engine::RenderObjectId;
 using fire_engine::RenderPreparation;
+using fire_engine::RenderPreparationPlan;
 using fire_engine::Scene;
 using fire_engine::SceneNode;
 using fire_engine::Texture;
@@ -26,6 +28,7 @@ using fire_engine::TextureFilter;
 using fire_engine::TextureWrap;
 using fire_engine::Vec3;
 using fire_engine::Vertex;
+using fire_engine::VertexLayoutKey;
 
 Mesh makeTriangle()
 {
@@ -96,12 +99,46 @@ TEST_CASE("Render preparation shares mesh and material resources")
     scene.addRoot(std::move(otherRoot));
 
     RenderPreparation preparation;
-    const auto& plan = preparation.build(assets, scene.buildDrawItems());
+    const auto& plan = preparation.build(assets, scene.buildDrawItems(), PipelineDescription{});
 
     REQUIRE(plan.meshes.size() == 1);
     REQUIRE(plan.materials.size() == 1);
     REQUIRE(plan.renderObjects.size() == 2);
     REQUIRE(plan.assetRevision == assets.revision());
+    REQUIRE(plan.pipeline == PipelineDescription{});
+    REQUIRE(plan.renderObjects.front().vertexLayout ==
+            VertexLayoutKey::ePositionColorTextureCoordinate);
+}
+
+TEST_CASE("Render preparation keys its cache by the selected pipeline")
+{
+    RenderAssets assets;
+    Mesh incompatibleMesh = makeTriangle();
+    const VertexLayoutKey alternateLayout = static_cast<VertexLayoutKey>(255);
+    incompatibleMesh.vertexLayout = alternateLayout;
+    const auto mesh = assets.addMesh(std::move(incompatibleMesh));
+    const auto material = assets.addMaterial(Material{});
+    const auto object = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
+    Scene scene;
+    scene.addRoot("incompatible").component(object);
+
+    RenderPreparation firstBuildPreparation;
+    REQUIRE_THROWS_AS(
+        firstBuildPreparation.build(assets, scene.buildDrawItems(), PipelineDescription{}),
+        std::invalid_argument);
+
+    RenderPreparation preparation;
+    const PipelineDescription alternatePipeline{.vertexLayout = alternateLayout};
+    const RenderPreparationPlan& firstPlan =
+        preparation.build(assets, scene.buildDrawItems(), alternatePipeline);
+    REQUIRE(firstPlan.pipeline == alternatePipeline);
+    REQUIRE(preparation.generation() == 1);
+
+    // If the pipeline description were absent from the cache key, this would
+    // return firstPlan before reaching the incompatible-layout check.
+    REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}),
+                      std::invalid_argument);
+    REQUIRE(preparation.generation() == 1);
 }
 
 TEST_CASE("Render preparation extracts shared image and texture dependencies")
@@ -132,7 +169,7 @@ TEST_CASE("Render preparation extracts shared image and texture dependencies")
     secondNode.component(secondObject);
 
     RenderPreparation preparation;
-    const auto& plan = preparation.build(assets, scene.buildDrawItems());
+    const auto& plan = preparation.build(assets, scene.buildDrawItems(), PipelineDescription{});
 
     REQUIRE(plan.images == std::vector{image});
     REQUIRE(plan.textures == std::vector{firstTexture, secondTexture});
@@ -150,7 +187,8 @@ TEST_CASE("Render preparation rejects incomplete mesh data")
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = material}));
 
         RenderPreparation preparation;
-        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems()), std::invalid_argument);
+        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}),
+                          std::invalid_argument);
     }
 
     SECTION("out-of-range index")
@@ -164,7 +202,8 @@ TEST_CASE("Render preparation rejects incomplete mesh data")
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = material}));
 
         RenderPreparation preparation;
-        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems()), std::invalid_argument);
+        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}),
+                          std::invalid_argument);
     }
 }
 
@@ -178,7 +217,8 @@ TEST_CASE("Render preparation rejects dangling references")
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = {}}));
 
         RenderPreparation preparation;
-        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems()), std::invalid_argument);
+        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}),
+                          std::invalid_argument);
     }
 
     SECTION("scene node render object")
@@ -194,7 +234,8 @@ TEST_CASE("Render preparation rejects dangling references")
         scene.addRoot(std::move(root));
 
         RenderPreparation preparation;
-        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems()), std::invalid_argument);
+        REQUIRE_THROWS_AS(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}),
+                          std::invalid_argument);
     }
 }
 
@@ -212,7 +253,7 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
 
     RenderPreparation preparation;
     const auto firstDrawList = scene.buildDrawItems();
-    const auto& firstPlan = preparation.build(assets, firstDrawList);
+    const auto& firstPlan = preparation.build(assets, firstDrawList, PipelineDescription{});
     REQUIRE(preparation.generation() == 1);
 
     root.localTransform({
@@ -222,7 +263,7 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
     });
     scene.updateWorldTransforms();
     const auto movedDrawList = scene.buildDrawItems();
-    const auto& reusedPlan = preparation.build(assets, movedDrawList);
+    const auto& reusedPlan = preparation.build(assets, movedDrawList, PipelineDescription{});
 
     REQUIRE(movedDrawList.dependencyHash == firstDrawList.dependencyHash);
     REQUIRE(&reusedPlan == &firstPlan);
@@ -234,12 +275,28 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
     // Simulate a hash collision: the exact dependency sequence must still
     // distinguish one instance from two.
     expandedDrawList.dependencyHash = firstDrawList.dependencyHash;
-    static_cast<void>(preparation.build(assets, expandedDrawList));
+    static_cast<void>(preparation.build(assets, expandedDrawList, PipelineDescription{}));
     REQUIRE(preparation.generation() == 2);
 
+    const RenderPreparationPlan beforeAssetMutation =
+        preparation.build(assets, expandedDrawList, PipelineDescription{});
     static_cast<void>(assets.addMaterial(Material{}));
-    static_cast<void>(preparation.build(assets, expandedDrawList));
+    const RenderPreparationPlan& afterAssetMutation =
+        preparation.build(assets, expandedDrawList, PipelineDescription{});
     REQUIRE(preparation.generation() == 3);
+    REQUIRE(afterAssetMutation.meshes == beforeAssetMutation.meshes);
+    REQUIRE(afterAssetMutation.images == beforeAssetMutation.images);
+    REQUIRE(afterAssetMutation.textures == beforeAssetMutation.textures);
+    REQUIRE(afterAssetMutation.materials == beforeAssetMutation.materials);
+    REQUIRE(afterAssetMutation.renderObjects.size() == beforeAssetMutation.renderObjects.size());
+    REQUIRE(afterAssetMutation.renderObjects.front().id ==
+            beforeAssetMutation.renderObjects.front().id);
+    REQUIRE(afterAssetMutation.renderObjects.front().mesh ==
+            beforeAssetMutation.renderObjects.front().mesh);
+    REQUIRE(afterAssetMutation.renderObjects.front().material ==
+            beforeAssetMutation.renderObjects.front().material);
+    REQUIRE(afterAssetMutation.renderObjects.front().vertexLayout ==
+            beforeAssetMutation.renderObjects.front().vertexLayout);
 }
 
 TEST_CASE("Render asset revisions are independent of scene hierarchy")
@@ -265,15 +322,15 @@ TEST_CASE("Image and texture additions invalidate render preparation")
     scene.addRoot("triangle").component(object);
 
     RenderPreparation preparation;
-    static_cast<void>(preparation.build(assets, scene.buildDrawItems()));
+    static_cast<void>(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}));
     REQUIRE(preparation.generation() == 1);
 
     const auto image =
         assets.addImage(ImageData{.width = 1, .height = 1, .pixels = {255, 255, 255, 255}});
-    static_cast<void>(preparation.build(assets, scene.buildDrawItems()));
+    static_cast<void>(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}));
     REQUIRE(preparation.generation() == 2);
 
     static_cast<void>(assets.addTexture(makeTexture(image)));
-    static_cast<void>(preparation.build(assets, scene.buildDrawItems()));
+    static_cast<void>(preparation.build(assets, scene.buildDrawItems(), PipelineDescription{}));
     REQUIRE(preparation.generation() == 3);
 }
