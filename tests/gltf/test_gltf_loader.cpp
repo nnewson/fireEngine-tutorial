@@ -73,7 +73,8 @@ TEST_CASE("The minimal glTF loader preserves hierarchy and reusable rotation dat
     REQUIRE(root.children().size() == 1);
     REQUIRE(
         std::holds_alternative<fire_engine::RenderObjectId>(root.children().front()->component()));
-    REQUIRE(loaded.scene.buildDrawItems().drawItems.size() == 1);
+    fire_engine::SceneDrawListArena drawListArena;
+    REQUIRE(loaded.scene.buildDrawItems(drawListArena).drawItems.size() == 1);
 
     REQUIRE(loaded.animations.size() == 1);
     REQUIRE(loaded.animations.front().name == "animation_AnimatedCube");

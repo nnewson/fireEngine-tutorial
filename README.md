@@ -66,6 +66,10 @@ secondary command buffers, not an alternative production renderer:
 ./build/fireEngineTutorial --benchmark 10000 --direct-primary
 ```
 
+During the Step 6 transform-resolution experiment, add `--flat-transforms` to
+select the flat topological control in the same benchmark binary. The default
+remains the recursive baseline.
+
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
 draw-list construction, draw-list validation, coordinator and worker command-

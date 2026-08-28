@@ -91,11 +91,17 @@ public:
      */
     void updateWorldTransforms();
 
+    /** @cond INTERNAL */
+    /** @brief Resolves world transforms through the dense topological registry experiment. */
+    void updateWorldTransformsFlat();
+    /** @endcond */
+
     /**
-     * @brief Builds this frame's draws in stable depth-first order.
+     * @brief Builds this frame's draws in stable depth-first order and freezes a read-only view.
+     * @param arena Reusable storage invalidating the view returned by its previous build.
      * @return Current draws plus a transform-independent dependency hash.
      */
-    [[nodiscard]] SceneDrawList buildDrawItems() const;
+    [[nodiscard]] SceneDrawList buildDrawItems(SceneDrawListArena& arena) const;
 
     /**
      * @brief Returns the owned root nodes in insertion order.
@@ -127,12 +133,14 @@ private:
     void prepareSubtreeRegistration(const SceneNode& node);
 
     /**
-     * @brief Assigns dense scene-local IDs to one prepared subtree.
+     * @brief Assigns dense scene-local IDs and parent IDs to one prepared subtree.
      * @param node Root of the subtree entering this scene.
+     * @param parent Parent ID, or the invalid sentinel for a root subtree.
      */
-    void registerSubtree(SceneNode& node);
+    void registerSubtree(SceneNode& node, SceneNodeId parent);
 
     std::vector<std::unique_ptr<SceneNode>> roots_; ///< Owned scene hierarchy.
     std::vector<SceneNode*> nodes_;                 ///< Dense lookup indexed by SceneNodeId.
+    std::vector<SceneNodeId> parentIds_; ///< Parent lookup in the same topological ID order.
 };
 } // namespace fire_engine

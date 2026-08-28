@@ -5,6 +5,9 @@
 
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -15,13 +18,18 @@ using fire_engine::AnimationId;
 using fire_engine::AnimationTargetPath;
 using fire_engine::Animator;
 using fire_engine::DrawItem;
-using fire_engine::Mat4;
 using fire_engine::RenderObjectId;
 using fire_engine::Scene;
+using fire_engine::SceneDrawListArena;
 using fire_engine::SceneNode;
 using fire_engine::SceneNodeId;
 using fire_engine::Transform;
 using fire_engine::Vec3;
+
+static_assert(!std::is_copy_constructible_v<SceneDrawListArena>);
+static_assert(!std::is_copy_assignable_v<SceneDrawListArena>);
+static_assert(!std::is_move_constructible_v<SceneDrawListArena>);
+static_assert(!std::is_move_assignable_v<SceneDrawListArena>);
 } // namespace
 
 TEST_CASE("Scene resolves transforms and emits draw items depth first")
@@ -55,11 +63,72 @@ TEST_CASE("Scene resolves transforms and emits draw items depth first")
     REQUIRE(childReference.worldTransform()[0, 3] == 1.0f);
     REQUIRE(childReference.worldTransform()[1, 3] == 2.0f);
 
-    const auto drawList = scene.buildDrawItems();
+    SceneDrawListArena drawListArena;
+    const auto drawList = scene.buildDrawItems(drawListArena);
+    static_assert(std::is_const_v<std::remove_reference_t<decltype(drawList.drawItems.front())>>);
     REQUIRE(drawList.drawItems.size() == 2);
     REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
     REQUIRE(drawList.drawItems[1].renderObject == RenderObjectId{.value = 1});
     REQUIRE(drawList.drawItems[1].world == childReference.worldTransform());
+
+    const DrawItem* const firstStorage = drawList.drawItems.data();
+    childReference.localTransform(Transform{
+        .translation = {.x = 4.0f, .y = 2.0f, .z = 0.0f},
+    });
+    scene.updateWorldTransforms();
+    const auto rebuiltDrawList = scene.buildDrawItems(drawListArena);
+    REQUIRE(rebuiltDrawList.drawItems.data() == firstStorage);
+    REQUIRE(rebuiltDrawList.drawItems[1].world == childReference.worldTransform());
+}
+
+TEST_CASE("Flat transform resolution follows topological scene registration")
+{
+    const auto makeScene = []
+    {
+        const auto makeNode = [](std::string name)
+        {
+            auto node = std::make_unique<SceneNode>(std::move(name));
+            node->localTransform(Transform{
+                .translation = {.x = 1.0f, .y = 0.0f, .z = 0.0f},
+            });
+            return node;
+        };
+
+        Scene scene;
+        auto firstRoot = makeNode("first root");
+        SceneNode& depthOne = firstRoot->addChild(makeNode("depth one"));
+        SceneNode& depthTwo = depthOne.addChild(makeNode("depth two"));
+        SceneNode& depthThree = depthTwo.addChild(makeNode("depth three"));
+        SceneNode& depthFour = depthThree.addChild(makeNode("depth four"));
+        SceneNode& registeredFirstRoot = scene.addRoot(std::move(firstRoot));
+
+        SceneNode& secondRoot = scene.addRoot(makeNode("second root"));
+        scene.addChild(secondRoot, makeNode("second-root child"));
+
+        auto laterSubtree = makeNode("later child of first root");
+        laterSubtree->addChild(makeNode("later grandchild of first root"));
+        scene.addChild(registeredFirstRoot, std::move(laterSubtree));
+        scene.addChild(depthFour, makeNode("later child of deep node"));
+        return scene;
+    };
+
+    Scene recursiveScene = makeScene();
+    Scene flatScene = makeScene();
+    recursiveScene.updateWorldTransforms();
+    flatScene.updateWorldTransformsFlat();
+
+    constexpr std::size_t kExpectedNodeCount = 10;
+    for (std::size_t index = 0; index < kExpectedNodeCount; ++index)
+    {
+        const SceneNodeId id{.value = index};
+        const auto recursiveNode = recursiveScene.findNode(id);
+        const auto flatNode = flatScene.findNode(id);
+        REQUIRE(recursiveNode.has_value());
+        REQUIRE(flatNode.has_value());
+        REQUIRE(flatNode->get().worldTransform() == recursiveNode->get().worldTransform());
+    }
+    REQUIRE_FALSE(recursiveScene.findNode(SceneNodeId{.value = kExpectedNodeCount}).has_value());
+    REQUIRE_FALSE(flatScene.findNode(SceneNodeId{.value = kExpectedNodeCount}).has_value());
 }
 
 TEST_CASE("Scene registers attached subtrees immediately and preserves stable IDs")
@@ -127,7 +196,8 @@ TEST_CASE("Scene supports several roots in stable insertion order")
     second.component(RenderObjectId{.value = 1});
     scene.updateWorldTransforms();
 
-    const auto drawList = scene.buildDrawItems();
+    SceneDrawListArena drawListArena;
+    const auto drawList = scene.buildDrawItems(drawListArena);
     REQUIRE(drawList.drawItems.size() == 2);
     REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
     REQUIRE(drawList.drawItems[1].renderObject == RenderObjectId{.value = 1});
@@ -166,7 +236,8 @@ TEST_CASE("Scene components separate animation behavior from renderable children
     REQUIRE(std::holds_alternative<std::monostate>(transformOnly.component()));
 
     scene.updateWorldTransforms();
-    const auto drawList = scene.buildDrawItems();
+    SceneDrawListArena drawListArena;
+    const auto drawList = scene.buildDrawItems(drawListArena);
     REQUIRE(drawList.drawItems.size() == 2);
     REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
     REQUIRE(drawList.drawItems[0].world[0, 3] == 3.0f);
