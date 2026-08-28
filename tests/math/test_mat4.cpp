@@ -147,17 +147,17 @@ TEST_CASE("Transform composes scale rotation and translation")
     REQUIRE(transformed.w == Approx(1.0f));
 }
 
-TEST_CASE("Mat4 camera transforms use Vulkan depth and right-handed view space")
+TEST_CASE("Mat4 camera transforms use zero-to-one depth and right-handed view space")
 {
     const Mat4 projection = Mat4::perspective(std::numbers::pi_v<float> * 0.5f, 2.0f, 1.0f, 11.0f);
     const Vec4 nearPoint = projection * Vec4{.x = 0.0f, .y = 0.0f, .z = -1.0f, .w = 1.0f};
     const Vec4 farPoint = projection * Vec4{.x = 0.0f, .y = 0.0f, .z = -11.0f, .w = 1.0f};
     REQUIRE(nearPoint.z / nearPoint.w == Approx(0.0f).margin(0.00001f));
     REQUIRE(farPoint.z / farPoint.w == Approx(1.0f).margin(0.00001f));
-    REQUIRE(projection[0, 0] == Approx(-projection[1, 1] / 2.0f));
+    REQUIRE(projection[0, 0] == Approx(projection[1, 1] / 2.0f));
 
     const Vec4 viewSpaceUp = projection * Vec4{.x = 0.0f, .y = 1.0f, .z = -1.0f, .w = 1.0f};
-    REQUIRE(viewSpaceUp.y / viewSpaceUp.w == Approx(-1.0f));
+    REQUIRE(viewSpaceUp.y / viewSpaceUp.w == Approx(1.0f));
 
     const auto view =
         Mat4::lookAt(Vec3{.x = 0.0f, .y = 0.0f, .z = 5.0f}, Vec3{.x = 0.0f, .y = 0.0f, .z = 0.0f},

@@ -139,6 +139,7 @@ private:
 
 /* --- File-local function declarations --- */
 
+[[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept;
 [[nodiscard]] Mat4 createViewProjection(vk::Extent2D extent);
 } // namespace
 
@@ -806,17 +807,11 @@ Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer) 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                *presentation_->pipeline().pipeline());
 
-    const vk::Viewport viewport{
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = static_cast<float>(presentation_->swapchain().extent().width),
-        .height = static_cast<float>(presentation_->swapchain().extent().height),
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
+    const vk::Extent2D extent = presentation_->swapchain().extent();
+    const vk::Viewport viewport = sceneViewport(extent);
     const vk::Rect2D scissor{
         .offset = {.x = 0, .y = 0},
-        .extent = presentation_->swapchain().extent(),
+        .extent = extent,
     };
     commandBuffer.setViewport(0, viewport);
     commandBuffer.setScissor(0, scissor);
@@ -983,6 +978,30 @@ void PresentationState::waitForPresentations()
 }
 
 /* --- File-local functions --- */
+
+/**
+ * @brief Maps positive normalized-device Y upward in framebuffer space.
+ * @param extent Framebuffer dimensions covered by the viewport.
+ * @return Full-extent viewport with the framebuffer Y inversion applied.
+ */
+[[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept
+{
+    // Vulkan's framebuffer Y points down. A negative-height viewport flips it back,
+    // which keeps Mat4::perspective a conventional Y-up projection. The origin moves
+    // to the bottom edge, hence y = height with a negative height. Negative viewport
+    // height is core since Vulkan 1.1 (VK_KHR_maintenance1).
+    return {
+        .x = 0.0f,
+        .y = static_cast<float>(extent.height),
+        .width = static_cast<float>(extent.width),
+        .height = -static_cast<float>(extent.height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+}
+
+static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).height == -600.0f);
+static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).y == 600.0f);
 
 /**
  * @brief Builds the fixed tutorial camera for the current presentation extent.
