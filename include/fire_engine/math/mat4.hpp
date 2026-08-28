@@ -100,7 +100,7 @@ public:
     }
 
     /**
-     * @brief Builds a right-handed Vulkan perspective projection.
+     * @brief Builds a right-handed perspective projection with zero-to-one depth.
      * @param verticalFieldOfView Vertical field of view in radians.
      * @param aspectRatio Framebuffer width divided by height.
      * @param nearPlane Positive distance to the near clipping plane.
@@ -125,9 +125,7 @@ public:
         const float focalLength = 1.0f / std::tan(verticalFieldOfView * 0.5f);
         Mat4 result;
         result[0, 0] = focalLength / aspectRatio;
-        // A positive-height Vulkan viewport maps positive NDC Y downward. Flip here so the
-        // projection retains the conventional view-space direction where positive Y is up.
-        result[1, 1] = -focalLength;
+        result[1, 1] = focalLength;
         result[2, 2] = farPlane / (nearPlane - farPlane);
         result[2, 3] = farPlane * nearPlane / (nearPlane - farPlane);
         result[3, 2] = -1.0f;

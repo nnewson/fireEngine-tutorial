@@ -326,7 +326,7 @@ createPipelineLayout(const vk::raii::Device& device,
     const vk::PipelineRasterizationStateCreateInfo rasterization{
         .polygonMode = vk::PolygonMode::eFill,
         // Vulkan names winding in framebuffer coordinates, whose Y axis already
-        // points down. The projection-side Y inversion maps glTF's Y-up
+        // points down. The negative-height viewport maps glTF's Y-up
         // counter-clockwise front faces onto exactly that convention, so the
         // glTF value carries over unchanged rather than being reversed.
         .cullMode = vk::CullModeFlagBits::eBack,
