@@ -8,6 +8,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -60,7 +62,7 @@ constexpr std::array kDescriptorBindings = {
     kBaseColorTextureBinding,
 };
 
-/** @brief Interleaved vertex-buffer layout shared with Renderer uploads. */
+/** @brief Interleaved vertex-buffer layout shared with resource compilation. */
 constexpr vk::VertexInputBindingDescription kVertexBinding{
     .binding = 0,
     .stride = static_cast<std::uint32_t>(sizeof(Vertex)),
@@ -114,22 +116,27 @@ static_assert(sizeof(Vertex) == 9 * sizeof(float),
 
 /* --- File-local function declarations --- */
 
+[[nodiscard]] const vk::VertexInputBindingDescription&
+compileVertexBinding(VertexLayoutKey vertexLayout);
+[[nodiscard]] std::span<const vk::VertexInputAttributeDescription>
+compileVertexAttributes(VertexLayoutKey vertexLayout);
 [[nodiscard]] vk::raii::DescriptorSetLayout
 createPushDescriptorLayout(const vk::raii::Device& device);
 [[nodiscard]] vk::raii::PipelineLayout
 createPipelineLayout(const vk::raii::Device& device,
                      const vk::raii::DescriptorSetLayout& descriptorSetLayout);
-[[nodiscard]] vk::raii::Pipeline
-createDynamicRenderingPipeline(const vk::raii::Device& device,
-                               const vk::raii::PipelineLayout& pipelineLayout,
-                               vk::Format colorFormat, vk::Format depthFormat);
+[[nodiscard]] vk::raii::Pipeline createDynamicRenderingPipeline(
+    const vk::raii::Device& device, const vk::raii::PipelineLayout& pipelineLayout,
+    PipelineDescription description, vk::Format colorFormat, vk::Format depthFormat);
 /** @endcond */
 } // namespace
 
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-Pipeline::Pipeline(const Device& device, vk::Format colorFormat, vk::Format depthFormat)
+Pipeline::Pipeline(const Device& device, PipelineDescription description, vk::Format colorFormat,
+                   vk::Format depthFormat)
+    : description_{description}
 {
     // Push descriptors allocate no descriptor sets. Vulkan no longer requires
     // this handle after pipeline-layout creation, but retaining it keeps the
@@ -140,8 +147,8 @@ Pipeline::Pipeline(const Device& device, vk::Format colorFormat, vk::Format dept
 
     // Dynamic rendering replaces the render-pass compatibility object with the
     // attachment format chained into graphics-pipeline creation.
-    pipeline_ = createDynamicRenderingPipeline(device.logicalDevice(), pipelineLayout_, colorFormat,
-                                               depthFormat);
+    pipeline_ = createDynamicRenderingPipeline(device.logicalDevice(), pipelineLayout_,
+                                               description_, colorFormat, depthFormat);
 }
 
 const vk::raii::PipelineLayout& Pipeline::pipelineLayout() const noexcept
@@ -153,12 +160,49 @@ const vk::raii::Pipeline& Pipeline::pipeline() const noexcept
 {
     return pipeline_;
 }
+
+const PipelineDescription& Pipeline::description() const noexcept
+{
+    return description_;
+}
 /** @endcond */
 
 namespace
 {
 /** @cond INTERNAL */
 /* --- File-local functions --- */
+
+/**
+ * @brief Maps one Vulkan-free vertex-layout key to its buffer binding.
+ * @param vertexLayout Layout selected by the pipeline description.
+ * @return Binding consumed during graphics-pipeline creation.
+ */
+[[nodiscard]] const vk::VertexInputBindingDescription&
+compileVertexBinding(VertexLayoutKey vertexLayout)
+{
+    switch (vertexLayout)
+    {
+    case VertexLayoutKey::ePositionColorTextureCoordinate:
+        return kVertexBinding;
+    }
+    throw std::invalid_argument("Pipeline description contains an unsupported vertex layout");
+}
+
+/**
+ * @brief Maps one Vulkan-free vertex-layout key to its shader attributes.
+ * @param vertexLayout Layout selected by the pipeline description.
+ * @return Attribute descriptions consumed during graphics-pipeline creation.
+ */
+[[nodiscard]] std::span<const vk::VertexInputAttributeDescription>
+compileVertexAttributes(VertexLayoutKey vertexLayout)
+{
+    switch (vertexLayout)
+    {
+    case VertexLayoutKey::ePositionColorTextureCoordinate:
+        return kVertexAttributes;
+    }
+    throw std::invalid_argument("Pipeline description contains an unsupported vertex layout");
+}
 
 /**
  * @brief Creates set zero as a Vulkan push-descriptor layout.
@@ -210,17 +254,21 @@ createPipelineLayout(const vk::raii::Device& device,
  * @brief Creates the scene pipeline without a render pass or shader modules.
  * @param device Logical device that owns the pipeline.
  * @param pipelineLayout Layout containing the push-descriptor set zero.
+ * @param description Vulkan-free vertex layout mapped into fixed pipeline state.
  * @param colorFormat Format of the dynamic-rendering color attachment.
  * @param depthFormat Format of the dynamic-rendering depth attachment.
  * @return RAII graphics pipeline compatible with the swapchain format.
  * @throws std::runtime_error if the compiled shader cannot be loaded.
  * @throws vk::SystemError if Vulkan cannot create the pipeline.
  */
-[[nodiscard]] vk::raii::Pipeline
-createDynamicRenderingPipeline(const vk::raii::Device& device,
-                               const vk::raii::PipelineLayout& pipelineLayout,
-                               vk::Format colorFormat, vk::Format depthFormat)
+[[nodiscard]] vk::raii::Pipeline createDynamicRenderingPipeline(
+    const vk::raii::Device& device, const vk::raii::PipelineLayout& pipelineLayout,
+    PipelineDescription description, vk::Format colorFormat, vk::Format depthFormat)
 {
+    const vk::VertexInputBindingDescription& vertexBinding =
+        compileVertexBinding(description.vertexLayout);
+    const std::span<const vk::VertexInputAttributeDescription> vertexAttributes =
+        compileVertexAttributes(description.vertexLayout);
     const std::vector<std::uint32_t> shaderCode = detail::loadSpirv(kShaderPath);
     const vk::ShaderModuleCreateInfo moduleInfo{
         .codeSize = shaderCode.size() * sizeof(std::uint32_t),
@@ -264,9 +312,9 @@ createDynamicRenderingPipeline(const vk::raii::Device& device,
     };
     const vk::PipelineVertexInputStateCreateInfo vertexInput{
         .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &kVertexBinding,
-        .vertexAttributeDescriptionCount = static_cast<std::uint32_t>(kVertexAttributes.size()),
-        .pVertexAttributeDescriptions = kVertexAttributes.data(),
+        .pVertexBindingDescriptions = &vertexBinding,
+        .vertexAttributeDescriptionCount = static_cast<std::uint32_t>(vertexAttributes.size()),
+        .pVertexAttributeDescriptions = vertexAttributes.data(),
     };
     const vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
         .topology = vk::PrimitiveTopology::eTriangleList,

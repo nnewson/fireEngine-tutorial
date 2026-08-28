@@ -8,6 +8,7 @@
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/detail/allocator.hpp>
+#include <fire_engine/render/detail/compiled_resource_graph.hpp>
 #include <fire_engine/render/detail/compiled_resources.hpp>
 #include <fire_engine/render/detail/depth_buffer.hpp>
 #include <fire_engine/render/detail/device.hpp>
@@ -16,10 +17,12 @@
 #include <fire_engine/render/detail/frame_in_flight.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
 #include <fire_engine/render/detail/pipeline.hpp>
+#include <fire_engine/render/detail/resource_compiler.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene.hpp>
 
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +41,11 @@ namespace fire_engine
 namespace
 {
 /** @cond INTERNAL */
+/* --- File-local constants --- */
+
+/** @brief Vulkan-free mesh layout required by the tutorial scene pipeline. */
+constexpr PipelineDescription kScenePipelineDescription{};
+
 /* --- File-local classes --- */
 
 /** @brief Accumulates one optional host phase without adding renderer state. */
@@ -286,6 +294,7 @@ private:
     CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
+    detail::ResourceCompiler resourceCompiler_; ///< Dedicated setup-time upload context.
 
     // Presentation-dependent state replaced as one ownership group.
     std::unique_ptr<PresentationState> presentation_; ///< Swapchain-compatible resources.
@@ -345,6 +354,7 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
     : commandRecordingMode_{configuration.commandRecordingMode},
       device_{glfw, window, applicationName},
       allocator_{device_},
+      resourceCompiler_{device_, allocator_},
       presentation_{std::make_unique<PresentationState>(device_, allocator_, window)},
       frame_{device_, allocator_,
              detail::FrameUniforms{.viewProjection =
@@ -396,7 +406,8 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
     // Planning validates every CPU relationship before the first Vulkan
     // allocation, keeping malformed input failures deterministic and cheap.
     const SceneDrawList drawList = scene.buildDrawItems();
-    const RenderPreparationPlan& plan = renderPreparation_.build(assets, drawList);
+    const RenderPreparationPlan& plan =
+        renderPreparation_.build(assets, drawList, presentation_->pipeline().description());
     if (compiledGeneration_.has_value() && *compiledGeneration_ == renderPreparation_.generation())
     {
         return;
@@ -410,7 +421,9 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const Scene& scene)
         waitIdle();
     }
 
-    compiledResources_.replace(device_, allocator_, frame_, assets, plan);
+    std::unique_ptr<detail::CompiledResourceGraph> candidate =
+        resourceCompiler_.compile(assets, plan, compiledResources_.graph());
+    compiledResources_.replace(std::move(candidate));
     compiledGeneration_ = renderPreparation_.generation();
 }
 
@@ -816,6 +829,7 @@ void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
     for (const DrawItem& item : drawItems)
     {
         const detail::CompiledDraw draw = compiledResources_.draw(item.renderObject);
+        assert(draw.vertexLayout == presentation_->pipeline().description().vertexLayout);
         const detail::DrawBindingChanges changes =
             bindingState.update(draw.vertexBuffer, draw.indexBuffer, draw.sampler, draw.imageView);
         if (changes.geometry)
@@ -884,7 +898,7 @@ PresentationState::PresentationState(const detail::Device& device,
     : logicalDevice_{&device.logicalDevice()},
       swapchain_{device, window, oldSwapchain},
       depthBuffer_{device, allocator, swapchain_.extent()},
-      pipeline_{device, swapchain_.imageFormat(), depthBuffer_.format()},
+      pipeline_{device, kScenePipelineDescription, swapchain_.imageFormat(), depthBuffer_.format()},
       presentSubmitted_(swapchain_.imageCount(), 0)
 {
     if (swapchain_.imageCount() == 0 ||

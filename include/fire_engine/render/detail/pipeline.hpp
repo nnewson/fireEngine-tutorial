@@ -2,6 +2,8 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
+#include <fire_engine/graphics/pipeline_description.hpp>
+
 namespace fire_engine::detail
 {
 /** @cond INTERNAL */
@@ -30,12 +32,14 @@ public:
      * @brief Creates the pipeline layout and graphics pipeline.
      * @param device Logical device with dynamic rendering, push descriptors, and
      *               maintenance5 enabled.
+     * @param description Vulkan-free vertex compatibility requirements.
      * @param colorFormat Swapchain format used by the dynamic color attachment.
      * @param depthFormat Format used by the dynamic depth attachment.
      * @throws std::runtime_error if the compiled shader cannot be loaded.
      * @throws vk::SystemError if Vulkan cannot create a pipeline object.
      */
-    Pipeline(const Device& device, vk::Format colorFormat, vk::Format depthFormat);
+    Pipeline(const Device& device, PipelineDescription description, vk::Format colorFormat,
+             vk::Format depthFormat);
 
     /** @brief Releases the pipeline, pipeline layout, and retained set layout in order. */
     ~Pipeline() = default;
@@ -61,12 +65,16 @@ public:
      */
     [[nodiscard]] const vk::raii::Pipeline& pipeline() const noexcept;
 
+    /** @brief Returns the Vulkan-free compatibility description. @return Retained description. */
+    [[nodiscard]] const PipelineDescription& description() const noexcept;
+
 private:
     // Vulkan permits the original descriptor-set-layout handle to be destroyed
     // after pipeline-layout creation. Retaining it makes that construction
     // relationship explicit for the tutorial and avoids a validation-layer
     // lifetime diagnostic when push descriptors are recorded. Reverse member
     // destruction releases these objects in dependency order.
+    PipelineDescription description_; ///< Vertex layout compiled into pipeline state.
     vk::raii::DescriptorSetLayout descriptorSetLayout_{nullptr}; ///< Set-zero push layout.
     vk::raii::PipelineLayout pipelineLayout_{nullptr}; ///< Supplied to each push-descriptor write.
     vk::raii::Pipeline pipeline_{nullptr};             ///< Dynamic-rendering graphics pipeline.
