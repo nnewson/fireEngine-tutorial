@@ -87,12 +87,11 @@ constexpr std::array<SmokeDefinition, 4> kSmokeDefinitions{{
     {
         .name = "prepare-twice",
         .scenario = SmokeScenario::ePrepareTwice,
-        // After the first frame uses the original resources, three more frames
-        // exercise the replacement. That typically revisits every per-image
-        // presentation fence on the current three-image swapchain, although
+        // Two original frames populate both submission slots before preparation
+        // quiesces them. Three replacement frames then revisit both slots while
         // image count and acquisition order remain driver-selected.
-        .frameLimit = 4,
-        .reprepareAfterFrame = 1,
+        .frameLimit = 5,
+        .reprepareAfterFrame = 2,
         .recreateEveryFrame = false,
     },
     {
@@ -211,7 +210,8 @@ try
     std::println("Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("Graphics queue family: {}", rendererInfo.graphicsQueueFamily);
     std::println("Present queue family: {}", rendererInfo.presentQueueFamily);
-    std::println("Logical device, queues, and VMA allocator created.");
+    std::println("Logical device, queues, VMA allocator, and {} frame slots created.",
+                 rendererInfo.frameSlotCount);
     std::println("Swapchain created: {} images at {}x{} ({}, {}, depth {}), {} presentation "
                  "semaphores.",
                  rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,

@@ -192,7 +192,8 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
-    std::println("  Ownership: separated frame slot and recording contexts (Step 4)");
+    std::println("  Ownership: cycled frame slots with per-slot recording contexts (Step 5)");
+    std::println("  Frames in flight: {}", rendererInfo.frameSlotCount);
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode);
     std::println("  Workload: instances={}, nodes={}, draws={}", instanceCount_, nodeCount_,
