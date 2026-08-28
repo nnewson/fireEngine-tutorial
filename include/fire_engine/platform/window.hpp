@@ -4,6 +4,8 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
+#include <fire_engine/platform/framebuffer_extent.hpp>
+
 /* --- External forward declarations --- */
 
 struct GLFWwindow;
@@ -57,7 +59,7 @@ public:
      * @brief Returns the drawable framebuffer size in physical pixels.
      * @return Current framebuffer extent; either dimension may be zero while minimized.
      */
-    [[nodiscard]] vk::Extent2D framebufferExtent() const noexcept;
+    [[nodiscard]] FramebufferExtent framebufferExtent() const noexcept;
 
     /**
      * @brief Reports whether the user or window system has requested closure.

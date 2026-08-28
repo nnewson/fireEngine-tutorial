@@ -1,6 +1,5 @@
 #include <fire_engine/render/detail/swapchain.hpp>
 
-#include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/detail/device.hpp>
 #include <fire_engine/render/detail/swapchain_selection.hpp>
 
@@ -39,7 +38,8 @@ createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t image
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-Swapchain::Swapchain(const Device& device, const Window& window, vk::SwapchainKHR oldSwapchain)
+Swapchain::Swapchain(const Device& device, FramebufferExtent framebufferExtent,
+                     vk::SwapchainKHR oldSwapchain)
 {
     const SurfaceSupport support = querySurfaceSupport(device);
 
@@ -53,8 +53,9 @@ Swapchain::Swapchain(const Device& device, const Window& window, vk::SwapchainKH
     }
     const vk::SurfaceFormatKHR surfaceFormat = detail::chooseSurfaceFormat(support.formats);
     const vk::PresentModeKHR presentMode = detail::choosePresentMode(support.presentModes);
-    const vk::Extent2D imageExtent =
-        detail::chooseExtent(support.capabilities, window.framebufferExtent());
+    const vk::Extent2D imageExtent = detail::chooseExtent(
+        support.capabilities,
+        vk::Extent2D{.width = framebufferExtent.width, .height = framebufferExtent.height});
     const std::array queueFamilies = {device.graphicsQueueFamily(), device.presentQueueFamily()};
     const bool usesSeparateQueueFamilies = queueFamilies[0] != queueFamilies[1];
 

@@ -5,13 +5,9 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
-namespace fire_engine
-{
-/* --- Forward declarations --- */
+#include <fire_engine/platform/framebuffer_extent.hpp>
 
-class Window;
-
-namespace detail
+namespace fire_engine::detail
 {
 /** @cond INTERNAL */
 
@@ -38,14 +34,15 @@ class Swapchain final
 {
 public:
     /**
-     * @brief Creates a swapchain suited to the selected device and current window.
+     * @brief Creates a swapchain suited to the selected device and framebuffer hint.
      * @param device Device, surface, and queue families used by the swapchain.
-     * @param window Window whose framebuffer size determines the image extent.
+     * @param framebufferExtent Drawable size used when the surface exposes a variable extent.
      * @param oldSwapchain Retired presentation state whose resources may be reused.
      * @throws std::runtime_error if the surface no longer supports presentation.
      * @throws vk::SystemError if swapchain, image-view, or semaphore creation fails.
      */
-    Swapchain(const Device& device, const Window& window, vk::SwapchainKHR oldSwapchain = nullptr);
+    Swapchain(const Device& device, FramebufferExtent framebufferExtent,
+              vk::SwapchainKHR oldSwapchain = nullptr);
 
     /**
      * @brief Releases image views before the swapchain that supplied their images.
@@ -162,5 +159,4 @@ private:
     vk::Extent2D extent_{}; ///< Dimensions shared by all images.
 };
 /** @endcond */
-} // namespace detail
-} // namespace fire_engine
+} // namespace fire_engine::detail

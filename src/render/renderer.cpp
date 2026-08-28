@@ -91,11 +91,11 @@ public:
      * @brief Creates one complete set of mutually compatible presentation resources.
      * @param device Device and queues used for rendering and presentation.
      * @param allocator VMA owner used for the depth attachment.
-     * @param window Window whose current framebuffer determines the extent.
+     * @param framebufferExtent Drawable size used to select the swapchain extent.
      * @param oldSwapchain Previous swapchain offered for implementation reuse.
      */
     PresentationState(const detail::Device& device, const detail::MemoryAllocator& allocator,
-                      const Window& window, vk::SwapchainKHR oldSwapchain = nullptr);
+                      FramebufferExtent framebufferExtent, vk::SwapchainKHR oldSwapchain = nullptr);
 
     /** @brief Returns the owned swapchain. @return Presentation images and semaphores. */
     [[nodiscard]] const detail::Swapchain& swapchain() const noexcept;
@@ -184,10 +184,10 @@ public:
 
     /**
      * @brief Replaces the complete presentation-dependent ownership group.
-     * @param window Window whose current framebuffer selects the new extent.
+     * @param framebufferExtent Drawable size sampled by the application event loop.
      * @return true after replacement, or false for a transient zero-sized framebuffer.
      */
-    [[nodiscard]] bool recreatePresentation(const Window& window);
+    [[nodiscard]] bool recreatePresentation(FramebufferExtent framebufferExtent);
 
     /** @brief Waits for device work and clears pending-submission bookkeeping. */
     void waitIdle();
@@ -332,9 +332,9 @@ RenderResult Renderer::drawFrame(const Scene& scene, RendererCpuTimings* timings
     return implementation_->drawFrame(scene, timings);
 }
 
-bool Renderer::recreatePresentation(const Window& window)
+bool Renderer::recreatePresentation(FramebufferExtent framebufferExtent)
 {
-    return implementation_->recreatePresentation(window);
+    return implementation_->recreatePresentation(framebufferExtent);
 }
 
 void Renderer::waitIdle()
@@ -356,7 +356,8 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
-      presentation_{std::make_unique<PresentationState>(device_, allocator_, window)},
+      presentation_{
+          std::make_unique<PresentationState>(device_, allocator_, window.framebufferExtent())},
       // Frame storage depends on the presentation extent sampled here, so the
       // presentation owner must be constructed before the frame slot.
       frameSlot_{device_, allocator_,
@@ -579,9 +580,8 @@ void Renderer::Impl::waitIdle()
     frameSlot_.clearPendingWork();
 }
 
-bool Renderer::Impl::recreatePresentation(const Window& window)
+bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
 {
-    const vk::Extent2D framebufferExtent = window.framebufferExtent();
     if (framebufferExtent.width == 0 || framebufferExtent.height == 0)
     {
         return false;
@@ -593,7 +593,7 @@ bool Renderer::Impl::recreatePresentation(const Window& window)
     waitIdle();
     const vk::SwapchainKHR oldSwapchain = *presentation_->swapchain().handle();
     auto replacement =
-        std::make_unique<PresentationState>(device_, allocator_, window, oldSwapchain);
+        std::make_unique<PresentationState>(device_, allocator_, framebufferExtent, oldSwapchain);
     frameSlot_.writeUniforms(detail::FrameUniforms{
         .viewProjection = createViewProjection(replacement->swapchain().extent()),
     });
@@ -904,10 +904,11 @@ namespace
 /* --- File-local class member functions --- */
 
 PresentationState::PresentationState(const detail::Device& device,
-                                     const detail::MemoryAllocator& allocator, const Window& window,
+                                     const detail::MemoryAllocator& allocator,
+                                     FramebufferExtent framebufferExtent,
                                      vk::SwapchainKHR oldSwapchain)
     : logicalDevice_{&device.logicalDevice()},
-      swapchain_{device, window, oldSwapchain},
+      swapchain_{device, framebufferExtent, oldSwapchain},
       depthBuffer_{device, allocator, swapchain_.extent()},
       pipeline_{device, kScenePipelineDescription, swapchain_.imageFormat(), depthBuffer_.format()},
       presentSubmitted_(swapchain_.imageCount(), 0)

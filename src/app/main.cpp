@@ -186,6 +186,11 @@ try
                                     : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
+    if (options.smokeScenario == SmokeScenario::eResize &&
+        renderer.recreatePresentation(fire_engine::FramebufferExtent{}))
+    {
+        throw std::logic_error("A zero framebuffer extent unexpectedly replaced presentation");
+    }
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
         std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
 
@@ -484,8 +489,8 @@ void addMixedResourceInstances(fire_engine::SceneContent& content)
 {
     while (!window.shouldClose())
     {
-        const vk::Extent2D extent = window.framebufferExtent();
-        if (extent.width != 0 && extent.height != 0 && renderer.recreatePresentation(window))
+        const fire_engine::FramebufferExtent extent = window.framebufferExtent();
+        if (extent.width != 0 && extent.height != 0 && renderer.recreatePresentation(extent))
         {
             return true;
         }
