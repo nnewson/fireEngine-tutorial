@@ -66,30 +66,22 @@ secondary command buffers, not an alternative production renderer:
 ./build/fireEngineTutorial --benchmark 10000 --direct-primary
 ```
 
-During the Step-4 ownership measurement, add `--legacy-frame-in-flight` to run
-the complete pre-split `FrameInFlight` arrangement from the same binary. This is
-a temporary paired control; the default owns submission state in a `FrameSlot`
-and primary/worker command pools in separate recording contexts:
-
-```sh
-./build/fireEngineTutorial --benchmark 10000 --legacy-frame-in-flight
-```
-
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
 draw-list construction, draw-list validation, coordinator and worker command-
 pool reset, primary and secondary recording, submission, and presentation
 waits. The separated report attributes worker-owned reset and recording work;
-it does not claim a placement speedup before workers exist. The legacy control
-retains the combined-reset report and its secondary-recording-only ceilings.
-Frames affected by out-of-date or suboptimal presentation are excluded from
-the measured sample set.
+it does not claim a placement speedup before workers exist. Frames affected by
+out-of-date or suboptimal presentation are excluded from the measured sample
+set.
 
 Use a Release build for performance results. Values are comparable only for
-the same workload, build configuration, machine, and Vulkan driver; hosted CI
-and software-renderer timings are not performance gates. The one-instance
-CTest scenario checks only that scene generation, measurement, aggregation,
-reporting, and Vulkan validation complete successfully.
+the same workload, build configuration, machine, and Vulkan driver. The plan's
+registered architecture gates use same-session phase ratios from admitted
+implementations; absolute hosted-runner timings are observations, not
+thresholds. The one-instance CTest scenario checks only that scene generation,
+measurement, aggregation, reporting, and Vulkan validation complete
+successfully.
 
 ## Documentation
 

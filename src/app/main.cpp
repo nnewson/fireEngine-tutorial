@@ -63,7 +63,6 @@ struct RunOptions
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
-    bool useLegacyOwnership = false; ///< Whether the benchmark selects the Step-4 paired control.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -185,9 +184,6 @@ try
         .commandRecordingMode = options.recordDirectly
                                     ? fire_engine::CommandRecordingMode::eDirectPrimary
                                     : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
-        .ownershipMode = options.useLegacyOwnership
-                             ? fire_engine::RendererOwnershipMode::eLegacyCombinedControl
-                             : fire_engine::RendererOwnershipMode::eSeparated,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
@@ -362,7 +358,7 @@ namespace
         }
         throw std::invalid_argument{requirement};
     }
-    if (option == "--benchmark" && argumentCount >= 3 && argumentCount <= 5)
+    if (option == "--benchmark" && argumentCount >= 3)
     {
         const std::uint64_t instanceCount = parsePositiveInteger(arguments[2], "--benchmark");
         if (instanceCount > std::numeric_limits<std::size_t>::max())
@@ -370,17 +366,12 @@ namespace
             throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
         }
         bool recordDirectly = false;
-        bool useLegacyOwnership = false;
         for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
         {
             const std::string_view benchmarkOption{arguments[argumentIndex]};
             if (benchmarkOption == "--direct-primary" && !recordDirectly)
             {
                 recordDirectly = true;
-            }
-            else if (benchmarkOption == "--legacy-frame-in-flight" && !useLegacyOwnership)
-            {
-                useLegacyOwnership = true;
             }
             else
             {
@@ -395,14 +386,13 @@ namespace
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
             .recordDirectly = recordDirectly,
-            .useLegacyOwnership = useLegacyOwnership,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
         throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
-                                    "[--direct-primary] [--legacy-frame-in-flight] | "
+                                    "[--direct-primary] | "
                                     "--frames positive-count [--recreate-every-frame] | "
                                     "--smoke scenario]");
     }
