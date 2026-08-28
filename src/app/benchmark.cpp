@@ -63,6 +63,13 @@ struct PhaseStatistics
 [[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode);
 
 /**
+ * @brief Names one frame/recording ownership arrangement.
+ * @param mode Ownership arrangement selected when the renderer was constructed.
+ * @return Stable human-readable label for paired benchmark comparisons.
+ */
+[[nodiscard]] std::string_view ownershipModeName(RendererOwnershipMode mode);
+
+/**
  * @brief Summarizes one non-empty collection of phase durations.
  * @param durations Durations to sort and aggregate.
  * @return Mean, median, and nearest-rank 95th percentile.
@@ -192,6 +199,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
+    std::println("  Ownership: {}", ownershipModeName(rendererInfo.ownershipMode));
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode);
     std::println("  Workload: instances={}, nodes={}, draws={}", instanceCount_, nodeCount_,
@@ -219,8 +227,18 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                [](const Sample& sample) { return sample.renderer.drawListBuild; });
     printPhase("draw-list validation",
                [](const Sample& sample) { return sample.renderer.drawListValidation; });
-    printPhase("command-pool reset",
-               [](const Sample& sample) { return sample.renderer.commandPoolReset; });
+    if (rendererInfo.ownershipMode == RendererOwnershipMode::eSeparated)
+    {
+        printPhase("coordinator command-pool reset", [](const Sample& sample)
+                   { return sample.renderer.coordinatorCommandPoolReset; });
+        printPhase("worker command-pool reset",
+                   [](const Sample& sample) { return sample.renderer.workerCommandPoolReset; });
+    }
+    else
+    {
+        printPhase("command-pool reset",
+                   [](const Sample& sample) { return sample.renderer.commandPoolReset; });
+    }
     printPhase("secondary command recording",
                [](const Sample& sample) { return sample.renderer.secondaryCommandRecording; });
     printPhase("primary command recording",
@@ -240,6 +258,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
 
     std::chrono::nanoseconds snapshot{};
     std::chrono::nanoseconds commandPoolReset{};
+    std::chrono::nanoseconds workerCommandPoolReset{};
     std::chrono::nanoseconds secondaryRecording{};
     std::chrono::nanoseconds primaryRecording{};
     std::chrono::nanoseconds secondaryExecution{};
@@ -252,6 +271,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                                                         sample.renderer.drawListValidation;
         snapshot += sampleSnapshot;
         commandPoolReset += sample.renderer.commandPoolReset;
+        workerCommandPoolReset += sample.renderer.workerCommandPoolReset;
         secondaryRecording += sample.renderer.secondaryCommandRecording;
         primaryRecording += sample.renderer.primaryCommandRecording;
         secondaryExecution += sample.renderer.secondaryCommandExecution;
@@ -274,7 +294,8 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Queue-submission share of measured active work: {:.2f}%",
                  percentageOfActive(submission));
     std::println("  Fence, acquisition, and presentation durations are reported separately.");
-    if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
+    if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer &&
+        rendererInfo.ownershipMode == RendererOwnershipMode::eLegacyCombinedControl)
     {
         const std::chrono::nanoseconds serialWork =
             snapshot + commandPoolReset + primaryRecording + secondaryExecution + submission;
@@ -302,10 +323,32 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
         std::println(
             "  Ceilings assume perfect division of only the measured secondary recording.");
     }
+    else if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
+    {
+        const std::chrono::nanoseconds attributedWorkerWork =
+            workerCommandPoolReset + secondaryRecording;
+        const std::chrono::nanoseconds serialOutsideWorker = activeWork - attributedWorkerWork;
+        std::println("  Secondary-execution share of measured active work: {:.2f}%",
+                     percentageOfActive(secondaryExecution));
+        std::println("  Worker-pool-reset share of measured active work: {:.2f}%",
+                     percentageOfActive(workerCommandPoolReset));
+        std::println("  Attributed worker-owned share: {:.2f}%",
+                     percentageOfActive(attributedWorkerWork));
+        std::println("  Current serial share outside worker-owned work: {:.2f}%",
+                     percentageOfActive(serialOutsideWorker));
+        std::println("  Split phases attribute ownership; they do not measure placement benefit.");
+        std::println(
+            "  Registered p subtracts the one-draw fixed reset estimate from worker work.");
+        std::println("  For two workers: serial + fixed reset + variable worker work / 2.");
+    }
     else
     {
         std::println(
             "  The direct-primary control has no worker-divisible secondary-recording phase.");
+        if (rendererInfo.ownershipMode == RendererOwnershipMode::eSeparated)
+        {
+            std::println("  Its worker pool has no command-buffer allocations or recorded work.");
+        }
     }
     std::println("  Draw bindings are cached independently inside each recorded command buffer.");
 }
@@ -352,6 +395,18 @@ namespace
         return "direct primary command buffer";
     }
     throw std::logic_error("Benchmark encountered an unknown command recording mode");
+}
+
+[[nodiscard]] std::string_view ownershipModeName(RendererOwnershipMode mode)
+{
+    switch (mode)
+    {
+    case RendererOwnershipMode::eSeparated:
+        return "separated frame slot and recording contexts (Step 4)";
+    case RendererOwnershipMode::eLegacyCombinedControl:
+        return "legacy combined FrameInFlight (Step 4 paired control)";
+    }
+    throw std::logic_error("Unknown renderer ownership mode");
 }
 
 [[nodiscard]] PhaseStatistics summarize(std::vector<std::chrono::nanoseconds> durations)

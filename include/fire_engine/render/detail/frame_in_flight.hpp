@@ -2,8 +2,8 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
-#include <fire_engine/math/mat4.hpp>
 #include <fire_engine/render/detail/buffer.hpp>
+#include <fire_engine/render/detail/frame_uniforms.hpp>
 
 namespace fire_engine::detail
 {
@@ -13,26 +13,10 @@ namespace fire_engine::detail
 class Device;
 class MemoryAllocator;
 
-/* --- POD structs --- */
-
-/**
- * @brief Per-frame values read by the tutorial vertex shader.
- *
- * Slang declares the matching constant buffer with Std140DataLayout. A 4x4
- * float matrix occupies 64 bytes and has 16-byte base alignment in that layout.
- */
-struct alignas(16) FrameUniforms
-{
-    Mat4 viewProjection = Mat4::identity(); ///< World-to-clip transform shared by every draw.
-};
-
-static_assert(sizeof(FrameUniforms) == 16 * sizeof(float));
-static_assert(alignof(FrameUniforms) == 16);
-
 /* --- Classes --- */
 
 /**
- * @brief Owns the command and synchronization objects for one frame in flight.
+ * @brief Preserves the legacy combined frame-and-recording ownership control.
  *
  * The current serial implementation combines one submission slot with one
  * recording context: a primary command buffer owns the frame boundaries, a
@@ -40,11 +24,10 @@ static_assert(alignof(FrameUniforms) == 16);
  * image acquisition, a fence reports submission completion, and a uniform
  * buffer holds values that may change after that fence signals.
  *
- * This combined ownership is deliberately interim. Submission synchronization
- * and uniform storage are indexed by frame, while parallel recording requires
- * command buffers and independently synchronized pools indexed by recording
- * context. Separating those lifetimes does not change the secondary-buffer
- * inheritance contract proved here.
+ * This complete pre-Step-4 arrangement remains temporarily selectable so its
+ * one-thread cost can be measured beside the separated ownership path in the
+ * same binary and session. Production ownership is FrameSlot plus independent
+ * RecordingContext objects.
  *
  * The matching render-finished semaphores are deliberately not here. Those are
  * indexed by swapchain image, so Swapchain owns them; see its documentation for
