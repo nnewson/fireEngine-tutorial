@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 
+#include <fire_engine/platform/framebuffer_extent.hpp>
+
 namespace fire_engine
 {
 /* --- Forward declarations --- */
@@ -135,8 +137,8 @@ public:
     [[nodiscard]] RenderResult drawFrame(const Scene& scene, RendererCpuTimings* timings = nullptr);
 
     /**
-     * @brief Replaces presentation resources for the window's current framebuffer.
-     * @param window Window whose framebuffer extent selects the replacement size.
+     * @brief Replaces presentation resources for a sampled framebuffer extent.
+     * @param framebufferExtent Drawable size sampled by the application event loop.
      * @return true after replacement, or false when the framebuffer is currently zero-sized.
      * @throws std::runtime_error if the surface no longer supports presentation.
      * @throws vk::SystemError internally if Vulkan resource creation fails.
@@ -145,7 +147,7 @@ public:
      * this call, so that transient state is reported rather than treated as an
      * error. Prepared meshes, textures, and render objects remain unchanged.
      */
-    [[nodiscard]] bool recreatePresentation(const Window& window);
+    [[nodiscard]] bool recreatePresentation(FramebufferExtent framebufferExtent);
 
     /** @brief Waits for device and presentation work before resources are destroyed. */
     void waitIdle();

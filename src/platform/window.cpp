@@ -53,7 +53,7 @@ vk::raii::SurfaceKHR Window::createVulkanSurface(const vk::raii::Instance& insta
     return {instance, surface};
 }
 
-vk::Extent2D Window::framebufferExtent() const noexcept
+FramebufferExtent Window::framebufferExtent() const noexcept
 {
     // Framebuffer pixels, rather than logical window coordinates, match the
     // resolution required by Vulkan on high-DPI displays.
