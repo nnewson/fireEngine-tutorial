@@ -18,6 +18,14 @@ class RecordingContext;
 
 /* --- POD structs --- */
 
+#if defined(_MSC_VER)
+// Separating participants onto their own cache lines is the entire purpose of
+// the alignment specifier below, so the padding MSVC reports as C4324 is
+// intentional rather than accidental.
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
 /**
  * @brief Timestamps captured by one recording participant.
  *
@@ -33,6 +41,10 @@ struct alignas(64) ChunkRecordingTimings
     std::chrono::steady_clock::time_point recordEnd{};  ///< After this chunk's secondary ends.
     bool recorded = false;                              ///< Whether this chunk ran this frame.
 };
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 /** @brief Everything one participant needs to record its contiguous draw range. */
 struct SecondaryChunkJob
