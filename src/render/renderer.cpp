@@ -303,6 +303,18 @@ private:
     [[nodiscard]] bool workMayBePending() const noexcept;
 
     /**
+     * @brief Selects the temporary Step-8a pool hint for every recording context.
+     * @return Detail-layer hint matching the configured renderer control.
+     */
+    [[nodiscard]] detail::RecordingPoolHint recordingPoolHint() const noexcept;
+
+    /**
+     * @brief Selects the buffer a worker context allocates for the active recording path.
+     * @return Secondary for the production path, or none for the direct-primary control.
+     */
+    [[nodiscard]] detail::RecordingBufferKind workerBufferKind() const noexcept;
+
+    /**
      * @brief Records the mesh bindings, constants, and indexed draw for each item.
      * @param commandBuffer Command buffer inside the active color pass.
      * @param input Compiler-produced packets and their compatible pipeline layout.
@@ -324,7 +336,8 @@ private:
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
     // Foundational long-lived state.
-    CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
+    CommandRecordingMode commandRecordingMode_;           ///< Fixed production or attribution path.
+    RecordingPoolLifetimeHint recordingPoolLifetimeHint_; ///< Temporary Step-8a pool hint.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
     detail::ResourceCompiler resourceCompiler_; ///< Dedicated setup-time upload context.
@@ -385,6 +398,7 @@ RendererInfo Renderer::info() const
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
                      RendererConfiguration configuration)
     : commandRecordingMode_{configuration.commandRecordingMode},
+      recordingPoolLifetimeHint_{configuration.recordingPoolLifetimeHint},
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
@@ -399,22 +413,16 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
               .slot = detail::FrameSlot{device_, allocator_,
                                         detail::FrameUniforms{.viewProjection = Mat4::identity()}},
               .coordinator =
-                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-              .worker =
-                  detail::RecordingContext{device_,
-                                           commandRecordingMode_ ==
-                                                   CommandRecordingMode::eSecondaryCommandBuffer
-                                               ? detail::RecordingBufferKind::eSecondary
-                                               : detail::RecordingBufferKind::eNone}},
+                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary,
+                                           recordingPoolHint()},
+              .worker = detail::RecordingContext{device_, workerBufferKind(), recordingPoolHint()}},
           FrameResources{
               .slot = detail::FrameSlot{device_, allocator_,
                                         detail::FrameUniforms{.viewProjection = Mat4::identity()}},
               .coordinator =
-                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-              .worker = detail::RecordingContext{
-                  device_, commandRecordingMode_ == CommandRecordingMode::eSecondaryCommandBuffer
-                               ? detail::RecordingBufferKind::eSecondary
-                               : detail::RecordingBufferKind::eNone}}}
+                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary,
+                                           recordingPoolHint()},
+              .worker = detail::RecordingContext{device_, workerBufferKind(), recordingPoolHint()}}}
 {
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
@@ -657,6 +665,20 @@ bool Renderer::Impl::workMayBePending() const noexcept
     return false;
 }
 
+detail::RecordingPoolHint Renderer::Impl::recordingPoolHint() const noexcept
+{
+    return recordingPoolLifetimeHint_ == RecordingPoolLifetimeHint::eTransient
+               ? detail::RecordingPoolHint::eTransient
+               : detail::RecordingPoolHint::eNone;
+}
+
+detail::RecordingBufferKind Renderer::Impl::workerBufferKind() const noexcept
+{
+    return commandRecordingMode_ == CommandRecordingMode::eSecondaryCommandBuffer
+               ? detail::RecordingBufferKind::eSecondary
+               : detail::RecordingBufferKind::eNone;
+}
+
 bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
 {
     if (framebufferExtent.width == 0 || framebufferExtent.height == 0)
@@ -692,6 +714,7 @@ RendererInfo Renderer::Impl::info() const
         .depthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
         .commandRecordingMode = commandRecordingMode_,
+        .recordingPoolLifetimeHint = recordingPoolLifetimeHint_,
     };
 }
 

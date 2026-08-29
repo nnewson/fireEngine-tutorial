@@ -29,11 +29,20 @@ enum class CommandRecordingMode : std::uint8_t
 
 /* --- POD structs --- */
 
+/** @brief Temporary Step-8a control over the per-frame recording pool hint. */
+enum class RecordingPoolLifetimeHint : std::uint8_t
+{
+    eNone,      ///< Create recording pools without an allocation-lifetime hint.
+    eTransient, ///< Declare the short-lived per-frame command buffers as transient.
+};
+
 /** @brief Construction-time renderer choices that remain fixed for its lifetime. */
 struct RendererConfiguration
 {
     CommandRecordingMode commandRecordingMode =
         CommandRecordingMode::eSecondaryCommandBuffer; ///< Geometry recording structure.
+    RecordingPoolLifetimeHint recordingPoolLifetimeHint =
+        RecordingPoolLifetimeHint::eNone; ///< Temporary Step-8a pool-hint control.
 };
 
 /** @brief Vulkan-free summary of the renderer selected for this window. */
@@ -53,6 +62,7 @@ struct RendererInfo
     std::string depthFormat;                   ///< Human-readable depth attachment format.
     std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
     CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
+    RecordingPoolLifetimeHint recordingPoolLifetimeHint; ///< Recording-pool hint in use.
 };
 
 /** @brief Host timings for renderer-owned CPU phases inside one drawFrame() attempt. */
