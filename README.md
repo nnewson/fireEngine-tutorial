@@ -68,13 +68,13 @@ secondary command buffers, not an alternative production renderer:
 
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
-draw-list construction, draw-list validation, coordinator and worker command-
-pool reset, primary and secondary recording, submission, and presentation
-waits. The per-slot report attributes worker-owned reset and recording work;
-it does not claim a placement speedup before workers exist. Two Vulkan
-submission slots are cycled independently of the driver-selected swapchain
-image. Frames affected by out-of-date or suboptimal presentation are excluded
-from the measured sample set.
+draw-list construction, recording-input compilation, frame-uniform updates,
+coordinator and worker command-pool reset, primary and secondary recording,
+submission, and presentation waits. The per-slot report attributes worker-owned
+reset and recording work; it does not claim a placement speedup before workers
+exist. Two Vulkan submission slots are cycled independently of the
+driver-selected swapchain image. Frames affected by out-of-date or suboptimal
+presentation are excluded from the measured sample set.
 
 Use a Release build for performance results. Values are comparable only for
 the same workload, build configuration, machine, and Vulkan driver. The plan's

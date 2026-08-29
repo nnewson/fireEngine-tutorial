@@ -2,14 +2,15 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <vulkan/vulkan_raii.hpp>
 
-#include <fire_engine/graphics/color4.hpp>
 #include <fire_engine/graphics/mesh.hpp>
 #include <fire_engine/graphics/pipeline_description.hpp>
 #include <fire_engine/render/detail/buffer.hpp>
+#include <fire_engine/render/detail/compiled_draw.hpp>
 #include <fire_engine/render/detail/image.hpp>
 
 namespace fire_engine
@@ -121,9 +122,9 @@ public:
     CompiledTexture(const CompiledTexture&) = delete;
     /// @brief Copy assignment is disabled because Vulkan handles have unique ownership.
     CompiledTexture& operator=(const CompiledTexture&) = delete;
-    /// @brief Move construction is disabled so render-object borrower addresses remain stable.
+    /// @brief Move construction is disabled so graph ownership remains explicit.
     CompiledTexture(CompiledTexture&&) = delete;
-    /// @brief Move assignment is disabled so render-object borrower addresses remain stable.
+    /// @brief Move assignment is disabled so graph ownership remains explicit.
     CompiledTexture& operator=(CompiledTexture&&) = delete;
 
     /** @brief Returns the sampled image. @return Borrowed compiled image. */
@@ -137,24 +138,13 @@ private:
     vk::raii::Sampler sampler_;            ///< Filtering and addressing state.
 };
 
-/* --- POD structs --- */
-
-/** @brief Prepared draw lookup retaining borrowers into one compiled graph. */
-struct CompiledRenderObject
-{
-    const CompiledMesh* mesh = nullptr;       ///< Shared compiled geometry.
-    const CompiledTexture* texture = nullptr; ///< Sampled base-color texture.
-    Color4 baseColor{};                       ///< Material factor pushed for each draw.
-    VertexLayoutKey vertexLayout =
-        VertexLayoutKey::ePositionColorTextureCoordinate; ///< Retained compatibility proof.
-};
-
 /**
  * @brief Complete stable ownership graph produced as one compilation candidate.
  *
- * Declaration order is part of the lifetime contract. Reverse destruction
- * releases render-object borrowers first, then meshes, every texture, and
- * finally every image borrowed by those textures.
+ * Only the image/texture declaration order is a lifetime constraint: image
+ * owners precede texture borrowers so reverse destruction releases every
+ * texture before the image it references. Meshes and the plain-handle packet
+ * table have no borrower-before-owner ordering requirement.
  */
 struct CompiledResourceGraph
 {
@@ -163,7 +153,7 @@ struct CompiledResourceGraph
     std::vector<std::unique_ptr<CompiledTexture>> textures; ///< Dense TextureId lookup.
     std::shared_ptr<CompiledTexture> fallbackTexture;       ///< Sampler paired with fallbackImage.
     std::vector<std::unique_ptr<CompiledMesh>> meshes;      ///< Dense MeshId lookup.
-    std::vector<CompiledRenderObject> objects;              ///< Dense RenderObjectId draw lookup.
+    std::vector<std::optional<CompiledDraw>> objects;       ///< Dense RenderObjectId packet lookup.
 };
 /** @endcond */
 } // namespace detail

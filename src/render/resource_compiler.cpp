@@ -165,13 +165,18 @@ ResourceCompiler::compile(const RenderAssets& assets, const RenderPreparationPla
     {
         const Material& material = assets.materials()[object.material.value];
         const CompiledMesh& mesh = *candidate->meshes[object.mesh.value];
+        const CompiledTexture& texture =
+            material.baseColorTexture.has_value()
+                ? *candidate->textures[material.baseColorTexture->value]
+                : *candidate->fallbackTexture;
         assert(mesh.vertexLayout() == object.vertexLayout);
         assert(object.vertexLayout == plan.pipeline.vertexLayout);
-        candidate->objects[object.id.value] = {
-            .mesh = &mesh,
-            .texture = material.baseColorTexture.has_value()
-                           ? candidate->textures[material.baseColorTexture->value].get()
-                           : candidate->fallbackTexture.get(),
+        candidate->objects[object.id.value] = CompiledDraw{
+            .vertexBuffer = mesh.vertexBuffer().handle(),
+            .indexBuffer = mesh.indexBuffer().handle(),
+            .indexCount = mesh.indexCount(),
+            .sampler = *texture.sampler(),
+            .imageView = *texture.image().view(),
             .baseColor = material.baseColor,
             .vertexLayout = object.vertexLayout,
         };

@@ -221,8 +221,10 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
 
     printPhase("transform update", &Sample::transformUpdate);
     printPhase("draw-list build", &Sample::drawListBuild);
-    printPhase("draw-list validation",
-               [](const Sample& sample) { return sample.renderer.drawListValidation; });
+    printPhase("recording-input build",
+               [](const Sample& sample) { return sample.renderer.recordingInputBuild; });
+    printPhase("frame-uniform update",
+               [](const Sample& sample) { return sample.renderer.frameUniformUpdate; });
     printPhase("coordinator command-pool reset",
                [](const Sample& sample) { return sample.renderer.coordinatorCommandPoolReset; });
     printPhase("worker command-pool reset",
@@ -254,17 +256,17 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     for (const Sample& sample : samples_)
     {
         const std::chrono::nanoseconds sampleSnapshot =
-            sample.transformUpdate + sample.drawListBuild + sample.renderer.drawListValidation;
+            sample.transformUpdate + sample.drawListBuild + sample.renderer.recordingInputBuild;
         snapshot += sampleSnapshot;
         workerCommandPoolReset += sample.renderer.workerCommandPoolReset;
         secondaryRecording += sample.renderer.secondaryCommandRecording;
         primaryRecording += sample.renderer.primaryCommandRecording;
         secondaryExecution += sample.renderer.secondaryCommandExecution;
         submission += sample.renderer.queueSubmission;
-        activeWork += sampleSnapshot + sample.renderer.commandPoolReset +
-                      sample.renderer.secondaryCommandRecording +
-                      sample.renderer.primaryCommandRecording +
-                      sample.renderer.secondaryCommandExecution + sample.renderer.queueSubmission;
+        activeWork +=
+            sampleSnapshot + sample.renderer.commandPoolReset + sample.renderer.frameUniformUpdate +
+            sample.renderer.secondaryCommandRecording + sample.renderer.primaryCommandRecording +
+            sample.renderer.secondaryCommandExecution + sample.renderer.queueSubmission;
     }
     if (activeWork.count() == 0)
     {

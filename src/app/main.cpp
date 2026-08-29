@@ -12,6 +12,7 @@
 #include <exception>
 #include <filesystem>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -40,6 +41,16 @@ namespace
  * @brief Deterministic step that samples both intervals and wraps AnimatedCube's two-second clip.
  */
 constexpr float kSmokeAnimationStepSeconds = 0.8f;
+
+/** @brief Fixed application-owned camera used by every tutorial scenario. */
+constexpr fire_engine::Camera kTutorialCamera{
+    .position = {.x = 0.0f, .y = 0.0f, .z = 4.0f},
+    .target = {},
+    .up = {.x = 0.0f, .y = 1.0f, .z = 0.0f},
+    .verticalFieldOfViewRadians = std::numbers::pi_v<float> / 3.0f,
+    .nearPlane = 0.1f,
+    .farPlane = 100.0f,
+};
 
 /* --- File-local types --- */
 
@@ -283,8 +294,8 @@ try
         }
 
         fire_engine::RendererCpuTimings rendererTimings;
-        const fire_engine::RenderResult result =
-            renderer.drawFrame(drawList, benchmark.has_value() ? &rendererTimings : nullptr);
+        const fire_engine::RenderResult result = renderer.drawFrame(
+            drawList, kTutorialCamera, benchmark.has_value() ? &rendererTimings : nullptr);
         if (benchmark.has_value())
         {
             benchmark->record(result, transformUpdate, drawListBuild, rendererTimings);
