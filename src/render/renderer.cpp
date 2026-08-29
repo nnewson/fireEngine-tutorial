@@ -18,10 +18,12 @@
 #include <fire_engine/render/detail/recording_context.hpp>
 #include <fire_engine/render/detail/recording_input.hpp>
 #include <fire_engine/render/detail/resource_compiler.hpp>
+#include <fire_engine/render/detail/secondary_recording_worker.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene_draw_list.hpp>
 
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +31,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -87,7 +90,11 @@ struct FrameResources final
 {
     detail::FrameSlot slot;               ///< Synchronization and uniform state for the slot.
     detail::RecordingContext coordinator; ///< Primary-command recording state for the slot.
-    detail::RecordingContext worker;      ///< Worker-local recording state for the slot.
+    // Both contexts exist in every configuration so one-thread and two-thread
+    // measurements share an ownership topology. An allocated pool that is never
+    // reset or recorded into contributes no measured work.
+    std::array<detail::RecordingContext, kMaxSecondaryRecordingThreads>
+        secondaries; ///< One recording context per participant.
 };
 
 /** @brief Replaceable swapchain, attachments, pipeline, and presentation completion state. */
@@ -155,6 +162,72 @@ private:
 /* --- File-local function declarations --- */
 
 [[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept;
+
+/**
+ * @brief Records fixed state shared by every draw in one command buffer.
+ * @param commandBuffer Primary or secondary command buffer receiving the state.
+ * @param state Plain handles and dynamic state proved by the input compiler.
+ * @return Fresh draw-binding cache scoped to the established descriptor state.
+ */
+[[nodiscard]] detail::DrawBindingState
+bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
+                  const detail::RecordingState& state);
+
+/**
+ * @brief Records the bindings, constants, and indexed draw for each packet.
+ * @param commandBuffer Command buffer inside the active color pass.
+ * @param state Compatible pipeline layout shared by every packet.
+ * @param draws Contiguous resolved packets recorded in order.
+ * @param bindingState Cache created when the complete geometry state was established.
+ */
+void recordDraws(const vk::raii::CommandBuffer& commandBuffer, const detail::RecordingState& state,
+                 std::span<const detail::RecordingDraw> draws,
+                 detail::DrawBindingState bindingState);
+
+/**
+ * @brief Resets one participant's pool and records its chunk into its secondary.
+ * @param job Recording context, fixed state, and contiguous packets for this chunk.
+ * @param timings Participant-local block receiving this chunk's timestamps.
+ */
+void recordSecondaryChunk(const detail::SecondaryChunkJob& job,
+                          detail::ChunkRecordingTimings* timings);
+
+/**
+ * @brief Merges participant timestamp blocks into the public per-frame timings.
+ * @param chunkTimings Participant-local blocks written during this attempt.
+ * @param participants Number of leading blocks that recorded a chunk.
+ * @param timings Optional public output receiving durations and the critical path.
+ */
+void mergeChunkTimings(
+    const std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads>& chunkTimings,
+    std::size_t participants, RendererCpuTimings* timings);
+
+/* --- File-local classes --- */
+
+/** @brief Waits for the dispatched helper chunk, including while unwinding. */
+class ChunkJoin final
+{
+public:
+    /** @brief Adopts a helper with one outstanding chunk. @param helper Dispatched helper. */
+    explicit ChunkJoin(detail::SecondaryRecordingWorker& helper) noexcept
+        : helper_{&helper}
+    {
+    }
+
+    /** @brief Blocks until the helper has stopped reading its job. */
+    ~ChunkJoin() noexcept
+    {
+        helper_->awaitCompletion();
+    }
+
+    ChunkJoin(const ChunkJoin&) = delete;
+    ChunkJoin& operator=(const ChunkJoin&) = delete;
+    ChunkJoin(ChunkJoin&&) = delete;
+    ChunkJoin& operator=(ChunkJoin&&) = delete;
+
+private:
+    detail::SecondaryRecordingWorker* helper_; ///< Borrowed for one dispatch.
+};
 } // namespace
 
 /* --- Private implementation class declaration --- */
@@ -220,7 +293,7 @@ private:
      * @param timings Optional output receiving the serial and secondary recording phases.
      */
     void recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                        const detail::RecordingInput& input, RendererCpuTimings* timings) const;
+                        const detail::RecordingInput& input, RendererCpuTimings* timings);
 
     /**
      * @brief Records inherited draws and executes them from one primary geometry pass.
@@ -230,8 +303,7 @@ private:
      * @param timings Optional output receiving both command-buffer recording phases.
      */
     void recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                 const detail::RecordingInput& input,
-                                 RendererCpuTimings* timings) const;
+                                 const detail::RecordingInput& input, RendererCpuTimings* timings);
 
     /**
      * @brief Records the complete geometry pass directly into one primary command buffer.
@@ -241,8 +313,7 @@ private:
      * @param timings Optional output receiving the direct primary recording phase.
      */
     void recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                              const detail::RecordingInput& input,
-                              RendererCpuTimings* timings) const;
+                              const detail::RecordingInput& input, RendererCpuTimings* timings);
 
     /**
      * @brief Begins a primary command buffer and its geometry rendering instance.
@@ -289,16 +360,6 @@ private:
     void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer, std::size_t frameSlotIndex,
                            std::uint32_t imageIndex, vk::RenderingFlags flags) const;
 
-    /**
-     * @brief Records fixed state shared by every draw in one command buffer.
-     * @param commandBuffer Primary or secondary command buffer receiving the state.
-     * @param state Plain handles and dynamic state proved by the input compiler.
-     * @return Fresh draw-binding cache scoped to the established descriptor state.
-     */
-    [[nodiscard]] detail::DrawBindingState
-    bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
-                      const detail::RecordingState& state) const;
-
     /** @brief Reports whether any submission slot may still be in use. @return Pending state. */
     [[nodiscard]] bool workMayBePending() const noexcept;
 
@@ -307,16 +368,6 @@ private:
      * @return Secondary for the production path, or none for the direct-primary control.
      */
     [[nodiscard]] detail::RecordingBufferKind workerBufferKind() const noexcept;
-
-    /**
-     * @brief Records the mesh bindings, constants, and indexed draw for each item.
-     * @param commandBuffer Command buffer inside the active color pass.
-     * @param input Compiler-produced packets and their compatible pipeline layout.
-     * @param bindingState Cache created when the complete geometry state was established.
-     */
-    void recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                     const detail::RecordingInput& input,
-                     detail::DrawBindingState bindingState) const;
 
     /**
      * @brief Orders color writes before the transition to presentation.
@@ -330,7 +381,8 @@ private:
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
     // Foundational long-lived state.
-    CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
+    CommandRecordingMode commandRecordingMode_;     ///< Fixed production or attribution path.
+    std::size_t secondaryRecordingThreadCount_ = 1; ///< Participants including the coordinator.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
     detail::ResourceCompiler resourceCompiler_; ///< Dedicated setup-time upload context.
@@ -346,6 +398,10 @@ private:
     detail::CompiledResources compiledResources_;   ///< GPU state selected by the current plan.
     std::optional<std::size_t> compiledGeneration_; ///< Plan generation uploaded to the GPU.
     detail::RecordingInputCompiler recordingInputCompiler_; ///< Reusable packet-freeze arena.
+
+    // Declared last so reverse member destruction stops the helper before the
+    // recording contexts whose pools it writes into.
+    detail::SecondaryRecordingWorker secondaryHelper_; ///< Records the second chunk on request.
 };
 /** @endcond */
 
@@ -391,6 +447,7 @@ RendererInfo Renderer::info() const
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
                      RendererConfiguration configuration)
     : commandRecordingMode_{configuration.commandRecordingMode},
+      secondaryRecordingThreadCount_{configuration.secondaryRecordingThreadCount},
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
@@ -406,14 +463,22 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
                                         detail::FrameUniforms{.viewProjection = Mat4::identity()}},
               .coordinator =
                   detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-              .worker = detail::RecordingContext{device_, workerBufferKind()}},
+              .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
+                              detail::RecordingContext{device_, workerBufferKind()}}},
           FrameResources{
               .slot = detail::FrameSlot{device_, allocator_,
                                         detail::FrameUniforms{.viewProjection = Mat4::identity()}},
               .coordinator =
                   detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-              .worker = detail::RecordingContext{device_, workerBufferKind()}}}
+              .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
+                              detail::RecordingContext{device_, workerBufferKind()}}}}
 {
+    if (secondaryRecordingThreadCount_ == 0 ||
+        secondaryRecordingThreadCount_ > kMaxSecondaryRecordingThreads)
+    {
+        throw std::invalid_argument("Secondary recording thread count is outside the supported "
+                                    "range");
+    }
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
         throw std::runtime_error("Vulkan returned a null device queue");
@@ -433,6 +498,10 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
 
 Renderer::Impl::~Impl() noexcept
 {
+    // drawFrame() waits for the helper synchronously, so every entry point
+    // below begins with it idle. Assert the invariant rather than joining,
+    // which would defeat the helper's persistence.
+    assert(secondaryHelper_.idle());
     if (!workMayBePending())
     {
         return;
@@ -460,6 +529,7 @@ Renderer::Impl::~Impl() noexcept
 
 void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& drawList)
 {
+    assert(secondaryHelper_.idle());
     // Planning validates every CPU relationship before the first Vulkan
     // allocation, keeping malformed input failures deterministic and cheap.
     const RenderPreparationPlan& plan =
@@ -635,6 +705,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
 
 void Renderer::Impl::waitIdle()
 {
+    assert(secondaryHelper_.idle());
     device_.logicalDevice().waitIdle();
     presentation_->waitForPresentations();
     for (FrameResources& frame : frames_)
@@ -664,6 +735,7 @@ detail::RecordingBufferKind Renderer::Impl::workerBufferKind() const noexcept
 
 bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
 {
+    assert(secondaryHelper_.idle());
     if (framebufferExtent.width == 0 || framebufferExtent.height == 0)
     {
         return false;
@@ -697,20 +769,38 @@ RendererInfo Renderer::Impl::info() const
         .depthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
         .commandRecordingMode = commandRecordingMode_,
+        .secondaryRecordingThreadCount = secondaryRecordingThreadCount_,
     };
 }
 
 void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                     const detail::RecordingInput& input,
-                                    RendererCpuTimings* timings) const
+                                    RendererCpuTimings* timings)
 {
-    const detail::RecordingContext& workerRecording = frames_[frameSlotIndex].worker;
-    {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->workerCommandPoolReset};
-        workerRecording.resetCommands();
-    }
     if (commandRecordingMode_ == CommandRecordingMode::eDirectPrimary)
     {
+        // The direct control still owns a secondary pool and still resets it, so
+        // its empty-pool cost stays measurable and comparable. That reset is the
+        // whole of its secondary-recording region.
+        const detail::RecordingContext& emptyContext = frames_[frameSlotIndex].secondaries.front();
+        if (timings == nullptr)
+        {
+            emptyContext.resetCommands();
+        }
+        else
+        {
+            const auto resetStart = std::chrono::steady_clock::now();
+            emptyContext.resetCommands();
+            const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - resetStart);
+            // No chunk is marked recorded: this path records no secondary at
+            // all, so it has zero recording participants even though its empty
+            // pool is still reset and timed as the fixed-cost floor.
+            timings->workerCommandPoolReset = elapsed;
+            timings->secondaryRecordingRegion = elapsed;
+            timings->workerResetRegionSpan = elapsed;
+            timings->workerRegionCriticalPath = elapsed;
+        }
         recordDirectCommands(frameSlotIndex, imageIndex, input, timings);
         return;
     }
@@ -719,32 +809,52 @@ void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t im
 
 void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                              const detail::RecordingInput& input,
-                                             RendererCpuTimings* timings) const
+                                             RendererCpuTimings* timings)
 {
     const FrameResources& frame = frames_[frameSlotIndex];
-    const vk::raii::CommandBuffer& secondaryCommandBuffer = frame.worker.commandBuffer();
+    const detail::RecordingState& state = input.state();
+    const std::span<const detail::RecordingDraw> draws = input.draws();
+
+    // The registered protocol requires non-empty ranges, so a workload too
+    // small to split stays with the coordinator alone.
+    const std::size_t participants =
+        secondaryRecordingThreadCount_ > 1 && draws.size() >= secondaryRecordingThreadCount_
+            ? secondaryRecordingThreadCount_
+            : 1;
+    const std::size_t firstChunkSize = participants > 1 ? (draws.size() + 1) / 2 : draws.size();
+
+    std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads> chunkTimings{};
+    const auto chunkBlock = [&chunkTimings, timings](std::size_t index)
+    { return timings == nullptr ? nullptr : &chunkTimings[index]; };
+    const detail::SecondaryChunkJob coordinatorJob{
+        .context = &frame.secondaries.front(),
+        .state = state,
+        .draws = draws.first(firstChunkSize),
+    };
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandRecording};
-        const detail::RecordingState& state = input.state();
-        const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &state.colorAttachmentFormat,
-            .depthAttachmentFormat = state.depthAttachmentFormat,
-            .rasterizationSamples = vk::SampleCountFlagBits::e1,
-        };
-        const vk::CommandBufferInheritanceInfo inheritanceInfo{
-            .pNext = &renderingInheritance,
-        };
-        const vk::CommandBufferBeginInfo secondaryBeginInfo{
-            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit |
-                     vk::CommandBufferUsageFlagBits::eRenderPassContinue,
-            .pInheritanceInfo = &inheritanceInfo,
-        };
-        secondaryCommandBuffer.begin(secondaryBeginInfo);
-        detail::DrawBindingState bindingState = bindGeometryState(secondaryCommandBuffer, state);
-        recordDraws(secondaryCommandBuffer, input, std::move(bindingState));
-        secondaryCommandBuffer.end();
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryRecordingRegion};
+        if (participants > 1)
+        {
+            const detail::SecondaryChunkJob helperJob{
+                .context = &frame.secondaries[1],
+                .state = state,
+                .draws = draws.subspan(firstChunkSize),
+            };
+            secondaryHelper_.dispatch(&recordSecondaryChunk, helperJob, chunkBlock(1));
+            // The guard's destructor waits for the helper, so completion is
+            // observed even while an exception from the coordinator's own chunk
+            // unwinds this scope. The job itself was copied by dispatch; what
+            // must stay alive is the context, draw storage, and timing block.
+            const ChunkJoin join{secondaryHelper_};
+            recordSecondaryChunk(coordinatorJob, chunkBlock(0));
+        }
+        else
+        {
+            recordSecondaryChunk(coordinatorJob, chunkBlock(0));
+        }
     }
+    secondaryHelper_.rethrowIfFailed();
+    mergeChunkTimings(chunkTimings, participants, timings);
 
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
     {
@@ -754,8 +864,18 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandExecution};
-        const std::array secondaryCommands{*secondaryCommandBuffer};
-        primaryCommandBuffer.executeCommands(secondaryCommands);
+        // Chunk order is preserved so recorded draw order survives the split.
+        if (participants > 1)
+        {
+            const std::array secondaryCommands{*frame.secondaries.front().commandBuffer(),
+                                               *frame.secondaries[1].commandBuffer()};
+            primaryCommandBuffer.executeCommands(secondaryCommands);
+        }
+        else
+        {
+            const std::array secondaryCommands{*frame.secondaries.front().commandBuffer()};
+            primaryCommandBuffer.executeCommands(secondaryCommands);
+        }
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
@@ -765,14 +885,14 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
 
 void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                           const detail::RecordingInput& input,
-                                          RendererCpuTimings* timings) const
+                                          RendererCpuTimings* timings)
 {
     CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
     const FrameResources& frame = frames_[frameSlotIndex];
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
     beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex, {});
     detail::DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer, input.state());
-    recordDraws(primaryCommandBuffer, input, std::move(bindingState));
+    recordDraws(primaryCommandBuffer, input.state(), input.draws(), std::move(bindingState));
     endPrimaryRecording(primaryCommandBuffer, imageIndex);
 }
 
@@ -885,67 +1005,6 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
         .pDepthAttachment = &depthAttachment,
     };
     commandBuffer.beginRendering(renderingInfo);
-}
-
-detail::DrawBindingState
-Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
-                                  const detail::RecordingState& state) const
-{
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, state.pipeline);
-    commandBuffer.setViewport(0, state.viewport);
-    commandBuffer.setScissor(0, state.scissor);
-
-    const vk::DescriptorBufferInfo uniformInfo{
-        .buffer = state.frameUniformBuffer,
-        .offset = 0,
-        .range = sizeof(detail::FrameUniforms),
-    };
-    const vk::WriteDescriptorSet uniformWrite{
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = vk::DescriptorType::eUniformBuffer,
-        .pBufferInfo = &uniformInfo,
-    };
-    commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, state.pipelineLayout, 0,
-                                    uniformWrite);
-    return {};
-}
-
-void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                                 const detail::RecordingInput& input,
-                                 detail::DrawBindingState bindingState) const
-{
-    constexpr vk::DeviceSize bufferOffset = 0;
-    for (const detail::RecordingDraw& draw : input.draws())
-    {
-        const detail::DrawBindingChanges changes =
-            bindingState.update(draw.vertexBuffer, draw.indexBuffer, draw.sampler, draw.imageView);
-        if (changes.geometry)
-        {
-            commandBuffer.bindVertexBuffers(0, draw.vertexBuffer, bufferOffset);
-            commandBuffer.bindIndexBuffer(draw.indexBuffer, 0, vk::IndexType::eUint32);
-        }
-        if (changes.texture)
-        {
-            const vk::DescriptorImageInfo textureInfo{
-                .sampler = draw.sampler,
-                .imageView = draw.imageView,
-                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-            };
-            const vk::WriteDescriptorSet textureWrite{
-                .dstBinding = 1,
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-                .pImageInfo = &textureInfo,
-            };
-            commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
-                                            input.state().pipelineLayout, 0, textureWrite);
-        }
-
-        commandBuffer.pushConstants<detail::DrawConstants>(
-            input.state().pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, draw.constants);
-        commandBuffer.drawIndexed(draw.indexCount, 1, 0, 0, 0);
-    }
 }
 
 void Renderer::Impl::transitionToPresent(const vk::raii::CommandBuffer& commandBuffer,
@@ -1076,6 +1135,167 @@ void PresentationState::waitForPresentations()
 
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).height == -600.0f);
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).y == 600.0f);
+
+detail::DrawBindingState bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
+                                           const detail::RecordingState& state)
+{
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, state.pipeline);
+    commandBuffer.setViewport(0, state.viewport);
+    commandBuffer.setScissor(0, state.scissor);
+
+    const vk::DescriptorBufferInfo uniformInfo{
+        .buffer = state.frameUniformBuffer,
+        .offset = 0,
+        .range = sizeof(detail::FrameUniforms),
+    };
+    const vk::WriteDescriptorSet uniformWrite{
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType = vk::DescriptorType::eUniformBuffer,
+        .pBufferInfo = &uniformInfo,
+    };
+    commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, state.pipelineLayout, 0,
+                                    uniformWrite);
+    return {};
+}
+
+void recordDraws(const vk::raii::CommandBuffer& commandBuffer, const detail::RecordingState& state,
+                 std::span<const detail::RecordingDraw> draws,
+                 detail::DrawBindingState bindingState)
+{
+    constexpr vk::DeviceSize bufferOffset = 0;
+    for (const detail::RecordingDraw& draw : draws)
+    {
+        const detail::DrawBindingChanges changes =
+            bindingState.update(draw.vertexBuffer, draw.indexBuffer, draw.sampler, draw.imageView);
+        if (changes.geometry)
+        {
+            commandBuffer.bindVertexBuffers(0, draw.vertexBuffer, bufferOffset);
+            commandBuffer.bindIndexBuffer(draw.indexBuffer, 0, vk::IndexType::eUint32);
+        }
+        if (changes.texture)
+        {
+            const vk::DescriptorImageInfo textureInfo{
+                .sampler = draw.sampler,
+                .imageView = draw.imageView,
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            };
+            const vk::WriteDescriptorSet textureWrite{
+                .dstBinding = 1,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+                .pImageInfo = &textureInfo,
+            };
+            commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, state.pipelineLayout,
+                                            0, textureWrite);
+        }
+
+        commandBuffer.pushConstants<detail::DrawConstants>(
+            state.pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, draw.constants);
+        commandBuffer.drawIndexed(draw.indexCount, 1, 0, 0, 0);
+    }
+}
+
+void recordSecondaryChunk(const detail::SecondaryChunkJob& job,
+                          detail::ChunkRecordingTimings* timings)
+{
+    // Each participant resets its own pool as the first act of its own work,
+    // which is the registered ownership rule for worker-local reset cost.
+    // Ordinary frames pass no timing block and take no clock samples.
+    if (timings != nullptr)
+    {
+        timings->resetStart = std::chrono::steady_clock::now();
+    }
+    job.context->resetCommands();
+    if (timings != nullptr)
+    {
+        timings->resetEnd = std::chrono::steady_clock::now();
+    }
+
+    const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &job.state.colorAttachmentFormat,
+        .depthAttachmentFormat = job.state.depthAttachmentFormat,
+        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+    };
+    const vk::CommandBufferInheritanceInfo inheritanceInfo{
+        .pNext = &renderingInheritance,
+    };
+    const vk::CommandBufferBeginInfo secondaryBeginInfo{
+        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit |
+                 vk::CommandBufferUsageFlagBits::eRenderPassContinue,
+        .pInheritanceInfo = &inheritanceInfo,
+    };
+    const vk::raii::CommandBuffer& commandBuffer = job.context->commandBuffer();
+    commandBuffer.begin(secondaryBeginInfo);
+    // Every chunk establishes its own complete geometry state, so each secondary
+    // pays a fixed preamble that does not divide with draw count.
+    detail::DrawBindingState bindingState = bindGeometryState(commandBuffer, job.state);
+    recordDraws(commandBuffer, job.state, job.draws, std::move(bindingState));
+    commandBuffer.end();
+
+    if (timings != nullptr)
+    {
+        timings->recordEnd = std::chrono::steady_clock::now();
+        timings->recorded = true;
+    }
+}
+
+void mergeChunkTimings(
+    const std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads>& chunkTimings,
+    std::size_t participants, RendererCpuTimings* timings)
+{
+    if (timings == nullptr)
+    {
+        return;
+    }
+
+    std::chrono::steady_clock::time_point earliestStart{};
+    std::chrono::steady_clock::time_point latestResetEnd{};
+    std::chrono::steady_clock::time_point latestEnd{};
+    for (std::size_t index = 0; index < participants; ++index)
+    {
+        const detail::ChunkRecordingTimings& chunk = chunkTimings[index];
+        assert(chunk.recorded);
+        if (index == 0 || chunk.resetStart < earliestStart)
+        {
+            earliestStart = chunk.resetStart;
+        }
+        if (index == 0 || chunk.resetEnd > latestResetEnd)
+        {
+            latestResetEnd = chunk.resetEnd;
+        }
+        if (index == 0 || chunk.recordEnd > latestEnd)
+        {
+            latestEnd = chunk.recordEnd;
+        }
+    }
+
+    for (std::size_t index = 0; index < participants; ++index)
+    {
+        const detail::ChunkRecordingTimings& chunk = chunkTimings[index];
+        const auto poolReset =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(chunk.resetEnd - chunk.resetStart);
+        const auto recording =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(chunk.recordEnd - chunk.resetEnd);
+        timings->chunks[index] = ChunkCpuTimings{
+            .poolReset = poolReset,
+            .recording = recording,
+            .resetStartOffset = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                chunk.resetStart - earliestStart),
+            .recorded = true,
+        };
+        timings->workerCommandPoolReset += poolReset;
+        timings->secondaryCommandRecording += recording;
+    }
+
+    // The reset-region span next to the participant reset durations is what
+    // decides whether concurrent resets overlapped or serialized.
+    timings->workerResetRegionSpan =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(latestResetEnd - earliestStart);
+    timings->workerRegionCriticalPath =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(latestEnd - earliestStart);
+}
 
 } // namespace
 /** @endcond */

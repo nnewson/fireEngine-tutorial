@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +28,11 @@ enum class CommandRecordingMode : std::uint8_t
     eDirectPrimary,          ///< Record draws directly for attribution benchmarks.
 };
 
+/* --- Constants --- */
+
+/** @brief Largest number of threads that may record secondary command buffers. */
+inline constexpr std::size_t kMaxSecondaryRecordingThreads = 2;
+
 /* --- POD structs --- */
 
 /** @brief Construction-time renderer choices that remain fixed for its lifetime. */
@@ -34,6 +40,8 @@ struct RendererConfiguration
 {
     CommandRecordingMode commandRecordingMode =
         CommandRecordingMode::eSecondaryCommandBuffer; ///< Geometry recording structure.
+    /// Participants recording secondary chunks, counting the coordinator itself.
+    std::size_t secondaryRecordingThreadCount = 1;
 };
 
 /** @brief Vulkan-free summary of the renderer selected for this window. */
@@ -53,6 +61,18 @@ struct RendererInfo
     std::string depthFormat;                   ///< Human-readable depth attachment format.
     std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
     CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
+    std::size_t secondaryRecordingThreadCount; ///< Recording participants including coordinator.
+};
+
+/** @brief Pool-reset and recording durations for one secondary recording participant. */
+struct ChunkCpuTimings
+{
+    std::chrono::nanoseconds poolReset{}; ///< This participant's own command-pool reset.
+    std::chrono::nanoseconds recording{}; ///< This participant's secondary command recording.
+    /// Delay from the earliest participant's reset start to this participant's own reset start.
+    /// With the per-participant durations this reconstructs whether resets overlapped.
+    std::chrono::nanoseconds resetStartOffset{};
+    bool recorded = false; ///< Whether this participant ran during the attempt.
 };
 
 /** @brief Host timings for renderer-owned CPU phases inside one drawFrame() attempt. */
@@ -66,7 +86,19 @@ struct RendererCpuTimings
     std::chrono::nanoseconds commandPoolReset{};            ///< Sum of pool resets on this path.
     std::chrono::nanoseconds coordinatorCommandPoolReset{}; ///< Primary-context pool reset.
     std::chrono::nanoseconds workerCommandPoolReset{};      ///< Worker-context pool reset.
-    std::chrono::nanoseconds secondaryCommandRecording{};   ///< Worker-candidate draw recording.
+    std::chrono::nanoseconds secondaryCommandRecording{};   ///< Sum of participant recording.
+    /// Coordinator-observed span from publishing the helper chunk through its completion wait
+    /// returning. This is the secondary-recording contribution to measured active work: unlike
+    /// the participant sums it also contains dispatch and join, which threading adds.
+    std::chrono::nanoseconds secondaryRecordingRegion{};
+    /// Earliest participant reset start through the latest participant recording completion.
+    /// Diagnostic input to the registered reset contract; never added to recording elapsed.
+    std::chrono::nanoseconds workerRegionCriticalPath{};
+    /// Earliest participant reset start through the latest participant reset end. Compare with
+    /// the participant reset durations to decide whether concurrent resets overlapped.
+    std::chrono::nanoseconds workerResetRegionSpan{};
+    std::array<ChunkCpuTimings, kMaxSecondaryRecordingThreads>
+        chunks{};                                         ///< Per-participant detail.
     std::chrono::nanoseconds primaryCommandRecording{};   ///< Serial pass and transition recording.
     std::chrono::nanoseconds secondaryCommandExecution{}; ///< Serial secondary execution call.
     std::chrono::nanoseconds queueSubmission{};           ///< Fence reset and graphics submission.

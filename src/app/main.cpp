@@ -74,6 +74,8 @@ struct RunOptions
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
+    std::size_t secondaryRecordingThreads =
+        1; ///< Recording participants including the coordinator.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -143,6 +145,14 @@ constexpr std::array<SmokeDefinition, 4> kSmokeDefinitions{{
                                                  std::string_view optionName);
 
 /**
+ * @brief Parses the supported secondary-recording participant count.
+ * @param text Argument text following --recording-threads.
+ * @return Participant count including the coordinator.
+ * @throws std::invalid_argument if the count is not positive or exceeds the supported maximum.
+ */
+[[nodiscard]] std::size_t parseRecordingThreadCount(std::string_view text);
+
+/**
  * @brief Adds an untextured render object that reuses AnimatedCube's imported mesh.
  * @param content Loaded content whose asset catalog receives the material and relationship.
  * @return ID of the newly added render object.
@@ -157,7 +167,7 @@ addUntexturedRenderObject(fire_engine::SceneContent& content);
 void selectUntexturedScene(fire_engine::SceneContent& content);
 
 /**
- * @brief Adds A/A/B draws so repeated preparation exercises binding reuse and changes.
+ * @brief Adds draws so each half of a split recording sees reuse and a change.
  * @param content Loaded AnimatedCube content extended with mixed-resource instances.
  */
 void addMixedResourceInstances(fire_engine::SceneContent& content);
@@ -194,6 +204,7 @@ try
         .commandRecordingMode = options.recordDirectly
                                     ? fire_engine::CommandRecordingMode::eDirectPrimary
                                     : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
+        .secondaryRecordingThreadCount = options.secondaryRecordingThreads,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
     if (options.smokeScenario == SmokeScenario::eResize &&
@@ -364,8 +375,17 @@ namespace
         return {};
     }
     const std::string_view option{arguments[1]};
-    if (argumentCount == 3 && option == "--smoke")
+    if ((argumentCount == 3 || argumentCount == 5) && option == "--smoke")
     {
+        std::size_t smokeRecordingThreads = 1;
+        if (argumentCount == 5)
+        {
+            if (std::string_view{arguments[3]} != "--recording-threads")
+            {
+                throw std::invalid_argument("--smoke accepts only --recording-threads count");
+            }
+            smokeRecordingThreads = parseRecordingThreadCount(arguments[4]);
+        }
         const std::string_view scenario{arguments[2]};
         for (const SmokeDefinition& definition : kSmokeDefinitions)
         {
@@ -378,6 +398,7 @@ namespace
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
                     .recordDirectly = false,
+                    .secondaryRecordingThreads = smokeRecordingThreads,
                 };
             }
         }
@@ -396,6 +417,8 @@ namespace
             throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
         }
         bool recordDirectly = false;
+        bool recordingThreadsSeen = false;
+        std::size_t secondaryRecordingThreads = 1;
         for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
         {
             const std::string_view benchmarkOption{arguments[argumentIndex]};
@@ -403,11 +426,26 @@ namespace
             {
                 recordDirectly = true;
             }
+            else if (benchmarkOption == "--recording-threads" && !recordingThreadsSeen &&
+                     argumentIndex + 1 < argumentCount)
+            {
+                ++argumentIndex;
+                recordingThreadsSeen = true;
+                secondaryRecordingThreads = parseRecordingThreadCount(arguments[argumentIndex]);
+            }
             else
             {
                 throw std::invalid_argument{"Unknown or repeated benchmark option: " +
                                             std::string{benchmarkOption}};
             }
+        }
+        // The direct control records no secondary at all, so a split request
+        // there would silently have no effect.
+        if (recordDirectly && secondaryRecordingThreads > 1)
+        {
+            throw std::invalid_argument(
+                "--direct-primary records no secondary command buffer, so it cannot be combined "
+                "with more than one recording thread");
         }
         return {
             .frameLimit = std::nullopt,
@@ -416,15 +454,17 @@ namespace
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
             .recordDirectly = recordDirectly,
+            .secondaryRecordingThreads = secondaryRecordingThreads,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
         throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
-                                    "[--direct-primary] | "
+                                    "[--direct-primary] "
+                                    "[--recording-threads count] | "
                                     "--frames positive-count [--recreate-every-frame] | "
-                                    "--smoke scenario]");
+                                    "--smoke scenario [--recording-threads count]]");
     }
 
     const std::uint64_t value = parsePositiveInteger(arguments[2], "--frames");
@@ -435,10 +475,21 @@ namespace
         .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
         .recordDirectly = false,
+        .secondaryRecordingThreads = 1,
     };
 }
 
-[[nodiscard]] std::uint64_t parsePositiveInteger(std::string_view text, std::string_view optionName)
+[[nodiscard]] std::size_t parseRecordingThreadCount(std::string_view text)
+{
+    const std::uint64_t threads = parsePositiveInteger(text, "--recording-threads");
+    if (threads > fire_engine::kMaxSecondaryRecordingThreads)
+    {
+        throw std::invalid_argument("--recording-threads exceeds the supported participant count");
+    }
+    return static_cast<std::size_t>(threads);
+}
+
+std::uint64_t parsePositiveInteger(std::string_view text, std::string_view optionName)
 {
     std::uint64_t value = 0;
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
@@ -486,11 +537,6 @@ void addMixedResourceInstances(fire_engine::SceneContent& content)
     }
 
     const fire_engine::RenderObjectId repeatedObject{.value = 0};
-    fire_engine::SceneNode& repeatedNode = content.scene.addRoot("Repeated resource instance");
-    repeatedNode.localTransform(fire_engine::Transform{
-        .translation = {.x = -1.5f, .y = 0.0f, .z = 0.0f},
-    });
-    repeatedNode.component(repeatedObject);
 
     fire_engine::Mesh duplicatedMesh = content.assets.meshes().front();
     const fire_engine::MeshId duplicatedMeshId = content.assets.addMesh(std::move(duplicatedMesh));
@@ -502,11 +548,24 @@ void addMixedResourceInstances(fire_engine::SceneContent& content)
         .mesh = duplicatedMeshId,
         .material = material,
     });
-    fire_engine::SceneNode& differentNode = content.scene.addRoot("Different resource instance");
-    differentNode.localTransform(fire_engine::Transform{
-        .translation = {.x = 1.5f, .y = 0.0f, .z = 0.0f},
-    });
-    differentNode.component(differentObject);
+
+    // The imported cube already supplies the first A, so appending A, B, A, A, B
+    // gives the six-draw order A, A, B, A, A, B. Splitting that in half hands
+    // each recording participant a first-draw bind, a redundant skip, and a
+    // resource change, rather than leaving one branch to a single chunk.
+    const std::array<fire_engine::RenderObjectId, 5> appendedObjects{
+        repeatedObject, differentObject, repeatedObject, repeatedObject, differentObject,
+    };
+    float offset = -3.0f;
+    for (const fire_engine::RenderObjectId object : appendedObjects)
+    {
+        fire_engine::SceneNode& node = content.scene.addRoot("Mixed resource instance");
+        node.localTransform(fire_engine::Transform{
+            .translation = {.x = offset, .y = 0.0f, .z = 0.0f},
+        });
+        node.component(object);
+        offset += 1.5f;
+    }
 }
 
 [[nodiscard]] bool recreateWhenDrawable(fire_engine::Renderer& renderer,

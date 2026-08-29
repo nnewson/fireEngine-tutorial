@@ -66,6 +66,16 @@ secondary command buffers, not an alternative production renderer:
 ./build/fireEngineTutorial --benchmark 10000 --direct-primary
 ```
 
+Add `--recording-threads 2` to split one frame's draws between the coordinator
+and one helper thread, each recording its own secondary command buffer. The
+same option applies to `--smoke` scenarios so the mixed-resource fixture can be
+validated in split form:
+
+```sh
+./build/fireEngineTutorial --benchmark 10000 --recording-threads 2
+./build/fireEngineTutorial --smoke prepare-twice --recording-threads 2
+```
+
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
 draw-list construction, recording-input compilation, frame-uniform updates,

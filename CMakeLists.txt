@@ -67,10 +67,11 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/image.cpp
     src/render/instance_support.cpp
     src/render/pipeline.cpp
-    src/render/recording_input.cpp
-    src/render/resource_compiler.cpp
     src/render/recording_context.cpp
+    src/render/recording_input.cpp
     src/render/renderer.cpp
+    src/render/resource_compiler.cpp
+    src/render/secondary_recording_worker.cpp
     src/render/spirv_loader.cpp
     src/render/swapchain.cpp
     src/render/swapchain_selection.cpp
@@ -234,6 +235,7 @@ add_executable(fireEngineTutorialTests
     tests/render/test_camera.cpp
     tests/render/test_draw_binding_state.cpp
     tests/render/test_recording_input.cpp
+    tests/render/test_secondary_recording_worker.cpp
     tests/render/test_spirv_loader.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
@@ -273,6 +275,17 @@ add_test(NAME fireEngineTutorialBenchmarkCorrectness
 add_test(NAME fireEngineTutorialDirectPrimaryBenchmarkCorrectness
     COMMAND fireEngineTutorial --benchmark 1 --direct-primary
 )
+add_test(NAME fireEngineTutorialSplitRecordingBenchmarkCorrectness
+    COMMAND fireEngineTutorial --benchmark 2 --recording-threads 2
+)
+# One draw cannot form two non-empty ranges, so this proves the fallback keeps
+# the single-participant path working when a split is requested.
+add_test(NAME fireEngineTutorialSplitRecordingFallbackCorrectness
+    COMMAND fireEngineTutorial --benchmark 1 --recording-threads 2
+)
+add_test(NAME fireEngineTutorialSplitRecordingMixedResourceSmoke
+    COMMAND fireEngineTutorial --smoke prepare-twice --recording-threads 2
+)
 
 # Synchronization validation is compiled into Debug configurations only. Keep
 # its device scenarios out of Release test lists instead of registering silent
@@ -295,12 +308,22 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND fireEngineTutorial --benchmark 1 --direct-primary
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
+    add_test(NAME fireEngineTutorialSplitRecordingSyncValidation
+        COMMAND fireEngineTutorial --benchmark 2 --recording-threads 2
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    add_test(NAME fireEngineTutorialSplitRecordingMixedResourceSyncValidation
+        COMMAND fireEngineTutorial --smoke prepare-twice --recording-threads 2
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
     # The ordinary benchmark controls check CLI/reporting and standard validation;
     # these separate runs deliberately enable synchronization checks.
     set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
         fireEngineTutorialPrepareTwiceSyncValidation
         fireEngineTutorialRecreationSyncValidation
         fireEngineTutorialDirectPrimarySyncValidation
+        fireEngineTutorialSplitRecordingSyncValidation
+        fireEngineTutorialSplitRecordingMixedResourceSyncValidation
     )
     set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
         ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
@@ -314,6 +337,9 @@ set_tests_properties(
     fireEngineTutorialRecreationSmoke
     fireEngineTutorialBenchmarkCorrectness
     fireEngineTutorialDirectPrimaryBenchmarkCorrectness
+    fireEngineTutorialSplitRecordingBenchmarkCorrectness
+    fireEngineTutorialSplitRecordingFallbackCorrectness
+    fireEngineTutorialSplitRecordingMixedResourceSmoke
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
@@ -326,6 +352,14 @@ set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
   Frames in flight: 2
   Presentation: [^\n]*
   Workload: instances=1, nodes=2, draws=1"
+)
+# Assert the effective participant count, not the configured one: a split that
+# silently fell back to a single participant would otherwise pass.
+set_tests_properties(fireEngineTutorialSplitRecordingBenchmarkCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 configured, 2 effective(.|\n)*participant 1 recording"
+)
+set_tests_properties(fireEngineTutorialSplitRecordingFallbackCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 configured, 1 effective"
 )
 set_tests_properties(fireEngineTutorialDirectPrimaryBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Recording path: direct primary command buffer(.|\n)*Its worker pool has no command-buffer allocations or recorded work."
