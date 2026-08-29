@@ -63,13 +63,6 @@ struct PhaseStatistics
 [[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode);
 
 /**
- * @brief Names the temporary Step-8a recording-pool hint in benchmark output.
- * @param hint Pool lifetime hint selected when the renderer was constructed.
- * @return Stable human-readable label for paired reports.
- */
-[[nodiscard]] std::string_view recordingPoolHintName(RecordingPoolLifetimeHint hint);
-
-/**
  * @brief Summarizes one non-empty collection of phase durations.
  * @param durations Durations to sort and aggregate.
  * @return Mean, median, and nearest-rank 95th percentile.
@@ -202,8 +195,6 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
-    std::println("  Recording pools: {}",
-                 recordingPoolHintName(rendererInfo.recordingPoolLifetimeHint));
     std::println("  Ownership: cycled frame slots with per-slot recording contexts (Step 5)");
     std::println("  Frames in flight: {}", rendererInfo.frameSlotCount);
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,
@@ -359,18 +350,6 @@ namespace
         return "direct primary command buffer";
     }
     throw std::logic_error("Benchmark encountered an unknown command recording mode");
-}
-
-[[nodiscard]] std::string_view recordingPoolHintName(RecordingPoolLifetimeHint hint)
-{
-    switch (hint)
-    {
-    case RecordingPoolLifetimeHint::eNone:
-        return "no lifetime hint";
-    case RecordingPoolLifetimeHint::eTransient:
-        return "transient hint (Step 8a control)";
-    }
-    throw std::logic_error("Benchmark encountered an unknown recording-pool hint");
 }
 
 [[nodiscard]] PhaseStatistics summarize(std::vector<std::chrono::nanoseconds> durations)
