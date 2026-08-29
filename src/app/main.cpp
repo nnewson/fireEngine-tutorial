@@ -63,7 +63,6 @@ struct RunOptions
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
-    bool flatTransformUpdate = false; ///< Whether the benchmark uses the flat resolution control.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -197,21 +196,14 @@ try
     std::optional<fire_engine::tutorial::BenchmarkRun> benchmark;
     if (options.benchmarkInstanceCount.has_value())
     {
-        benchmark.emplace(content, *options.benchmarkInstanceCount, options.flatTransformUpdate);
+        benchmark.emplace(content, *options.benchmarkInstanceCount);
     }
     else if (options.smokeScenario == SmokeScenario::eUntextured)
     {
         selectUntexturedScene(content);
     }
     fire_engine::SceneDrawListArena drawListArena;
-    if (benchmark.has_value())
-    {
-        benchmark->updateWorldTransforms(content.scene);
-    }
-    else
-    {
-        content.scene.updateWorldTransforms();
-    }
+    content.scene.updateWorldTransforms();
     renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
@@ -253,7 +245,7 @@ try
         {
             benchmark->advanceScene(content.scene);
             const auto transformStart = std::chrono::steady_clock::now();
-            benchmark->updateWorldTransforms(content.scene);
+            content.scene.updateWorldTransforms();
             transformUpdate = std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - transformStart);
         }
@@ -375,7 +367,6 @@ namespace
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
                     .recordDirectly = false,
-                    .flatTransformUpdate = false,
                 };
             }
         }
@@ -394,17 +385,12 @@ namespace
             throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
         }
         bool recordDirectly = false;
-        bool flatTransformUpdate = false;
         for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
         {
             const std::string_view benchmarkOption{arguments[argumentIndex]};
             if (benchmarkOption == "--direct-primary" && !recordDirectly)
             {
                 recordDirectly = true;
-            }
-            else if (benchmarkOption == "--flat-transforms" && !flatTransformUpdate)
-            {
-                flatTransformUpdate = true;
             }
             else
             {
@@ -419,14 +405,13 @@ namespace
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
             .recordDirectly = recordDirectly,
-            .flatTransformUpdate = flatTransformUpdate,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
         throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
-                                    "[--direct-primary] [--flat-transforms] | "
+                                    "[--direct-primary] | "
                                     "--frames positive-count [--recreate-every-frame] | "
                                     "--smoke scenario]");
     }
@@ -439,7 +424,6 @@ namespace
         .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
         .recordDirectly = false,
-        .flatTransformUpdate = false,
     };
 }
 

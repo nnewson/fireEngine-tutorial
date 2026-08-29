@@ -269,9 +269,6 @@ add_test(NAME fireEngineTutorialBenchmarkCorrectness
 add_test(NAME fireEngineTutorialDirectPrimaryBenchmarkCorrectness
     COMMAND fireEngineTutorial --benchmark 1 --direct-primary
 )
-add_test(NAME fireEngineTutorialFlatTransformBenchmarkCorrectness
-    COMMAND fireEngineTutorial --benchmark 1 --flat-transforms
-)
 
 # Synchronization validation is compiled into Debug configurations only. Keep
 # its device scenarios out of Release test lists instead of registering silent
@@ -313,7 +310,6 @@ set_tests_properties(
     fireEngineTutorialRecreationSmoke
     fireEngineTutorialBenchmarkCorrectness
     fireEngineTutorialDirectPrimaryBenchmarkCorrectness
-    fireEngineTutorialFlatTransformBenchmarkCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
@@ -322,17 +318,13 @@ set_tests_properties(
 )
 
 set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Transform path: recursive baseline
-  Ownership: cycled frame slots with per-slot recording contexts \\(Step 5\\)
+    PASS_REGULAR_EXPRESSION "Ownership: cycled frame slots with per-slot recording contexts \\(Step 5\\)
   Frames in flight: 2
   Presentation: [^\n]*
   Workload: instances=1, nodes=2, draws=1"
 )
 set_tests_properties(fireEngineTutorialDirectPrimaryBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Recording path: direct primary command buffer(.|\n)*Its worker pool has no command-buffer allocations or recorded work."
-)
-set_tests_properties(fireEngineTutorialFlatTransformBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Transform path: flat topological control"
 )
 # Run one scenario away from the executable and copied assets to prove that the
 # compiled absolute asset and shader paths do not depend on the working folder.

@@ -5,9 +5,7 @@
 
 #include <memory>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
-#include <utility>
 #include <variant>
 #include <vector>
 
@@ -79,56 +77,6 @@ TEST_CASE("Scene resolves transforms and emits draw items depth first")
     const auto rebuiltDrawList = scene.buildDrawItems(drawListArena);
     REQUIRE(rebuiltDrawList.drawItems.data() == firstStorage);
     REQUIRE(rebuiltDrawList.drawItems[1].world == childReference.worldTransform());
-}
-
-TEST_CASE("Flat transform resolution follows topological scene registration")
-{
-    const auto makeScene = []
-    {
-        const auto makeNode = [](std::string name)
-        {
-            auto node = std::make_unique<SceneNode>(std::move(name));
-            node->localTransform(Transform{
-                .translation = {.x = 1.0f, .y = 0.0f, .z = 0.0f},
-            });
-            return node;
-        };
-
-        Scene scene;
-        auto firstRoot = makeNode("first root");
-        SceneNode& depthOne = firstRoot->addChild(makeNode("depth one"));
-        SceneNode& depthTwo = depthOne.addChild(makeNode("depth two"));
-        SceneNode& depthThree = depthTwo.addChild(makeNode("depth three"));
-        SceneNode& depthFour = depthThree.addChild(makeNode("depth four"));
-        SceneNode& registeredFirstRoot = scene.addRoot(std::move(firstRoot));
-
-        SceneNode& secondRoot = scene.addRoot(makeNode("second root"));
-        scene.addChild(secondRoot, makeNode("second-root child"));
-
-        auto laterSubtree = makeNode("later child of first root");
-        laterSubtree->addChild(makeNode("later grandchild of first root"));
-        scene.addChild(registeredFirstRoot, std::move(laterSubtree));
-        scene.addChild(depthFour, makeNode("later child of deep node"));
-        return scene;
-    };
-
-    Scene recursiveScene = makeScene();
-    Scene flatScene = makeScene();
-    recursiveScene.updateWorldTransforms();
-    flatScene.updateWorldTransformsFlat();
-
-    constexpr std::size_t kExpectedNodeCount = 10;
-    for (std::size_t index = 0; index < kExpectedNodeCount; ++index)
-    {
-        const SceneNodeId id{.value = index};
-        const auto recursiveNode = recursiveScene.findNode(id);
-        const auto flatNode = flatScene.findNode(id);
-        REQUIRE(recursiveNode.has_value());
-        REQUIRE(flatNode.has_value());
-        REQUIRE(flatNode->get().worldTransform() == recursiveNode->get().worldTransform());
-    }
-    REQUIRE_FALSE(recursiveScene.findNode(SceneNodeId{.value = kExpectedNodeCount}).has_value());
-    REQUIRE_FALSE(flatScene.findNode(SceneNodeId{.value = kExpectedNodeCount}).has_value());
 }
 
 TEST_CASE("Scene registers attached subtrees immediately and preserves stable IDs")

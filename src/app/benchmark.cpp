@@ -76,10 +76,8 @@ struct PhaseStatistics
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-BenchmarkRun::BenchmarkRun(SceneContent& content, std::size_t instanceCount,
-                           bool flatTransformUpdate)
-    : instanceCount_{instanceCount},
-      flatTransformUpdate_{flatTransformUpdate}
+BenchmarkRun::BenchmarkRun(SceneContent& content, std::size_t instanceCount)
+    : instanceCount_{instanceCount}
 {
     if (instanceCount_ == 0)
     {
@@ -121,7 +119,7 @@ BenchmarkRun::BenchmarkRun(SceneContent& content, std::size_t instanceCount,
         throw std::logic_error("The synthetic benchmark root was not registered");
     }
     rootId_ = *registeredRootId;
-    updateWorldTransforms(scene);
+    scene.updateWorldTransforms();
     SceneDrawListArena drawListArena;
     const SceneDrawList drawList = scene.buildDrawItems(drawListArena);
     nodeCount_ = countNodes(scene);
@@ -155,16 +153,6 @@ void BenchmarkRun::advanceScene(Scene& scene) const
     transform.translation.x =
         0.25f * std::sin(static_cast<float>(acceptedFrame) * kAnimationStepSeconds);
     root->get().localTransform(transform);
-}
-
-void BenchmarkRun::updateWorldTransforms(Scene& scene) const
-{
-    if (flatTransformUpdate_)
-    {
-        scene.updateWorldTransformsFlat();
-        return;
-    }
-    scene.updateWorldTransforms();
 }
 
 void BenchmarkRun::record(RenderResult result, std::chrono::nanoseconds transformUpdate,
@@ -207,8 +195,6 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
-    std::println("  Transform path: {}",
-                 flatTransformUpdate_ ? "flat topological control" : "recursive baseline");
     std::println("  Ownership: cycled frame slots with per-slot recording contexts (Step 5)");
     std::println("  Frames in flight: {}", rendererInfo.frameSlotCount);
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,

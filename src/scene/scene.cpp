@@ -3,7 +3,6 @@
 #include <fire_engine/core/detail/hash.hpp>
 
 #include <algorithm>
-#include <cassert>
 #include <functional>
 #include <limits>
 #include <stdexcept>
@@ -51,7 +50,7 @@ SceneNode& Scene::addRoot(std::unique_ptr<SceneNode> root)
     SceneNode& result = *root;
     prepareSubtreeRegistration(result);
     roots_.push_back(std::move(root));
-    registerSubtree(result, SceneNodeId{});
+    registerSubtree(result);
     return result;
 }
 
@@ -73,7 +72,7 @@ SceneNode& Scene::addChild(SceneNodeId parent, std::unique_ptr<SceneNode> child)
 
     prepareSubtreeRegistration(*child);
     SceneNode& result = nodes_[parent.value]->attachChild(std::move(child));
-    registerSubtree(result, parent);
+    registerSubtree(result);
     return result;
 }
 
@@ -99,20 +98,6 @@ void Scene::updateWorldTransforms()
     for (const std::unique_ptr<SceneNode>& root : roots_)
     {
         root->resolve(Mat4::identity());
-    }
-}
-
-void Scene::updateWorldTransformsFlat()
-{
-    assert(nodes_.size() == parentIds_.size());
-    const Mat4 identity = Mat4::identity();
-    for (std::size_t index = 0; index < nodes_.size(); ++index)
-    {
-        SceneNode& node = *nodes_[index];
-        const SceneNodeId parent = parentIds_[index];
-        assert(!parent.valid() || parent.value < index);
-        const Mat4& parentWorld = parent.valid() ? nodes_[parent.value]->worldTransform_ : identity;
-        node.worldTransform_ = parentWorld * node.localTransform_.matrix();
     }
 }
 
@@ -170,28 +155,24 @@ std::optional<SceneNodeConstRef> Scene::findNode(SceneNodeId id) const noexcept
 void Scene::prepareSubtreeRegistration(const SceneNode& node)
 {
     const std::size_t subtreeSize = countDetachedNodes(node);
-    const std::size_t maximumNodeCount = std::min(nodes_.max_size(), parentIds_.max_size());
-    if (subtreeSize > maximumNodeCount - nodes_.size())
+    const std::size_t maximumSize = nodes_.max_size();
+    if (subtreeSize > maximumSize - nodes_.size())
     {
         throw std::length_error("A scene cannot register this many nodes");
     }
 
     const std::size_t requiredCapacity = nodes_.size() + subtreeSize;
-    nodes_.reserve(nextRegistryCapacity(nodes_.capacity(), requiredCapacity, nodes_.max_size()));
-    parentIds_.reserve(
-        nextRegistryCapacity(parentIds_.capacity(), requiredCapacity, parentIds_.max_size()));
+    nodes_.reserve(nextRegistryCapacity(nodes_.capacity(), requiredCapacity, maximumSize));
 }
 
-void Scene::registerSubtree(SceneNode& node, SceneNodeId parent)
+void Scene::registerSubtree(SceneNode& node)
 {
-    const SceneNodeId nodeId{.value = nodes_.size()};
-    node.assignId(nodeId);
+    node.assignId(SceneNodeId{.value = nodes_.size()});
     nodes_.push_back(&node);
-    parentIds_.push_back(parent);
 
     for (const std::unique_ptr<SceneNode>& child : node.children())
     {
-        registerSubtree(*child, nodeId);
+        registerSubtree(*child);
     }
 }
 

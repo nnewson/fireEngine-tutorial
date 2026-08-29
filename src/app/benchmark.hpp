@@ -25,11 +25,10 @@ public:
      * @brief Replaces loaded content with repeated instances of its sole render object.
      * @param content AnimatedCube content supplying one reusable compiled cube.
      * @param instanceCount Positive number of synthetic cube instances to create.
-     * @param flatTransformUpdate Whether to use the temporary flat-resolution control.
      * @throws std::invalid_argument if instanceCount is zero.
      * @throws std::logic_error if the fixture does not contain exactly one render object.
      */
-    BenchmarkRun(SceneContent& content, std::size_t instanceCount, bool flatTransformUpdate);
+    BenchmarkRun(SceneContent& content, std::size_t instanceCount);
 
     /**
      * @brief Reports whether every warm-up and measured frame has completed.
@@ -42,12 +41,6 @@ public:
      * @param scene Synthetic hierarchy whose shared root transform is changed.
      */
     void advanceScene(Scene& scene) const;
-
-    /**
-     * @brief Resolves the current hierarchy through the selected benchmark control.
-     * @param scene Synthetic hierarchy whose world transforms are updated.
-     */
-    void updateWorldTransforms(Scene& scene) const;
 
     /**
      * @brief Accepts or discards one attempted frame's timings.
@@ -80,7 +73,6 @@ private:
     static constexpr float kAnimationStepSeconds = 1.0f / 60.0f; ///< Deterministic mutation step.
 
     std::size_t instanceCount_ = 0;       ///< Repeated uses of the one compiled cube.
-    bool flatTransformUpdate_ = false;    ///< Temporary topological-resolution control.
     std::size_t nodeCount_ = 0;           ///< Observable nodes in the synthetic hierarchy.
     std::size_t drawCount_ = 0;           ///< Observable draw items in the synthetic hierarchy.
     SceneNodeId rootId_;                  ///< Shared root mutated before transform resolution.
