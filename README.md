@@ -66,6 +66,14 @@ secondary command buffers, not an alternative production renderer:
 ./build/fireEngineTutorial --benchmark 10000 --direct-primary
 ```
 
+The temporary Step-8a experiment accepts `--transient-command-pools`, which
+creates the per-frame recording pools with `eTransient`. It measures whether
+declaring those short-lived buffers changes pool-reset cost:
+
+```sh
+./build/fireEngineTutorial --benchmark 10000 --transient-command-pools
+```
+
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
 draw-list construction, recording-input compilation, frame-uniform updates,

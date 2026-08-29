@@ -21,6 +21,13 @@ enum class RecordingBufferKind : std::uint8_t
     eSecondary, ///< Allocate one secondary command buffer.
 };
 
+/** @brief Temporary Step-8a control over the recording pool's lifetime hint. */
+enum class RecordingPoolHint : std::uint8_t
+{
+    eNone,      ///< Create the pool without an allocation-lifetime hint.
+    eTransient, ///< Declare the short-lived per-frame buffers with eTransient.
+};
+
 /* --- Classes --- */
 
 /**
@@ -36,8 +43,10 @@ public:
      * @brief Creates one recording-thread-local pool and requested command buffer.
      * @param device Logical device and graphics queue family used for allocation.
      * @param bufferKind Whether the context owns a primary, secondary, or no buffer.
+     * @param poolHint Temporary Step-8a selection of the pool's lifetime hint.
      */
-    RecordingContext(const Device& device, RecordingBufferKind bufferKind);
+    RecordingContext(const Device& device, RecordingBufferKind bufferKind,
+                     RecordingPoolHint poolHint);
 
     /** @brief Releases the command buffer before its pool. */
     ~RecordingContext() = default;
