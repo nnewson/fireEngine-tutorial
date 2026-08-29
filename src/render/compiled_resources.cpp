@@ -112,6 +112,21 @@ const vk::raii::Sampler& CompiledTexture::sampler() const noexcept
 
 /* --- Public member functions --- */
 
+CompiledResourcesView::CompiledResourcesView(
+    std::span<const std::optional<CompiledDraw>> draws) noexcept
+    : draws_{draws}
+{
+}
+
+std::optional<CompiledDraw> CompiledResourcesView::find(RenderObjectId id) const noexcept
+{
+    if (!id.valid() || id.value >= draws_.size())
+    {
+        return std::nullopt;
+    }
+    return draws_[id.value];
+}
+
 CompiledResources::CompiledResources()
     : graph_{std::make_unique<CompiledResourceGraph>()}
 {
@@ -119,29 +134,9 @@ CompiledResources::CompiledResources()
 
 CompiledResources::~CompiledResources() = default;
 
-bool CompiledResources::contains(RenderObjectId id) const noexcept
+CompiledResourcesView CompiledResources::view() const noexcept
 {
-    return id.valid() && id.value < graph_->objects.size() &&
-           graph_->objects[id.value].mesh != nullptr &&
-           graph_->objects[id.value].texture != nullptr;
-}
-
-CompiledDraw CompiledResources::draw(RenderObjectId id) const
-{
-    if (!contains(id))
-    {
-        throw std::out_of_range("Render object is not part of the compiled plan");
-    }
-    const CompiledRenderObject& object = graph_->objects[id.value];
-    return {
-        .vertexBuffer = object.mesh->vertexBuffer().handle(),
-        .indexBuffer = object.mesh->indexBuffer().handle(),
-        .indexCount = object.mesh->indexCount(),
-        .sampler = *object.texture->sampler(),
-        .imageView = *object.texture->image().view(),
-        .baseColor = object.baseColor,
-        .vertexLayout = object.vertexLayout,
-    };
+    return CompiledResourcesView{graph_->objects};
 }
 
 const CompiledResourceGraph& CompiledResources::graph() const noexcept

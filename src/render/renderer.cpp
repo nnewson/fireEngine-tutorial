@@ -3,8 +3,6 @@
 #include <fire_engine/core/log.hpp>
 #include <fire_engine/graphics/render_assets.hpp>
 #include <fire_engine/graphics/render_preparation.hpp>
-#include <fire_engine/math/normalize_error.hpp>
-#include <fire_engine/math/vec3.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/detail/allocator.hpp>
@@ -18,22 +16,19 @@
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
 #include <fire_engine/render/detail/pipeline.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
+#include <fire_engine/render/detail/recording_input.hpp>
 #include <fire_engine/render/detail/resource_compiler.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene_draw_list.hpp>
 
 #include <array>
-#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <expected>
 #include <limits>
 #include <memory>
-#include <numbers>
 #include <optional>
-#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -160,7 +155,6 @@ private:
 /* --- File-local function declarations --- */
 
 [[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept;
-[[nodiscard]] Mat4 createViewProjection(vk::Extent2D extent);
 } // namespace
 
 /* --- Private implementation class declaration --- */
@@ -197,10 +191,11 @@ public:
     /**
      * @brief Records, submits, and presents the current scene once.
      * @param drawList Frozen draw items and transforms valid until this call returns.
+     * @param camera Application-owned perspective values sampled for this frame.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Presentation outcome for the acquired swapchain image.
      */
-    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList, const Camera& camera,
                                          RendererCpuTimings* timings);
 
     /**
@@ -221,32 +216,32 @@ private:
      * @brief Records the complete command-buffer sequence for one acquired image.
      * @param frameSlotIndex Cycled submission slot whose command buffers are reusable.
      * @param imageIndex Acquired swapchain-image index.
-     * @param drawItems Current ordered scene draws.
+     * @param input Compiler-produced immutable recording input.
      * @param timings Optional output receiving the serial and secondary recording phases.
      */
     void recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                        std::span<const DrawItem> drawItems, RendererCpuTimings* timings) const;
+                        const detail::RecordingInput& input, RendererCpuTimings* timings) const;
 
     /**
      * @brief Records inherited draws and executes them from one primary geometry pass.
      * @param frameSlotIndex Cycled submission slot owning this frame's recording contexts.
      * @param imageIndex Acquired swapchain-image index.
-     * @param drawItems Current ordered scene draws.
+     * @param input Compiler-produced immutable recording input.
      * @param timings Optional output receiving both command-buffer recording phases.
      */
     void recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                 std::span<const DrawItem> drawItems,
+                                 const detail::RecordingInput& input,
                                  RendererCpuTimings* timings) const;
 
     /**
      * @brief Records the complete geometry pass directly into one primary command buffer.
      * @param frameSlotIndex Cycled submission slot owning this frame's recording context.
      * @param imageIndex Acquired swapchain-image index.
-     * @param drawItems Current ordered scene draws.
+     * @param input Compiler-produced immutable recording input.
      * @param timings Optional output receiving the direct primary recording phase.
      */
     void recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                              std::span<const DrawItem> drawItems,
+                              const detail::RecordingInput& input,
                               RendererCpuTimings* timings) const;
 
     /**
@@ -297,12 +292,12 @@ private:
     /**
      * @brief Records fixed state shared by every draw in one command buffer.
      * @param commandBuffer Primary or secondary command buffer receiving the state.
-     * @param uniformBuffer Slot-local shader values used by the submitted command buffer.
+     * @param state Plain handles and dynamic state proved by the input compiler.
      * @return Fresh draw-binding cache scoped to the established descriptor state.
      */
     [[nodiscard]] detail::DrawBindingState
     bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
-                      const detail::AllocatedBuffer& uniformBuffer) const;
+                      const detail::RecordingState& state) const;
 
     /** @brief Reports whether any submission slot may still be in use. @return Pending state. */
     [[nodiscard]] bool workMayBePending() const noexcept;
@@ -310,11 +305,11 @@ private:
     /**
      * @brief Records the mesh bindings, constants, and indexed draw for each item.
      * @param commandBuffer Command buffer inside the active color pass.
-     * @param drawItems Current ordered scene draws.
+     * @param input Compiler-produced packets and their compatible pipeline layout.
      * @param bindingState Cache created when the complete geometry state was established.
      */
     void recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                     std::span<const DrawItem> drawItems,
+                     const detail::RecordingInput& input,
                      detail::DrawBindingState bindingState) const;
 
     /**
@@ -344,6 +339,7 @@ private:
     RenderPreparation renderPreparation_;           ///< Vulkan-free validation and plan cache.
     detail::CompiledResources compiledResources_;   ///< GPU state selected by the current plan.
     std::optional<std::size_t> compiledGeneration_; ///< Plan generation uploaded to the GPU.
+    detail::RecordingInputCompiler recordingInputCompiler_; ///< Reusable packet-freeze arena.
 };
 /** @endcond */
 
@@ -362,9 +358,10 @@ void Renderer::prepare(const RenderAssets& assets, const SceneDrawList& drawList
     implementation_->prepare(assets, drawList);
 }
 
-RenderResult Renderer::drawFrame(const SceneDrawList& drawList, RendererCpuTimings* timings)
+RenderResult Renderer::drawFrame(const SceneDrawList& drawList, const Camera& camera,
+                                 RendererCpuTimings* timings)
 {
-    return implementation_->drawFrame(drawList, timings);
+    return implementation_->drawFrame(drawList, camera, timings);
 }
 
 bool Renderer::recreatePresentation(FramebufferExtent framebufferExtent)
@@ -395,12 +392,12 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
           std::make_unique<PresentationState>(device_, allocator_, window.framebufferExtent())},
       // Frame storage depends on the presentation extent sampled here, so the
       // presentation owner must be constructed before the submission slots.
+      // Identity is only valid initialization; drawFrame writes the sampled
+      // camera after each slot retires and before that slot is submitted.
       frames_{
           FrameResources{
               .slot = detail::FrameSlot{device_, allocator_,
-                                        detail::FrameUniforms{
-                                            .viewProjection = createViewProjection(
-                                                presentation_->swapchain().extent())}},
+                                        detail::FrameUniforms{.viewProjection = Mat4::identity()}},
               .coordinator =
                   detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
               .worker =
@@ -411,9 +408,7 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
                                                : detail::RecordingBufferKind::eNone}},
           FrameResources{
               .slot = detail::FrameSlot{device_, allocator_,
-                                        detail::FrameUniforms{
-                                            .viewProjection = createViewProjection(
-                                                presentation_->swapchain().extent())}},
+                                        detail::FrameUniforms{.viewProjection = Mat4::identity()}},
               .coordinator =
                   detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
               .worker = detail::RecordingContext{
@@ -490,7 +485,8 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& dr
     compiledGeneration_ = renderPreparation_.generation();
 }
 
-RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, RendererCpuTimings* timings)
+RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Camera& camera,
+                                       RendererCpuTimings* timings)
 {
     if (timings != nullptr)
     {
@@ -500,23 +496,32 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, RendererCp
     {
         throw std::logic_error("Renderer::prepare must be called before drawFrame");
     }
-    // Validate the transient draw list before acquiring an image. A failure
-    // therefore cannot abandon a signaled acquisition semaphore.
-    {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->drawListValidation};
-        for (const DrawItem& item : drawList.drawItems)
-        {
-            if (!compiledResources_.contains(item.renderObject))
-            {
-                throw std::logic_error("Scene refers to an object not compiled by prepare");
-            }
-        }
-    }
-
-    const vk::raii::Device& logicalDevice = device_.logicalDevice();
     const std::size_t frameSlotIndex = nextFrameSlotIndex_;
     FrameResources& frame = frames_[frameSlotIndex];
     detail::FrameSlot& frameSlot = frame.slot;
+    // Freeze external IDs and transforms before acquisition. A compiler
+    // failure therefore cannot abandon a signaled acquisition semaphore.
+    const detail::RecordingInput recordingInput = [&]() -> detail::RecordingInput
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->recordingInputBuild};
+        const vk::Extent2D extent = presentation_->swapchain().extent();
+        const detail::RecordingState recordingState{
+            .pipeline = *presentation_->pipeline().pipeline(),
+            .pipelineLayout = *presentation_->pipeline().pipelineLayout(),
+            .frameUniformBuffer = frameSlot.uniformBuffer().handle(),
+            .frameUniforms = {.viewProjection = cameraViewProjection(
+                                  camera, static_cast<float>(extent.width) /
+                                              static_cast<float>(extent.height))},
+            .viewport = sceneViewport(extent),
+            .scissor = {.offset = {.x = 0, .y = 0}, .extent = extent},
+            .colorAttachmentFormat = presentation_->swapchain().imageFormat(),
+            .depthAttachmentFormat = presentation_->depthBuffer(frameSlotIndex).format(),
+            .vertexLayout = presentation_->pipeline().description().vertexLayout,
+        };
+        return recordingInputCompiler_.compile(drawList, compiledResources_.view(), recordingState);
+    }();
+
+    const vk::raii::Device& logicalDevice = device_.logicalDevice();
     vk::Result fenceResult = vk::Result::eSuccess;
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameFenceWait};
@@ -526,6 +531,10 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, RendererCp
     if (fenceResult != vk::Result::eSuccess)
     {
         throw vk::SystemError{vk::make_error_code(fenceResult), "Waiting for the frame fence"};
+    }
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameUniformUpdate};
+        frameSlot.writeUniforms(recordingInput.state().frameUniforms);
     }
 
     std::uint32_t imageIndex = 0;
@@ -554,7 +563,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, RendererCp
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->coordinatorCommandPoolReset};
         frame.coordinator.resetCommands();
     }
-    recordCommands(frameSlotIndex, imageIndex, drawList.drawItems, timings);
+    recordCommands(frameSlotIndex, imageIndex, recordingInput, timings);
     if (timings != nullptr)
     {
         timings->commandPoolReset =
@@ -662,13 +671,6 @@ bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
     const vk::SwapchainKHR oldSwapchain = *presentation_->swapchain().handle();
     auto replacement =
         std::make_unique<PresentationState>(device_, allocator_, framebufferExtent, oldSwapchain);
-    const detail::FrameUniforms uniforms{
-        .viewProjection = createViewProjection(replacement->swapchain().extent()),
-    };
-    for (const FrameResources& frame : frames_)
-    {
-        frame.slot.writeUniforms(uniforms);
-    }
     presentation_ = std::move(replacement);
     return true;
 }
@@ -694,7 +696,7 @@ RendererInfo Renderer::Impl::info() const
 }
 
 void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                    std::span<const DrawItem> drawItems,
+                                    const detail::RecordingInput& input,
                                     RendererCpuTimings* timings) const
 {
     const detail::RecordingContext& workerRecording = frames_[frameSlotIndex].worker;
@@ -704,26 +706,25 @@ void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t im
     }
     if (commandRecordingMode_ == CommandRecordingMode::eDirectPrimary)
     {
-        recordDirectCommands(frameSlotIndex, imageIndex, drawItems, timings);
+        recordDirectCommands(frameSlotIndex, imageIndex, input, timings);
         return;
     }
-    recordSecondaryCommands(frameSlotIndex, imageIndex, drawItems, timings);
+    recordSecondaryCommands(frameSlotIndex, imageIndex, input, timings);
 }
 
 void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                             std::span<const DrawItem> drawItems,
+                                             const detail::RecordingInput& input,
                                              RendererCpuTimings* timings) const
 {
     const FrameResources& frame = frames_[frameSlotIndex];
     const vk::raii::CommandBuffer& secondaryCommandBuffer = frame.worker.commandBuffer();
-    const detail::AllocatedBuffer& uniformBuffer = frame.slot.uniformBuffer();
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandRecording};
-        const vk::Format colorFormat = presentation_->swapchain().imageFormat();
+        const detail::RecordingState& state = input.state();
         const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
             .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &colorFormat,
-            .depthAttachmentFormat = presentation_->depthBuffer(frameSlotIndex).format(),
+            .pColorAttachmentFormats = &state.colorAttachmentFormat,
+            .depthAttachmentFormat = state.depthAttachmentFormat,
             .rasterizationSamples = vk::SampleCountFlagBits::e1,
         };
         const vk::CommandBufferInheritanceInfo inheritanceInfo{
@@ -735,9 +736,8 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
             .pInheritanceInfo = &inheritanceInfo,
         };
         secondaryCommandBuffer.begin(secondaryBeginInfo);
-        detail::DrawBindingState bindingState =
-            bindGeometryState(secondaryCommandBuffer, uniformBuffer);
-        recordDraws(secondaryCommandBuffer, drawItems, std::move(bindingState));
+        detail::DrawBindingState bindingState = bindGeometryState(secondaryCommandBuffer, state);
+        recordDraws(secondaryCommandBuffer, input, std::move(bindingState));
         secondaryCommandBuffer.end();
     }
 
@@ -759,16 +759,15 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
 }
 
 void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                          std::span<const DrawItem> drawItems,
+                                          const detail::RecordingInput& input,
                                           RendererCpuTimings* timings) const
 {
     CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
     const FrameResources& frame = frames_[frameSlotIndex];
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
     beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex, {});
-    detail::DrawBindingState bindingState =
-        bindGeometryState(primaryCommandBuffer, frame.slot.uniformBuffer());
-    recordDraws(primaryCommandBuffer, drawItems, std::move(bindingState));
+    detail::DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer, input.state());
+    recordDraws(primaryCommandBuffer, input, std::move(bindingState));
     endPrimaryRecording(primaryCommandBuffer, imageIndex);
 }
 
@@ -885,22 +884,14 @@ void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuf
 
 detail::DrawBindingState
 Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
-                                  const detail::AllocatedBuffer& uniformBuffer) const
+                                  const detail::RecordingState& state) const
 {
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
-                               *presentation_->pipeline().pipeline());
-
-    const vk::Extent2D extent = presentation_->swapchain().extent();
-    const vk::Viewport viewport = sceneViewport(extent);
-    const vk::Rect2D scissor{
-        .offset = {.x = 0, .y = 0},
-        .extent = extent,
-    };
-    commandBuffer.setViewport(0, viewport);
-    commandBuffer.setScissor(0, scissor);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, state.pipeline);
+    commandBuffer.setViewport(0, state.viewport);
+    commandBuffer.setScissor(0, state.scissor);
 
     const vk::DescriptorBufferInfo uniformInfo{
-        .buffer = uniformBuffer.handle(),
+        .buffer = state.frameUniformBuffer,
         .offset = 0,
         .range = sizeof(detail::FrameUniforms),
     };
@@ -910,20 +901,18 @@ Renderer::Impl::bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
         .descriptorType = vk::DescriptorType::eUniformBuffer,
         .pBufferInfo = &uniformInfo,
     };
-    commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
-                                    *presentation_->pipeline().pipelineLayout(), 0, uniformWrite);
+    commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, state.pipelineLayout, 0,
+                                    uniformWrite);
     return {};
 }
 
 void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                                 std::span<const DrawItem> drawItems,
+                                 const detail::RecordingInput& input,
                                  detail::DrawBindingState bindingState) const
 {
     constexpr vk::DeviceSize bufferOffset = 0;
-    for (const DrawItem& item : drawItems)
+    for (const detail::RecordingDraw& draw : input.draws())
     {
-        const detail::CompiledDraw draw = compiledResources_.draw(item.renderObject);
-        assert(draw.vertexLayout == presentation_->pipeline().description().vertexLayout);
         const detail::DrawBindingChanges changes =
             bindingState.update(draw.vertexBuffer, draw.indexBuffer, draw.sampler, draw.imageView);
         if (changes.geometry)
@@ -945,17 +934,11 @@ void Renderer::Impl::recordDraws(const vk::raii::CommandBuffer& commandBuffer,
                 .pImageInfo = &textureInfo,
             };
             commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics,
-                                            *presentation_->pipeline().pipelineLayout(), 0,
-                                            textureWrite);
+                                            input.state().pipelineLayout, 0, textureWrite);
         }
 
-        const detail::DrawConstants constants{
-            .model = item.world,
-            .baseColor = draw.baseColor,
-        };
         commandBuffer.pushConstants<detail::DrawConstants>(
-            *presentation_->pipeline().pipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0,
-            constants);
+            input.state().pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, draw.constants);
         commandBuffer.drawIndexed(draw.indexCount, 1, 0, 0, 0);
     }
 }
@@ -1088,27 +1071,6 @@ void PresentationState::waitForPresentations()
 
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).height == -600.0f);
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).y == 600.0f);
-
-/**
- * @brief Builds the fixed tutorial camera for the current presentation extent.
- * @param extent Non-zero swapchain extent used to derive the projection aspect ratio.
- * @return World-to-clip transform for the static camera.
- * @throws std::logic_error if the fixed camera unexpectedly has a degenerate basis.
- */
-[[nodiscard]] Mat4 createViewProjection(vk::Extent2D extent)
-{
-    const std::expected<Mat4, NormalizeError> view = Mat4::lookAt(
-        Vec3{.x = 0.0f, .y = 0.0f, .z = 4.0f}, Vec3{}, Vec3{.x = 0.0f, .y = 1.0f, .z = 0.0f});
-    if (!view.has_value())
-    {
-        throw std::logic_error("The fixed camera produced a degenerate view basis");
-    }
-
-    const float aspectRatio = static_cast<float>(extent.width) / static_cast<float>(extent.height);
-    const Mat4 projection =
-        Mat4::perspective(std::numbers::pi_v<float> / 3.0f, aspectRatio, 0.1f, 100.0f);
-    return projection * *view;
-}
 
 } // namespace
 /** @endcond */

@@ -7,6 +7,7 @@
 #include <string>
 
 #include <fire_engine/platform/framebuffer_extent.hpp>
+#include <fire_engine/render/camera.hpp>
 
 namespace fire_engine
 {
@@ -57,7 +58,8 @@ struct RendererInfo
 /** @brief Host timings for renderer-owned CPU phases inside one drawFrame() attempt. */
 struct RendererCpuTimings
 {
-    std::chrono::nanoseconds drawListValidation{};          ///< Prepared-resource membership proof.
+    std::chrono::nanoseconds recordingInputBuild{};         ///< Draw validation and packet freeze.
+    std::chrono::nanoseconds frameUniformUpdate{};          ///< Slot-local per-frame value write.
     std::chrono::nanoseconds frameFenceWait{};              ///< Reusable-frame completion wait.
     std::chrono::nanoseconds imageAcquisitionWait{};        ///< Presentable-image acquisition.
     std::chrono::nanoseconds presentationFenceWait{};       ///< Per-image retirement wait.
@@ -91,6 +93,8 @@ enum class RenderResult : std::uint8_t
  * prepare(), while drawFrame() consumes a frozen scene draw-list view and
  * records a fresh command buffer. Presentation resources can be replaced
  * independently, preserving compiled scene resources across window changes.
+ * Calls on one Renderer are serialized by the application; public member
+ * functions must not be invoked concurrently.
  */
 class Renderer final
 {
@@ -127,14 +131,16 @@ public:
     void prepare(const RenderAssets& assets, const SceneDrawList& drawList);
 
     /**
-     * @brief Records frozen scene draws, submits them, and presents one image.
+     * @brief Freezes frame input, records it, submits it, and presents one image.
      * @param drawList Read-only draw view valid until this call returns.
+     * @param camera Vulkan-free camera values sampled for this frame.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Whether an image was presented and whether the swapchain remains suitable.
      * @throws std::logic_error if prepare() has not run or a draw reference was not prepared.
+     * @throws std::invalid_argument if the camera cannot form a valid perspective view.
      * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */
-    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList, const Camera& camera,
                                          RendererCpuTimings* timings = nullptr);
 
     /**

@@ -23,7 +23,8 @@ public:
      * @brief Creates the uniform storage and synchronization for one submission slot.
      * @param device Logical device used to create synchronization objects.
      * @param allocator VMA owner used for the uniform buffer.
-     * @param initialUniforms Initial shader values written before construction completes.
+     * @param initialUniforms Defensive shader values written before construction completes;
+     * Renderer overwrites them after slot retirement and before every submission.
      */
     FrameSlot(const Device& device, const MemoryAllocator& allocator,
               const FrameUniforms& initialUniforms);

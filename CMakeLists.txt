@@ -59,6 +59,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/platform/window.cpp
     src/render/allocator.cpp
     src/render/buffer.cpp
+    src/render/camera.cpp
     src/render/compiled_resources.cpp
     src/render/depth_buffer.cpp
     src/render/device.cpp
@@ -66,6 +67,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/frame_slot.cpp
     src/render/image.cpp
     src/render/pipeline.cpp
+    src/render/recording_input.cpp
     src/render/resource_compiler.cpp
     src/render/recording_context.cpp
     src/render/renderer.cpp
@@ -229,7 +231,9 @@ add_executable(fireEngineTutorialTests
     tests/graphics/test_asset_validation.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
+    tests/render/test_camera.cpp
     tests/render/test_draw_binding_state.cpp
+    tests/render/test_recording_input.cpp
     tests/render/test_spirv_loader.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
