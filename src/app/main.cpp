@@ -74,7 +74,6 @@ struct RunOptions
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
-    bool transientRecordingPools = false; ///< Whether the Step-8a pool hint is selected.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -195,9 +194,6 @@ try
         .commandRecordingMode = options.recordDirectly
                                     ? fire_engine::CommandRecordingMode::eDirectPrimary
                                     : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
-        .recordingPoolLifetimeHint = options.transientRecordingPools
-                                         ? fire_engine::RecordingPoolLifetimeHint::eTransient
-                                         : fire_engine::RecordingPoolLifetimeHint::eNone,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
     if (options.smokeScenario == SmokeScenario::eResize &&
@@ -382,7 +378,6 @@ namespace
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
                     .recordDirectly = false,
-                    .transientRecordingPools = false,
                 };
             }
         }
@@ -401,17 +396,12 @@ namespace
             throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
         }
         bool recordDirectly = false;
-        bool transientRecordingPools = false;
         for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
         {
             const std::string_view benchmarkOption{arguments[argumentIndex]};
             if (benchmarkOption == "--direct-primary" && !recordDirectly)
             {
                 recordDirectly = true;
-            }
-            else if (benchmarkOption == "--transient-command-pools" && !transientRecordingPools)
-            {
-                transientRecordingPools = true;
             }
             else
             {
@@ -426,15 +416,13 @@ namespace
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
             .recordDirectly = recordDirectly,
-            .transientRecordingPools = transientRecordingPools,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
         (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
     {
         throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
-                                    "[--direct-primary] "
-                                    "[--transient-command-pools] | "
+                                    "[--direct-primary] | "
                                     "--frames positive-count [--recreate-every-frame] | "
                                     "--smoke scenario]");
     }
@@ -447,7 +435,6 @@ namespace
         .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
         .recordDirectly = false,
-        .transientRecordingPools = false,
     };
 }
 

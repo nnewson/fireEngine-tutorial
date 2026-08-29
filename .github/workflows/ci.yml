@@ -286,40 +286,6 @@ jobs:
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
 
-      - name: Record Lavapipe 1,000-draw transient-pool control A
-        continue-on-error: true
-        timeout-minutes: 20
-        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
-
-      - name: Record Lavapipe 1,000-draw transient-pool candidate
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 1000 --transient-command-pools
-
-      - name: Record Lavapipe 1,000-draw transient-pool control B
-        continue-on-error: true
-        timeout-minutes: 20
-        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
-
-      - name: Record Lavapipe 10,000-draw transient-pool control A
-        continue-on-error: true
-        timeout-minutes: 20
-        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
-
-      - name: Record Lavapipe 10,000-draw transient-pool candidate
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 10000 --transient-command-pools
-
-      - name: Record Lavapipe 10,000-draw transient-pool control B
-        continue-on-error: true
-        timeout-minutes: 20
-        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
-
       - name: Record Lavapipe 1,000-draw direct-primary control
         continue-on-error: true
         timeout-minutes: 20

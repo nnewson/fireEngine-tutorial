@@ -9,17 +9,14 @@ namespace fire_engine::detail
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-RecordingContext::RecordingContext(const Device& device, RecordingBufferKind bufferKind,
-                                   RecordingPoolHint poolHint)
+RecordingContext::RecordingContext(const Device& device, RecordingBufferKind bufferKind)
 {
-    // Step 8a measures whether declaring these per-frame buffers short-lived
-    // changes pool-reset cost. Every buffer is eOneTimeSubmit and the pool is
-    // reset before each reuse, so eTransient describes the real usage; the
-    // flag is a driver hint and neither changes nor relaxes the reset rules.
+    // Every buffer allocated here is eOneTimeSubmit and the pool is reset
+    // before each reuse, so eTransient describes the real usage. It is a driver
+    // hint and neither changes nor relaxes the reset rules. Step 8a measured it
+    // as unresolved against control drift on both decision-bearing drivers.
     const vk::CommandPoolCreateInfo commandPoolInfo{
-        .flags = poolHint == RecordingPoolHint::eTransient
-                     ? vk::CommandPoolCreateFlags{vk::CommandPoolCreateFlagBits::eTransient}
-                     : vk::CommandPoolCreateFlags{},
+        .flags = vk::CommandPoolCreateFlagBits::eTransient,
         .queueFamilyIndex = device.graphicsQueueFamily(),
     };
     commandPool_ = vk::raii::CommandPool{device.logicalDevice(), commandPoolInfo};
