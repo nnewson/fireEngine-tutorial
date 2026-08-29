@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -190,11 +191,42 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
         throw std::logic_error("The benchmark report requires every measured frame");
     }
 
+    // A configured split still falls back to one participant when the workload
+    // is too small to form two non-empty ranges, so report what actually ran.
+    std::size_t effectiveParticipants = 0;
+    for (const ChunkCpuTimings& chunk : samples_.front().renderer.chunks)
+    {
+        if (chunk.recorded)
+        {
+            ++effectiveParticipants;
+        }
+    }
+    for (const Sample& sample : samples_)
+    {
+        std::size_t sampleParticipants = 0;
+        for (const ChunkCpuTimings& chunk : sample.renderer.chunks)
+        {
+            if (chunk.recorded)
+            {
+                ++sampleParticipants;
+            }
+        }
+        if (sampleParticipants != effectiveParticipants)
+        {
+            throw std::logic_error("Measured frames disagree on the recording participant count");
+        }
+    }
+
     std::println("\nPhase-level CPU benchmark");
     std::println("  Build configuration: {}", FIRE_ENGINE_BUILD_CONFIGURATION);
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
     std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
+    if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
+    {
+        std::println("  Secondary recording participants: {} configured, {} effective",
+                     rendererInfo.secondaryRecordingThreadCount, effectiveParticipants);
+    }
     std::println("  Ownership: cycled frame slots with per-slot recording contexts (Step 5)");
     std::println("  Frames in flight: {}", rendererInfo.frameSlotCount);
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,
@@ -227,10 +259,36 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                [](const Sample& sample) { return sample.renderer.frameUniformUpdate; });
     printPhase("coordinator command-pool reset",
                [](const Sample& sample) { return sample.renderer.coordinatorCommandPoolReset; });
-    printPhase("worker command-pool reset",
+    // With more than one participant these are summed participant CPU time, not
+    // an elapsed phase: the participants overlap, so the sums are diagnostics
+    // rather than a contribution to active work.
+    printPhase(effectiveParticipants > 1 ? "worker pool reset (summed CPU)"
+                                         : "worker command-pool reset",
                [](const Sample& sample) { return sample.renderer.workerCommandPoolReset; });
-    printPhase("secondary command recording",
+    printPhase(effectiveParticipants > 1 ? "secondary recording (summed CPU)"
+                                         : "secondary command recording",
                [](const Sample& sample) { return sample.renderer.secondaryCommandRecording; });
+    printPhase("secondary recording region",
+               [](const Sample& sample) { return sample.renderer.secondaryRecordingRegion; });
+    if (effectiveParticipants > 1)
+    {
+        printPhase("worker-region critical path",
+                   [](const Sample& sample) { return sample.renderer.workerRegionCriticalPath; });
+        printPhase("worker reset-region span",
+                   [](const Sample& sample) { return sample.renderer.workerResetRegionSpan; });
+        for (std::size_t participant = 0; participant < effectiveParticipants; ++participant)
+        {
+            printPhase(std::format("participant {} pool reset", participant),
+                       [participant](const Sample& sample)
+                       { return sample.renderer.chunks[participant].poolReset; });
+            printPhase(std::format("participant {} recording", participant),
+                       [participant](const Sample& sample)
+                       { return sample.renderer.chunks[participant].recording; });
+            printPhase(std::format("participant {} reset start offset", participant),
+                       [participant](const Sample& sample)
+                       { return sample.renderer.chunks[participant].resetStartOffset; });
+        }
+    }
     printPhase("primary command recording",
                [](const Sample& sample) { return sample.renderer.primaryCommandRecording; });
     printPhase("secondary command execution",
@@ -249,6 +307,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::chrono::nanoseconds snapshot{};
     std::chrono::nanoseconds workerCommandPoolReset{};
     std::chrono::nanoseconds secondaryRecording{};
+    std::chrono::nanoseconds secondaryRecordingRegion{};
     std::chrono::nanoseconds primaryRecording{};
     std::chrono::nanoseconds secondaryExecution{};
     std::chrono::nanoseconds submission{};
@@ -260,13 +319,19 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
         snapshot += sampleSnapshot;
         workerCommandPoolReset += sample.renderer.workerCommandPoolReset;
         secondaryRecording += sample.renderer.secondaryCommandRecording;
+        secondaryRecordingRegion += sample.renderer.secondaryRecordingRegion;
         primaryRecording += sample.renderer.primaryCommandRecording;
         secondaryExecution += sample.renderer.secondaryCommandExecution;
         submission += sample.renderer.queueSubmission;
-        activeWork +=
-            sampleSnapshot + sample.renderer.commandPoolReset + sample.renderer.frameUniformUpdate +
-            sample.renderer.secondaryCommandRecording + sample.renderer.primaryCommandRecording +
-            sample.renderer.secondaryCommandExecution + sample.renderer.queueSubmission;
+        // The secondary-recording region, not the participant sums, is what
+        // enters active work. With more than one participant the sums overlap
+        // in time and exclude dispatch and join, so adding them would both
+        // double-count parallel work and hide the cost threading introduces.
+        activeWork += sampleSnapshot + sample.renderer.coordinatorCommandPoolReset +
+                      sample.renderer.frameUniformUpdate +
+                      sample.renderer.secondaryRecordingRegion +
+                      sample.renderer.primaryCommandRecording +
+                      sample.renderer.secondaryCommandExecution + sample.renderer.queueSubmission;
     }
     if (activeWork.count() == 0)
     {
@@ -283,21 +348,38 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Fence, acquisition, and presentation durations are reported separately.");
     if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
     {
-        const std::chrono::nanoseconds attributedWorkerWork =
-            workerCommandPoolReset + secondaryRecording;
+        // Worker-owned work is the region the coordinator observes, which is
+        // the quantity the registered model divides.
+        const std::chrono::nanoseconds attributedWorkerWork = secondaryRecordingRegion;
         const std::chrono::nanoseconds serialOutsideWorker = activeWork - attributedWorkerWork;
         std::println("  Secondary-execution share of measured active work: {:.2f}%",
                      percentageOfActive(secondaryExecution));
-        std::println("  Worker-pool-reset share of measured active work: {:.2f}%",
-                     percentageOfActive(workerCommandPoolReset));
-        std::println("  Attributed worker-owned share: {:.2f}%",
+        std::println("  Secondary-recording region share of measured active work: {:.2f}%",
                      percentageOfActive(attributedWorkerWork));
-        std::println("  Current serial share outside worker-owned work: {:.2f}%",
+        std::println("  Current serial share outside that region: {:.2f}%",
                      percentageOfActive(serialOutsideWorker));
-        std::println("  Split phases attribute ownership; they do not measure placement benefit.");
-        std::println(
-            "  Registered p subtracts the one-draw fixed reset estimate from worker work.");
-        std::println("  For two workers: serial + fixed reset + variable worker work / 2.");
+        if (effectiveParticipants > 1)
+        {
+            // This configuration measures a realized split rather than predicting
+            // one, so the single-participant projection does not apply. Summed
+            // participant CPU time is not a share of elapsed active work.
+            std::println("  Summed participant durations overlap in time and are reported as "
+                         "diagnostics only.");
+            std::println("  Compare the reset-region span with the participant reset durations to "
+                         "judge overlap.");
+            std::println("  The recording region includes dispatch and join, so it prices the "
+                         "threading overhead.");
+        }
+        else
+        {
+            std::println("  Worker-pool-reset share of measured active work: {:.2f}%",
+                         percentageOfActive(workerCommandPoolReset));
+            std::println(
+                "  Split phases attribute ownership; they do not measure placement benefit.");
+            std::println(
+                "  Registered p subtracts the one-draw fixed reset estimate from worker work.");
+            std::println("  For two workers: serial + fixed reset + variable worker work / 2.");
+        }
     }
     else
     {
