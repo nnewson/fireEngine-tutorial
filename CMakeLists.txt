@@ -49,7 +49,6 @@ add_library(fireEngineTutorialEngine STATIC
     src/animation/animation_playback.cpp
     src/animation/animation_validation.cpp
     src/content/scene_content_validation.cpp
-    src/core/debug.cpp
     src/gltf/gltf_loader.cpp
     src/gltf/image_decoder.cpp
     src/graphics/asset_validation.cpp
@@ -66,6 +65,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/draw_binding_state.cpp
     src/render/frame_slot.cpp
     src/render/image.cpp
+    src/render/instance_support.cpp
     src/render/pipeline.cpp
     src/render/recording_input.cpp
     src/render/resource_compiler.cpp

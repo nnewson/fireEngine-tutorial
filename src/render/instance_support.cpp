@@ -1,4 +1,4 @@
-#include <fire_engine/core/detail/debug.hpp>
+#include <fire_engine/render/detail/instance_support.hpp>
 
 #include <algorithm>
 #include <string_view>
