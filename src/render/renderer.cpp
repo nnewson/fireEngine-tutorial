@@ -196,11 +196,13 @@ void recordSecondaryChunk(const detail::SecondaryChunkJob& job,
  * @brief Merges participant timestamp blocks into the public per-frame timings.
  * @param chunkTimings Participant-local blocks written during this attempt.
  * @param participants Number of leading blocks that recorded a chunk.
+ * @param completionWait Coordinator wait outcome when a helper ran, otherwise null.
  * @param timings Optional public output receiving durations and the critical path.
  */
 void mergeChunkTimings(
     const std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads>& chunkTimings,
-    std::size_t participants, RendererCpuTimings* timings);
+    std::size_t participants, const detail::CompletionWait* completionWait,
+    RendererCpuTimings* timings);
 
 /* --- File-local classes --- */
 
@@ -854,7 +856,8 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
         }
     }
     secondaryHelper_.rethrowIfFailed();
-    mergeChunkTimings(chunkTimings, participants, timings);
+    mergeChunkTimings(chunkTimings, participants,
+                      participants > 1 ? &secondaryHelper_.lastCompletionWait() : nullptr, timings);
 
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
     {
@@ -1243,7 +1246,8 @@ void recordSecondaryChunk(const detail::SecondaryChunkJob& job,
 
 void mergeChunkTimings(
     const std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads>& chunkTimings,
-    std::size_t participants, RendererCpuTimings* timings)
+    std::size_t participants, const detail::CompletionWait* completionWait,
+    RendererCpuTimings* timings)
 {
     if (timings == nullptr)
     {
@@ -1295,6 +1299,23 @@ void mergeChunkTimings(
         std::chrono::duration_cast<std::chrono::nanoseconds>(latestResetEnd - earliestStart);
     timings->workerRegionCriticalPath =
         std::chrono::duration_cast<std::chrono::nanoseconds>(latestEnd - earliestStart);
+
+    if (completionWait == nullptr)
+    {
+        return;
+    }
+    timings->secondaryJoinWait = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        completionWait->end - completionWait->start);
+    timings->secondaryCompletionTail =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(completionWait->end - latestEnd);
+    // Defined independently of finish order: zero when the coordinator was last
+    // to finish, so no chunk work remained when it entered the wait.
+    timings->secondaryHelperRemainingWork =
+        latestEnd > completionWait->start ? std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                latestEnd - completionWait->start)
+                                          : std::chrono::nanoseconds{};
+    timings->secondaryCompletionAcquiredBySpin = completionWait->acquiredBySpin;
+    timings->secondaryCompletionUsedBlockingWait = completionWait->usedBlockingWait;
 }
 
 } // namespace

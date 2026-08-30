@@ -16,6 +16,17 @@ namespace fire_engine::detail
 
 class RecordingContext;
 
+/* --- Constants --- */
+
+/**
+ * @brief Registered Step-9c bound on active polling inside the completion wait.
+ *
+ * Active polling stops at the first deadline check at or after this budget.
+ * Preemption can make the wall time exceed it without the loop performing any
+ * further polling while descheduled.
+ */
+inline constexpr std::chrono::nanoseconds kCompletionSpinBudget{std::chrono::microseconds{50}};
+
 /* --- POD structs --- */
 
 #if defined(_MSC_VER)
@@ -52,6 +63,22 @@ struct SecondaryChunkJob
     const RecordingContext* context = nullptr; ///< Pool and secondary buffer owned by the chunk.
     RecordingState state{};                    ///< Fixed state copied so no caller frame is read.
     std::span<const RecordingDraw> draws;      ///< Contiguous packets recorded by this chunk.
+};
+
+/**
+ * @brief Outcome of one coordinator completion wait.
+ *
+ * The two flags are not complements. Completion can be published after the
+ * final polling load but before the fallback loop's first load, in which case
+ * neither polling observed it nor did the coordinator ever block. Reporting
+ * both separates that boundary case from a genuine block.
+ */
+struct CompletionWait
+{
+    std::chrono::steady_clock::time_point start{}; ///< Entry to the wait.
+    std::chrono::steady_clock::time_point end{};   ///< After completion was observed.
+    bool acquiredBySpin = false;                   ///< Polling observed completion.
+    bool usedBlockingWait = false;                 ///< The coordinator actually blocked.
 };
 
 /**
@@ -114,10 +141,25 @@ public:
     /**
      * @brief Blocks until the dispatched chunk has stopped reading its job.
      *
+     * Polls the completion flag for at most kCompletionSpinBudget, then blocks
+     * on that same flag. The flag rather than a semaphore is the completion
+     * primitive: a semaphore released before the flag was published would let
+     * this call return, the next dispatch clear the flag, and the helper then
+     * publish a stale completion that the following wait would misreport as a
+     * successful spin. Because the coordinator cannot proceed until the store
+     * is visible, no publication can be outstanding when the flag is cleared.
+     *
      * Safe to call while an exception unwinds; it neither throws nor reports
      * the helper's own failure. Call rethrowIfFailed() afterwards.
      */
     void awaitCompletion() noexcept;
+
+    /**
+     * @brief Returns how the most recent completion wait ended.
+     * @return Wait boundaries and whether polling observed completion.
+     * @pre awaitCompletion() has returned for that dispatch.
+     */
+    [[nodiscard]] const CompletionWait& lastCompletionWait() const noexcept;
 
     /**
      * @brief Rethrows a failure captured by the helper's most recent chunk.
@@ -143,10 +185,14 @@ private:
     ChunkRecordingTimings* timings_ = nullptr;  ///< Optional participant block for the chunk.
     std::exception_ptr failure_;                ///< Failure captured by the current chunk.
     std::atomic<bool> stopping_{false};         ///< Set once, before the final request.
-    bool outstanding_ = false;                  ///< Coordinator-side dispatch bookkeeping.
-    std::binary_semaphore request_{0};          ///< Released by dispatch, acquired by run.
-    std::binary_semaphore completion_{0};       ///< Released by run, acquired by the waiter.
-    std::thread thread_;                        ///< Joined by the destructor.
+    // Cleared by dispatch and published by the helper. Its acquire observation
+    // supplies the happens-before for the participant timings and any captured
+    // failure, so no separate completion semaphore is needed.
+    std::atomic<bool> completionPublished_{false}; ///< Completion signal and wait primitive.
+    CompletionWait lastCompletionWait_{};          ///< Outcome of the most recent wait.
+    bool outstanding_ = false;                     ///< Coordinator-side dispatch bookkeeping.
+    std::binary_semaphore request_{0};             ///< Released by dispatch, acquired by run.
+    std::thread thread_;                           ///< Joined by the destructor.
 };
 /** @endcond */
 } // namespace fire_engine::detail
