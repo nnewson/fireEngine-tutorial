@@ -52,12 +52,12 @@ constexpr std::size_t kFrameSlotCount = 2;
 /**
  * @brief Smallest per-participant draw count at which recording is split.
  *
- * Step 9c measured a benefit at 10,000 draws on both decision-bearing
- * implementations in the synthetic benchmark, and a regression on one of them
- * at 1,000. This threshold is that measured boundary rather than an estimate of
- * where the crossover lies, which nothing in those runs locates. It is an
- * empirical policy rather than an interface, so it stays internal and reaches
- * reports only as a value on RendererInfo.
+ * Release measurements showed a benefit at 10,000 draws on both
+ * decision-bearing implementations in the synthetic benchmark, and a
+ * regression on one of them at 1,000. This threshold is that measured boundary
+ * rather than an estimate of where the crossover lies, which nothing in those
+ * runs locates. It is an empirical policy rather than an interface, so it stays
+ * internal and reaches reports only as a value on RendererInfo.
  */
 constexpr std::size_t kMinimumDrawsPerRecordingParticipant = 5000;
 
@@ -841,8 +841,8 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
 
     // The production policy selects the count from the workload. A diagnostic
     // override replaces that choice so a forced split can be measured below the
-    // threshold, which is how the Step-9 matrices were acquired. Either way the
-    // ranges must stay non-empty.
+    // threshold and compared with an explicitly single-participant control.
+    // Either way the ranges must stay non-empty.
     const std::size_t requested =
         forcedSecondaryRecordingThreadCount_.value_or(automaticParticipantCount(draws.size()));
     const std::size_t participants = requested > 1 && draws.size() >= requested ? requested : 1;

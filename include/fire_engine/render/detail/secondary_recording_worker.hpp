@@ -19,7 +19,7 @@ class RecordingContext;
 /* --- Constants --- */
 
 /**
- * @brief Registered Step-9c bound on active polling inside the completion wait.
+ * @brief Measured bound on active polling inside the completion wait.
  *
  * Active polling stops at the first deadline check at or after this budget.
  * Preemption can make the wall time exceed it without the loop performing any

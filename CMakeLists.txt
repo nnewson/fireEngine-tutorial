@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 # Declare the project metadata and tell CMake that this repository contains
 # C++ sources. No C compiler is needed for this tutorial.
 project(fire_engine_tutorial
-    VERSION 0.8.0
+    VERSION 0.9.0
     DESCRIPTION "A development tutorial to building your own fireEngine"
     LANGUAGES CXX
 )
@@ -359,7 +359,7 @@ set_tests_properties(
 )
 
 set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Ownership: cycled frame slots with per-slot recording contexts \\(Step 5\\)
+    PASS_REGULAR_EXPRESSION "Ownership: cycled frame slots with per-slot recording contexts
   Frames in flight: 2
   Presentation: [^\n]*
   Workload: instances=1, nodes=2, draws=1"

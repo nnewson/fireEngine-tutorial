@@ -232,7 +232,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                               rendererInfo.minimumDrawsPerRecordingParticipant),
             effectiveParticipants);
     }
-    std::println("  Ownership: cycled frame slots with per-slot recording contexts (Step 5)");
+    std::println("  Ownership: cycled frame slots with per-slot recording contexts");
     std::println("  Frames in flight: {}", rendererInfo.frameSlotCount);
     std::println("  Presentation: {}x{}, {}, {}", rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode);
