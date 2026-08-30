@@ -13,8 +13,9 @@ RecordingContext::RecordingContext(const Device& device, RecordingBufferKind buf
 {
     // Every buffer allocated here is eOneTimeSubmit and the pool is reset
     // before each reuse, so eTransient describes the real usage. It is a driver
-    // hint and neither changes nor relaxes the reset rules. Step 8a measured it
-    // as unresolved against control drift on both decision-bearing drivers.
+    // hint and neither changes nor relaxes the reset rules. Paired measurements
+    // found its effect unresolved against control drift on both
+    // decision-bearing drivers.
     const vk::CommandPoolCreateInfo commandPoolInfo{
         .flags = vk::CommandPoolCreateFlagBits::eTransient,
         .queueFamilyIndex = device.graphicsQueueFamily(),
