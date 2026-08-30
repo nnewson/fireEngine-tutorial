@@ -224,8 +224,13 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
     if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
     {
-        std::println("  Secondary recording participants: {} configured, {} effective",
-                     rendererInfo.secondaryRecordingThreadCount, effectiveParticipants);
+        std::println(
+            "  Secondary recording participants: {}, {} effective",
+            rendererInfo.forcedSecondaryRecordingThreadCount.has_value()
+                ? std::format("{} forced", *rendererInfo.forcedSecondaryRecordingThreadCount)
+                : std::format("automatic at or above {} draws per participant",
+                              rendererInfo.minimumDrawsPerRecordingParticipant),
+            effectiveParticipants);
     }
     std::println("  Ownership: cycled frame slots with per-slot recording contexts (Step 5)");
     std::println("  Frames in flight: {}", rendererInfo.frameSlotCount);

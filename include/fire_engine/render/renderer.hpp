@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <fire_engine/platform/framebuffer_extent.hpp>
@@ -40,8 +41,9 @@ struct RendererConfiguration
 {
     CommandRecordingMode commandRecordingMode =
         CommandRecordingMode::eSecondaryCommandBuffer; ///< Geometry recording structure.
-    /// Participants recording secondary chunks, counting the coordinator itself.
-    std::size_t secondaryRecordingThreadCount = 1;
+    /// Diagnostic override forcing a participant count, counting the coordinator itself.
+    /// Unset selects the participant count from the workload, which is the production policy.
+    std::optional<std::size_t> forcedSecondaryRecordingThreadCount;
 };
 
 /** @brief Vulkan-free summary of the renderer selected for this window. */
@@ -61,7 +63,10 @@ struct RendererInfo
     std::string depthFormat;                   ///< Human-readable depth attachment format.
     std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
     CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
-    std::size_t secondaryRecordingThreadCount; ///< Recording participants including coordinator.
+    /// Diagnostic override in force, or unset when the workload selects the participant count.
+    std::optional<std::size_t> forcedSecondaryRecordingThreadCount;
+    /// Per-participant draw count at or above which the workload policy splits recording.
+    std::size_t minimumDrawsPerRecordingParticipant;
 };
 
 /** @brief Pool-reset and recording durations for one secondary recording participant. */
