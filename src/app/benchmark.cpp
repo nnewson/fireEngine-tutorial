@@ -276,6 +276,12 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                    [](const Sample& sample) { return sample.renderer.workerRegionCriticalPath; });
         printPhase("worker reset-region span",
                    [](const Sample& sample) { return sample.renderer.workerResetRegionSpan; });
+        printPhase("completion join wait",
+                   [](const Sample& sample) { return sample.renderer.secondaryJoinWait; });
+        printPhase("completion tail",
+                   [](const Sample& sample) { return sample.renderer.secondaryCompletionTail; });
+        printPhase("helper work remaining at join", [](const Sample& sample)
+                   { return sample.renderer.secondaryHelperRemainingWork; });
         for (std::size_t participant = 0; participant < effectiveParticipants; ++participant)
         {
             printPhase(std::format("participant {} pool reset", participant),
@@ -369,6 +375,29 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                          "judge overlap.");
             std::println("  The recording region includes dispatch and join, so it prices the "
                          "threading overhead.");
+            // Three outcomes, not two: completion can land after the final
+            // polling load but before the fallback's first load, in which case
+            // neither polling observed it nor did the coordinator block.
+            std::size_t spunFrames = 0;
+            std::size_t blockedFrames = 0;
+            for (const Sample& sample : samples_)
+            {
+                if (sample.renderer.secondaryCompletionAcquiredBySpin)
+                {
+                    ++spunFrames;
+                }
+                if (sample.renderer.secondaryCompletionUsedBlockingWait)
+                {
+                    ++blockedFrames;
+                }
+            }
+            const auto measuredFrames = static_cast<double>(samples_.size());
+            const double spunShare = 100.0 * static_cast<double>(spunFrames) / measuredFrames;
+            const double blockedShare = 100.0 * static_cast<double>(blockedFrames) / measuredFrames;
+            std::println("  Completion acquired by polling: {:.2f}% of frames", spunShare);
+            std::println("  Completion required a blocking wait: {:.2f}% of frames", blockedShare);
+            std::println("  Completion observed at the deadline boundary: {:.2f}% of frames",
+                         100.0 - spunShare - blockedShare);
         }
         else
         {

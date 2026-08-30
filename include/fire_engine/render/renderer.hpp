@@ -97,6 +97,20 @@ struct RendererCpuTimings
     /// Earliest participant reset start through the latest participant reset end. Compare with
     /// the participant reset durations to decide whether concurrent resets overlapped.
     std::chrono::nanoseconds workerResetRegionSpan{};
+    /// Entry to the coordinator's completion wait through its return. Contains any remaining
+    /// helper execution as well as the wake.
+    std::chrono::nanoseconds secondaryJoinWait{};
+    /// Latest participant recording completion through the coordinator's wait returning. This is
+    /// what the registered completion spin is intended to remove.
+    std::chrono::nanoseconds secondaryCompletionTail{};
+    /// Helper execution still outstanding when the coordinator entered its wait, defined
+    /// independently of finish order as max(latestRecordEnd - joinStart, 0).
+    std::chrono::nanoseconds secondaryHelperRemainingWork{};
+    /// Whether polling observed completion within the registered budget.
+    bool secondaryCompletionAcquiredBySpin = false;
+    /// Whether the coordinator actually blocked. Not the complement of the flag above: completion
+    /// can land after the last poll but before the fallback's first load, blocking neither way.
+    bool secondaryCompletionUsedBlockingWait = false;
     std::array<ChunkCpuTimings, kMaxSecondaryRecordingThreads>
         chunks{};                                         ///< Per-participant detail.
     std::chrono::nanoseconds primaryCommandRecording{};   ///< Serial pass and transition recording.

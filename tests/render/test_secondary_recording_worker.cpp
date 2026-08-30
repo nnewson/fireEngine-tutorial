@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <stdexcept>
 #include <type_traits>
 
@@ -49,6 +50,23 @@ TEST_CASE("Secondary recording worker runs a dispatched chunk and reports idlene
     REQUIRE(gCompletedChunks.load(std::memory_order_relaxed) == 1);
     REQUIRE(timings.recorded);
     REQUIRE_NOTHROW(worker.rethrowIfFailed());
+}
+
+TEST_CASE("Secondary recording worker reports ordered completion-wait boundaries")
+{
+    SecondaryRecordingWorker worker;
+
+    const SecondaryChunkJob job;
+    worker.dispatch(&countingRecorder, job, nullptr);
+    worker.awaitCompletion();
+
+    // Which outcome occurred depends on scheduling and is not asserted. The
+    // interval must be well formed, and the two outcome flags are mutually
+    // exclusive because observing completion while polling skips the fallback.
+    const auto& wait = worker.lastCompletionWait();
+    REQUIRE(wait.start <= wait.end);
+    REQUIRE(wait.start != std::chrono::steady_clock::time_point{});
+    REQUIRE_FALSE((wait.acquiredBySpin && wait.usedBlockingWait));
 }
 
 TEST_CASE("Secondary recording worker omits instrumentation when no block is supplied")
