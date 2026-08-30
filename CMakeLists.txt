@@ -286,6 +286,15 @@ add_test(NAME fireEngineTutorialSplitRecordingFallbackCorrectness
 add_test(NAME fireEngineTutorialSplitRecordingMixedResourceSmoke
     COMMAND fireEngineTutorial --smoke prepare-twice --recording-threads 2
 )
+# Without an override the workload policy selects the participant count. Cover
+# both branches at the call site: the compile-time assertions only protect the
+# calculation, not that the renderer consults it.
+add_test(NAME fireEngineTutorialAutomaticRecordingCorrectness
+    COMMAND fireEngineTutorial --benchmark 2
+)
+add_test(NAME fireEngineTutorialAutomaticSplitCorrectness
+    COMMAND fireEngineTutorial --benchmark 10000
+)
 
 # Synchronization validation is compiled into Debug configurations only. Keep
 # its device scenarios out of Release test lists instead of registering silent
@@ -340,6 +349,8 @@ set_tests_properties(
     fireEngineTutorialSplitRecordingBenchmarkCorrectness
     fireEngineTutorialSplitRecordingFallbackCorrectness
     fireEngineTutorialSplitRecordingMixedResourceSmoke
+    fireEngineTutorialAutomaticRecordingCorrectness
+    fireEngineTutorialAutomaticSplitCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
@@ -353,13 +364,22 @@ set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
   Presentation: [^\n]*
   Workload: instances=1, nodes=2, draws=1"
 )
-# Assert the effective participant count, not the configured one: a split that
-# silently fell back to a single participant would otherwise pass.
+# Assert the effective participant count, not the requested one: a split that
+# silently fell back to a single participant would otherwise pass. These
+# scenarios force a split below the production threshold on purpose, so the
+# two-participant path keeps its validation coverage wherever the policy would
+# select one.
 set_tests_properties(fireEngineTutorialSplitRecordingBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 configured, 2 effective(.|\n)*participant 1 recording"
+    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 forced, 2 effective(.|\n)*participant 1 recording"
 )
 set_tests_properties(fireEngineTutorialSplitRecordingFallbackCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 configured, 1 effective"
+    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 forced, 1 effective"
+)
+set_tests_properties(fireEngineTutorialAutomaticRecordingCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Secondary recording participants: automatic[^\n]*, 1 effective"
+)
+set_tests_properties(fireEngineTutorialAutomaticSplitCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Secondary recording participants: automatic[^\n]*, 2 effective"
 )
 set_tests_properties(fireEngineTutorialDirectPrimaryBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Recording path: direct primary command buffer(.|\n)*Its worker pool has no command-buffer allocations or recorded work."

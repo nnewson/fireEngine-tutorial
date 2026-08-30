@@ -49,6 +49,18 @@ constexpr PipelineDescription kScenePipelineDescription{};
 /** @brief Submission slots cycled independently of acquired swapchain images. */
 constexpr std::size_t kFrameSlotCount = 2;
 
+/**
+ * @brief Smallest per-participant draw count at which recording is split.
+ *
+ * Step 9c measured a benefit at 10,000 draws on both decision-bearing
+ * implementations in the synthetic benchmark, and a regression on one of them
+ * at 1,000. This threshold is that measured boundary rather than an estimate of
+ * where the crossover lies, which nothing in those runs locates. It is an
+ * empirical policy rather than an interface, so it stays internal and reaches
+ * reports only as a value on RendererInfo.
+ */
+constexpr std::size_t kMinimumDrawsPerRecordingParticipant = 5000;
+
 /* --- File-local classes --- */
 
 /** @brief Accumulates one optional host phase without adding renderer state. */
@@ -162,6 +174,13 @@ private:
 /* --- File-local function declarations --- */
 
 [[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept;
+
+/**
+ * @brief Selects how many participants record one frame when nothing forces a count.
+ * @param drawCount Resolved packets in the frozen recording input.
+ * @return Participant count, at least one and never above the supported maximum.
+ */
+[[nodiscard]] constexpr std::size_t automaticParticipantCount(std::size_t drawCount) noexcept;
 
 /**
  * @brief Records fixed state shared by every draw in one command buffer.
@@ -383,8 +402,9 @@ private:
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
     // Foundational long-lived state.
-    CommandRecordingMode commandRecordingMode_;     ///< Fixed production or attribution path.
-    std::size_t secondaryRecordingThreadCount_ = 1; ///< Participants including the coordinator.
+    CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
+    /// Diagnostic override, or unset when the workload selects the participant count.
+    std::optional<std::size_t> forcedSecondaryRecordingThreadCount_;
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
     detail::ResourceCompiler resourceCompiler_; ///< Dedicated setup-time upload context.
@@ -449,7 +469,7 @@ RendererInfo Renderer::info() const
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
                      RendererConfiguration configuration)
     : commandRecordingMode_{configuration.commandRecordingMode},
-      secondaryRecordingThreadCount_{configuration.secondaryRecordingThreadCount},
+      forcedSecondaryRecordingThreadCount_{configuration.forcedSecondaryRecordingThreadCount},
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
@@ -475,8 +495,9 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
               .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
                               detail::RecordingContext{device_, workerBufferKind()}}}}
 {
-    if (secondaryRecordingThreadCount_ == 0 ||
-        secondaryRecordingThreadCount_ > kMaxSecondaryRecordingThreads)
+    if (forcedSecondaryRecordingThreadCount_.has_value() &&
+        (*forcedSecondaryRecordingThreadCount_ == 0 ||
+         *forcedSecondaryRecordingThreadCount_ > kMaxSecondaryRecordingThreads))
     {
         throw std::invalid_argument("Secondary recording thread count is outside the supported "
                                     "range");
@@ -771,7 +792,8 @@ RendererInfo Renderer::Impl::info() const
         .depthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
         .commandRecordingMode = commandRecordingMode_,
-        .secondaryRecordingThreadCount = secondaryRecordingThreadCount_,
+        .forcedSecondaryRecordingThreadCount = forcedSecondaryRecordingThreadCount_,
+        .minimumDrawsPerRecordingParticipant = kMinimumDrawsPerRecordingParticipant,
     };
 }
 
@@ -817,12 +839,13 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
     const detail::RecordingState& state = input.state();
     const std::span<const detail::RecordingDraw> draws = input.draws();
 
-    // The registered protocol requires non-empty ranges, so a workload too
-    // small to split stays with the coordinator alone.
-    const std::size_t participants =
-        secondaryRecordingThreadCount_ > 1 && draws.size() >= secondaryRecordingThreadCount_
-            ? secondaryRecordingThreadCount_
-            : 1;
+    // The production policy selects the count from the workload. A diagnostic
+    // override replaces that choice so a forced split can be measured below the
+    // threshold, which is how the Step-9 matrices were acquired. Either way the
+    // ranges must stay non-empty.
+    const std::size_t requested =
+        forcedSecondaryRecordingThreadCount_.value_or(automaticParticipantCount(draws.size()));
+    const std::size_t participants = requested > 1 && draws.size() >= requested ? requested : 1;
     const std::size_t firstChunkSize = participants > 1 ? (draws.size() + 1) / 2 : draws.size();
 
     std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads> chunkTimings{};
@@ -1138,6 +1161,26 @@ void PresentationState::waitForPresentations()
 
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).height == -600.0f);
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).y == 600.0f);
+
+constexpr std::size_t automaticParticipantCount(std::size_t drawCount) noexcept
+{
+    const std::size_t supported = drawCount / kMinimumDrawsPerRecordingParticipant;
+    if (supported < 2)
+    {
+        return 1;
+    }
+    return supported > kMaxSecondaryRecordingThreads ? kMaxSecondaryRecordingThreads : supported;
+}
+
+static_assert(automaticParticipantCount(0) == 1);
+static_assert(automaticParticipantCount(1) == 1);
+static_assert(automaticParticipantCount(1000) == 1);
+// One participant below the measured boundary, two at it.
+static_assert(automaticParticipantCount(kMinimumDrawsPerRecordingParticipant * 2 - 1) == 1);
+static_assert(automaticParticipantCount(kMinimumDrawsPerRecordingParticipant * 2) == 2);
+// Never above the supported maximum, however large the workload.
+static_assert(automaticParticipantCount(kMinimumDrawsPerRecordingParticipant * 100) ==
+              kMaxSecondaryRecordingThreads);
 
 detail::DrawBindingState bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
                                            const detail::RecordingState& state)

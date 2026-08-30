@@ -74,8 +74,8 @@ struct RunOptions
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
-    std::size_t secondaryRecordingThreads =
-        1; ///< Recording participants including the coordinator.
+    /// Diagnostic override forcing a participant count, or unset to use the workload policy.
+    std::optional<std::size_t> forcedRecordingThreads;
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -204,7 +204,7 @@ try
         .commandRecordingMode = options.recordDirectly
                                     ? fire_engine::CommandRecordingMode::eDirectPrimary
                                     : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
-        .secondaryRecordingThreadCount = options.secondaryRecordingThreads,
+        .forcedSecondaryRecordingThreadCount = options.forcedRecordingThreads,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
     if (options.smokeScenario == SmokeScenario::eResize &&
@@ -377,7 +377,7 @@ namespace
     const std::string_view option{arguments[1]};
     if ((argumentCount == 3 || argumentCount == 5) && option == "--smoke")
     {
-        std::size_t smokeRecordingThreads = 1;
+        std::optional<std::size_t> smokeRecordingThreads;
         if (argumentCount == 5)
         {
             if (std::string_view{arguments[3]} != "--recording-threads")
@@ -398,7 +398,7 @@ namespace
                     .smokeScenario = definition.scenario,
                     .recreateEveryFrame = definition.recreateEveryFrame,
                     .recordDirectly = false,
-                    .secondaryRecordingThreads = smokeRecordingThreads,
+                    .forcedRecordingThreads = smokeRecordingThreads,
                 };
             }
         }
@@ -418,7 +418,7 @@ namespace
         }
         bool recordDirectly = false;
         bool recordingThreadsSeen = false;
-        std::size_t secondaryRecordingThreads = 1;
+        std::optional<std::size_t> forcedRecordingThreads;
         for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
         {
             const std::string_view benchmarkOption{arguments[argumentIndex]};
@@ -431,7 +431,7 @@ namespace
             {
                 ++argumentIndex;
                 recordingThreadsSeen = true;
-                secondaryRecordingThreads = parseRecordingThreadCount(arguments[argumentIndex]);
+                forcedRecordingThreads = parseRecordingThreadCount(arguments[argumentIndex]);
             }
             else
             {
@@ -441,7 +441,7 @@ namespace
         }
         // The direct control records no secondary at all, so a split request
         // there would silently have no effect.
-        if (recordDirectly && secondaryRecordingThreads > 1)
+        if (recordDirectly && forcedRecordingThreads.value_or(1) > 1)
         {
             throw std::invalid_argument(
                 "--direct-primary records no secondary command buffer, so it cannot be combined "
@@ -454,7 +454,7 @@ namespace
             .smokeScenario = SmokeScenario::eNone,
             .recreateEveryFrame = false,
             .recordDirectly = recordDirectly,
-            .secondaryRecordingThreads = secondaryRecordingThreads,
+            .forcedRecordingThreads = forcedRecordingThreads,
         };
     }
     if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
@@ -475,7 +475,7 @@ namespace
         .smokeScenario = SmokeScenario::eNone,
         .recreateEveryFrame = argumentCount == 4,
         .recordDirectly = false,
-        .secondaryRecordingThreads = 1,
+        .forcedRecordingThreads = std::nullopt,
     };
 }
 
