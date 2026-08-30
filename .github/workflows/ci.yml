@@ -276,12 +276,40 @@ jobs:
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1
 
-      - name: Record Lavapipe 1,000-draw benchmark ratios
+      # Step 9b runs one worker, two workers, then one worker again at each
+      # workload from this single binary. T1 and the phase inputs come from the
+      # mean of the two outer arms, T2 from the centre arm, and the registered
+      # drift rule classifies the difference before the materialization gate.
+      - name: Record Lavapipe 1,000-draw one-worker control A
         continue-on-error: true
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
 
-      - name: Record Lavapipe 10,000-draw benchmark ratios
+      - name: Record Lavapipe 1,000-draw two-worker candidate
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 1000 --recording-threads 2
+
+      - name: Record Lavapipe 1,000-draw one-worker control B
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 1000
+
+      - name: Record Lavapipe 10,000-draw one-worker control A
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
+
+      - name: Record Lavapipe 10,000-draw two-worker candidate
+        continue-on-error: true
+        timeout-minutes: 20
+        run: >-
+          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
+          --benchmark 10000 --recording-threads 2
+
+      - name: Record Lavapipe 10,000-draw one-worker control B
         continue-on-error: true
         timeout-minutes: 20
         run: xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial --benchmark 10000
