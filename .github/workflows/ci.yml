@@ -6,8 +6,28 @@ on:
     branches:
       - main
 
+# Keep this tool checkout identical to the manifest baseline in
+# vcpkg-configuration.json. Pinning both makes port resolution and the vcpkg
+# executable interpreting it reproducible.
+env:
+  VCPKG_COMMIT: 04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4
+
 jobs:
   # -------- Platform-independent lint gates (run once) --------
+
+  dependency-pin:
+    name: vcpkg pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check registry and tool revisions match
+        run: |
+          baseline="$(python3 -c 'import json; print(json.load(open("vcpkg-configuration.json"))["default-registry"]["baseline"])')"
+          if [[ "${baseline}" != "${VCPKG_COMMIT}" ]]; then
+            echo "vcpkg baseline ${baseline} does not match CI tool ${VCPKG_COMMIT}." >&2
+            exit 1
+          fi
 
   terminology:
     name: US English terminology
@@ -50,6 +70,7 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
+    needs: dependency-pin
     runs-on: ubuntu-24.04
     env:
       CC: gcc-14
@@ -78,7 +99,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
+          ref: ${{ env.VCPKG_COMMIT }}
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -192,6 +213,7 @@ jobs:
 
   build-test-linux:
     name: build and test (Linux)
+    needs: dependency-pin
     runs-on: ubuntu-24.04
     env:
       CC: gcc-14
@@ -229,7 +251,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
+          ref: ${{ env.VCPKG_COMMIT }}
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -342,10 +364,11 @@ jobs:
           --benchmark 10000 --direct-primary
 
   # KosmicKrisp requires Apple Silicon, macOS 26, and an SDK installation that
-  # includes the preview driver. CI therefore verifies only the macOS/AppleClang
-  # C++23 build.
+  # includes the preview driver. Hosted CI therefore runs the device-free suite
+  # without claiming Vulkan-device coverage.
   build-macos:
-    name: build (macOS)
+    name: build and test (macOS)
+    needs: dependency-pin
     runs-on: macos-latest
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -360,7 +383,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
+          ref: ${{ env.VCPKG_COMMIT }}
 
       - name: Bootstrap vcpkg
         run: ./vcpkg/bootstrap-vcpkg.sh
@@ -383,10 +406,14 @@ jobs:
       - name: Build
         run: cmake --build --preset default
 
+      - name: Test device-free suite
+        run: ctest --preset default -L device-free --no-tests=error
+
   # GitHub's hosted Windows runner has no Vulkan ICD. This job therefore
-  # verifies only the Windows/MSVC C++23 build.
+  # runs the device-free suite without claiming Vulkan-device coverage.
   build-windows:
-    name: build (Windows)
+    name: build and test (Windows)
+    needs: dependency-pin
     runs-on: windows-latest
     env:
       VCPKG_ROOT: ${{ github.workspace }}\vcpkg
@@ -404,7 +431,7 @@ jobs:
         with:
           repository: microsoft/vcpkg
           path: vcpkg
-          ref: ea1a7396b05637a53bf23c078647ecc0edee4b80
+          ref: ${{ env.VCPKG_COMMIT }}
 
       - name: Bootstrap vcpkg
         run: .\vcpkg\bootstrap-vcpkg.bat
@@ -426,3 +453,6 @@ jobs:
 
       - name: Build
         run: cmake --build --preset default
+
+      - name: Test device-free suite
+        run: ctest --preset default -L device-free --no-tests=error

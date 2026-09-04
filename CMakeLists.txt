@@ -252,7 +252,10 @@ target_link_libraries(fireEngineTutorialTests
 fire_engine_enable_warnings(fireEngineTutorialTests)
 
 include(Catch)
-catch_discover_tests(fireEngineTutorialTests)
+catch_discover_tests(fireEngineTutorialTests
+    PROPERTIES
+        LABELS device-free
+)
 
 # These bounded scenarios retain the real application integration path. They
 # cover imported animation, changed preparation dependencies, the untextured
@@ -354,6 +357,7 @@ set_tests_properties(
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
+        LABELS vulkan-device
         RESOURCE_LOCK fireEngineTutorialVulkan
         TIMEOUT 30
 )
