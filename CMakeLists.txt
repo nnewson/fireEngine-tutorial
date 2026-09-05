@@ -52,6 +52,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/gltf/gltf_loader.cpp
     src/gltf/image_decoder.cpp
     src/graphics/asset_validation.cpp
+    src/graphics/frame_capture.cpp
     src/graphics/render_assets.cpp
     src/graphics/render_preparation.cpp
     src/platform/glfw.cpp
@@ -230,6 +231,7 @@ add_executable(fireEngineTutorialTests
     tests/content/test_scene_content_validation.cpp
     tests/gltf/test_gltf_loader.cpp
     tests/graphics/test_asset_validation.cpp
+    tests/graphics/test_frame_capture.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
     tests/render/test_camera.cpp
