@@ -274,6 +274,21 @@ add_test(NAME fireEngineTutorialUntexturedSmoke
 add_test(NAME fireEngineTutorialRecreationSmoke
     COMMAND fireEngineTutorial --smoke resize
 )
+# The parser accepts mode selectors and their modifiers in either order. Keep
+# both forms so later options cannot accidentally restore position-dependent
+# parsing.
+add_test(NAME fireEngineTutorialFramesOptionsForwardOrder
+    COMMAND fireEngineTutorial --frames 3 --recreate-every-frame
+)
+add_test(NAME fireEngineTutorialFramesOptionsReverseOrder
+    COMMAND fireEngineTutorial --recreate-every-frame --frames 3
+)
+add_test(NAME fireEngineTutorialSmokeOptionsForwardOrder
+    COMMAND fireEngineTutorial --smoke basic --recording-threads 2
+)
+add_test(NAME fireEngineTutorialSmokeOptionsReverseOrder
+    COMMAND fireEngineTutorial --recording-threads 2 --smoke basic
+)
 add_test(NAME fireEngineTutorialBenchmarkCorrectness
     COMMAND fireEngineTutorial --benchmark 1
 )
@@ -299,6 +314,86 @@ add_test(NAME fireEngineTutorialAutomaticRecordingCorrectness
 )
 add_test(NAME fireEngineTutorialAutomaticSplitCorrectness
     COMMAND fireEngineTutorial --benchmark 10000
+)
+
+# These parser failures occur before GLFW or Vulkan initialization, so they
+# remain device-free even though they exercise the application executable.
+add_test(NAME fireEngineTutorialRepeatedOptionRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=Repeated option: --frames"
+        -DARGUMENT_COUNT=4
+        -DARGUMENT_1=--frames
+        -DARGUMENT_2=1
+        -DARGUMENT_3=--frames
+        -DARGUMENT_4=2
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialMissingOptionValueRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--frames requires a value"
+        -DARGUMENT_COUNT=1
+        -DARGUMENT_1=--frames
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialUnknownOptionRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=Unknown option: --unknown-option"
+        "-DEXPECTED_ERROR_2=Usage: fireEngineTutorial"
+        -DARGUMENT_COUNT=1
+        -DARGUMENT_1=--unknown-option
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialDirectPrimaryWithoutBenchmarkRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--direct-primary requires --benchmark"
+        -DARGUMENT_COUNT=1
+        -DARGUMENT_1=--direct-primary
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialRecreationWithoutFramesRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--recreate-every-frame requires --frames"
+        -DARGUMENT_COUNT=1
+        -DARGUMENT_1=--recreate-every-frame
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialRecordingThreadsWithoutModeRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--recording-threads requires --benchmark or --smoke"
+        -DARGUMENT_COUNT=2
+        -DARGUMENT_1=--recording-threads
+        -DARGUMENT_2=1
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialDirectPrimarySplitRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--direct-primary records no secondary command buffer"
+        -DARGUMENT_COUNT=5
+        -DARGUMENT_1=--recording-threads
+        -DARGUMENT_2=2
+        -DARGUMENT_3=--direct-primary
+        -DARGUMENT_4=--benchmark
+        -DARGUMENT_5=1
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+set_tests_properties(
+    fireEngineTutorialRepeatedOptionRejected
+    fireEngineTutorialMissingOptionValueRejected
+    fireEngineTutorialUnknownOptionRejected
+    fireEngineTutorialDirectPrimaryWithoutBenchmarkRejected
+    fireEngineTutorialRecreationWithoutFramesRejected
+    fireEngineTutorialRecordingThreadsWithoutModeRejected
+    fireEngineTutorialDirectPrimarySplitRejected
+    PROPERTIES
+        LABELS device-free
+        TIMEOUT 5
 )
 
 # Synchronization validation is compiled into Debug configurations only. Keep
@@ -349,6 +444,10 @@ set_tests_properties(
     fireEngineTutorialPrepareTwiceSmoke
     fireEngineTutorialUntexturedSmoke
     fireEngineTutorialRecreationSmoke
+    fireEngineTutorialFramesOptionsForwardOrder
+    fireEngineTutorialFramesOptionsReverseOrder
+    fireEngineTutorialSmokeOptionsForwardOrder
+    fireEngineTutorialSmokeOptionsReverseOrder
     fireEngineTutorialBenchmarkCorrectness
     fireEngineTutorialDirectPrimaryBenchmarkCorrectness
     fireEngineTutorialSplitRecordingBenchmarkCorrectness

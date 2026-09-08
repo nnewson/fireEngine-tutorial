@@ -5,6 +5,7 @@
 
 #include "benchmark.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
@@ -42,6 +43,12 @@ namespace
  */
 constexpr float kSmokeAnimationStepSeconds = 0.8f;
 
+/** @brief Complete command-line grammar appended to every parsing failure. */
+constexpr std::string_view kCommandLineUsage =
+    "Usage: fireEngineTutorial [--benchmark positive-instances [--direct-primary] "
+    "[--recording-threads count] | --frames positive-count [--recreate-every-frame] | "
+    "--smoke scenario [--recording-threads count]] (options may appear in any order)";
+
 /** @brief Fixed application-owned camera used by every tutorial scenario. */
 constexpr fire_engine::Camera kTutorialCamera{
     .position = {.x = 0.0f, .y = 0.0f, .z = 4.0f},
@@ -62,6 +69,15 @@ enum class SmokeScenario : std::uint8_t
     ePrepareTwice, ///< Change dependencies and replace compiled GPU resources.
     eUntextured,   ///< Draw the imported mesh through the persistent white fallback texture.
     eResize,       ///< Recreate presentation-dependent state after every presented frame.
+};
+
+/** @brief Mutually exclusive top-level application modes selected by the command line. */
+enum class RunMode : std::uint8_t
+{
+    eInteractive, ///< Unbounded interactive rendering with no top-level option.
+    eBenchmark,   ///< Synthetic phase-level benchmark.
+    eFrames,      ///< Ordinary rendering bounded by a presented-frame count.
+    eSmoke,       ///< Named bounded device-level integration scenario.
 };
 
 /** @brief Command-line controls used by automated integration runs. */
@@ -369,114 +385,137 @@ namespace
 /* --- File-local functions --- */
 
 [[nodiscard]] RunOptions parseOptions(int argumentCount, char* arguments[])
+try
 {
-    if (argumentCount == 1)
+    RunOptions options;
+    RunMode mode = RunMode::eInteractive;
+    bool directPrimarySeen = false;
+    bool recreateEveryFrameSeen = false;
+    bool recordingThreadsSeen = false;
+
+    const auto selectMode = [&mode](RunMode selectedMode, std::string_view optionName)
     {
-        return {};
-    }
-    const std::string_view option{arguments[1]};
-    if ((argumentCount == 3 || argumentCount == 5) && option == "--smoke")
-    {
-        std::optional<std::size_t> smokeRecordingThreads;
-        if (argumentCount == 5)
+        if (mode == selectedMode)
         {
-            if (std::string_view{arguments[3]} != "--recording-threads")
-            {
-                throw std::invalid_argument("--smoke accepts only --recording-threads count");
-            }
-            smokeRecordingThreads = parseRecordingThreadCount(arguments[4]);
+            throw std::invalid_argument{"Repeated option: " + std::string{optionName}};
         }
-        const std::string_view scenario{arguments[2]};
-        for (const SmokeDefinition& definition : kSmokeDefinitions)
-        {
-            if (scenario == definition.name)
-            {
-                return {
-                    .frameLimit = definition.frameLimit,
-                    .reprepareAfterFrame = definition.reprepareAfterFrame,
-                    .benchmarkInstanceCount = std::nullopt,
-                    .smokeScenario = definition.scenario,
-                    .recreateEveryFrame = definition.recreateEveryFrame,
-                    .recordDirectly = false,
-                    .forcedRecordingThreads = smokeRecordingThreads,
-                };
-            }
-        }
-        std::string requirement{"--smoke requires one of:"};
-        for (const SmokeDefinition& definition : kSmokeDefinitions)
-        {
-            requirement.append(" ").append(definition.name);
-        }
-        throw std::invalid_argument{requirement};
-    }
-    if (option == "--benchmark" && argumentCount >= 3)
-    {
-        const std::uint64_t instanceCount = parsePositiveInteger(arguments[2], "--benchmark");
-        if (instanceCount > std::numeric_limits<std::size_t>::max())
-        {
-            throw std::invalid_argument("--benchmark instance count exceeds this platform's limit");
-        }
-        bool recordDirectly = false;
-        bool recordingThreadsSeen = false;
-        std::optional<std::size_t> forcedRecordingThreads;
-        for (int argumentIndex = 3; argumentIndex < argumentCount; ++argumentIndex)
-        {
-            const std::string_view benchmarkOption{arguments[argumentIndex]};
-            if (benchmarkOption == "--direct-primary" && !recordDirectly)
-            {
-                recordDirectly = true;
-            }
-            else if (benchmarkOption == "--recording-threads" && !recordingThreadsSeen &&
-                     argumentIndex + 1 < argumentCount)
-            {
-                ++argumentIndex;
-                recordingThreadsSeen = true;
-                forcedRecordingThreads = parseRecordingThreadCount(arguments[argumentIndex]);
-            }
-            else
-            {
-                throw std::invalid_argument{"Unknown or repeated benchmark option: " +
-                                            std::string{benchmarkOption}};
-            }
-        }
-        // The direct control records no secondary at all, so a split request
-        // there would silently have no effect.
-        if (recordDirectly && forcedRecordingThreads.value_or(1) > 1)
+        if (mode != RunMode::eInteractive)
         {
             throw std::invalid_argument(
-                "--direct-primary records no secondary command buffer, so it cannot be combined "
-                "with more than one recording thread");
+                "Only one of --benchmark, --frames, and --smoke may be supplied");
         }
-        return {
-            .frameLimit = std::nullopt,
-            .reprepareAfterFrame = std::nullopt,
-            .benchmarkInstanceCount = static_cast<std::size_t>(instanceCount),
-            .smokeScenario = SmokeScenario::eNone,
-            .recreateEveryFrame = false,
-            .recordDirectly = recordDirectly,
-            .forcedRecordingThreads = forcedRecordingThreads,
-        };
-    }
-    if ((argumentCount != 3 && argumentCount != 4) || option != "--frames" ||
-        (argumentCount == 4 && std::string_view{arguments[3]} != "--recreate-every-frame"))
+        mode = selectedMode;
+    };
+    const auto requireValue =
+        [argumentCount, arguments](int& argumentIndex, std::string_view optionName)
     {
-        throw std::invalid_argument("Usage: fireEngineTutorial [--benchmark positive-instances "
-                                    "[--direct-primary] "
-                                    "[--recording-threads count] | "
-                                    "--frames positive-count [--recreate-every-frame] | "
-                                    "--smoke scenario [--recording-threads count]]");
+        if (argumentIndex + 1 >= argumentCount ||
+            std::string_view{arguments[argumentIndex + 1]}.starts_with("--"))
+        {
+            throw std::invalid_argument{std::string{optionName} + " requires a value"};
+        }
+        return std::string_view{arguments[++argumentIndex]};
+    };
+
+    for (int argumentIndex = 1; argumentIndex < argumentCount; ++argumentIndex)
+    {
+        const std::string_view option{arguments[argumentIndex]};
+        if (option == "--benchmark")
+        {
+            selectMode(RunMode::eBenchmark, option);
+            const std::uint64_t instanceCount =
+                parsePositiveInteger(requireValue(argumentIndex, option), option);
+            if (instanceCount > std::numeric_limits<std::size_t>::max())
+            {
+                throw std::invalid_argument(
+                    "--benchmark instance count exceeds this platform's limit");
+            }
+            options.benchmarkInstanceCount = static_cast<std::size_t>(instanceCount);
+        }
+        else if (option == "--frames")
+        {
+            selectMode(RunMode::eFrames, option);
+            options.frameLimit = parsePositiveInteger(requireValue(argumentIndex, option), option);
+        }
+        else if (option == "--smoke")
+        {
+            selectMode(RunMode::eSmoke, option);
+            const std::string_view scenario = requireValue(argumentIndex, option);
+            const auto definition =
+                std::ranges::find(kSmokeDefinitions, scenario, &SmokeDefinition::name);
+            if (definition == kSmokeDefinitions.end())
+            {
+                std::string requirement{"--smoke requires one of:"};
+                for (const SmokeDefinition& candidate : kSmokeDefinitions)
+                {
+                    requirement.append(" ").append(candidate.name);
+                }
+                throw std::invalid_argument{requirement};
+            }
+            options.frameLimit = definition->frameLimit;
+            options.reprepareAfterFrame = definition->reprepareAfterFrame;
+            options.smokeScenario = definition->scenario;
+            options.recreateEveryFrame = definition->recreateEveryFrame;
+        }
+        else if (option == "--direct-primary")
+        {
+            if (directPrimarySeen)
+            {
+                throw std::invalid_argument("Repeated option: --direct-primary");
+            }
+            directPrimarySeen = true;
+            options.recordDirectly = true;
+        }
+        else if (option == "--recreate-every-frame")
+        {
+            if (recreateEveryFrameSeen)
+            {
+                throw std::invalid_argument("Repeated option: --recreate-every-frame");
+            }
+            recreateEveryFrameSeen = true;
+            options.recreateEveryFrame = true;
+        }
+        else if (option == "--recording-threads")
+        {
+            if (recordingThreadsSeen)
+            {
+                throw std::invalid_argument("Repeated option: --recording-threads");
+            }
+            recordingThreadsSeen = true;
+            options.forcedRecordingThreads =
+                parseRecordingThreadCount(requireValue(argumentIndex, option));
+        }
+        else
+        {
+            throw std::invalid_argument{"Unknown option: " + std::string{option}};
+        }
     }
 
-    const std::uint64_t value = parsePositiveInteger(arguments[2], "--frames");
-    return {
-        .frameLimit = value,
-        .reprepareAfterFrame = std::nullopt,
-        .benchmarkInstanceCount = std::nullopt,
-        .smokeScenario = SmokeScenario::eNone,
-        .recreateEveryFrame = argumentCount == 4,
-        .recordDirectly = false,
-        .forcedRecordingThreads = std::nullopt,
-    };
+    if (options.recordDirectly && mode != RunMode::eBenchmark)
+    {
+        throw std::invalid_argument("--direct-primary requires --benchmark");
+    }
+    if (recreateEveryFrameSeen && mode != RunMode::eFrames)
+    {
+        throw std::invalid_argument("--recreate-every-frame requires --frames");
+    }
+    if (recordingThreadsSeen && mode != RunMode::eBenchmark && mode != RunMode::eSmoke)
+    {
+        throw std::invalid_argument("--recording-threads requires --benchmark or --smoke");
+    }
+    // The direct control records no secondary at all, so a split request
+    // there would silently have no effect.
+    if (options.recordDirectly && options.forcedRecordingThreads.value_or(1) > 1)
+    {
+        throw std::invalid_argument(
+            "--direct-primary records no secondary command buffer, so it cannot be combined "
+            "with more than one recording thread");
+    }
+    return options;
+}
+catch (const std::invalid_argument& error)
+{
+    throw std::invalid_argument{std::string{error.what()} + '\n' + std::string{kCommandLineUsage}};
 }
 
 [[nodiscard]] std::size_t parseRecordingThreadCount(std::string_view text)

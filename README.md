@@ -44,6 +44,8 @@ benchmark correctness run. The four smoke paths can be selected directly with
 `--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`, or
 `--smoke resize`.
 
+Options belonging to the same mode may be supplied in any order.
+
 ```sh
 ctest --preset default
 ```
