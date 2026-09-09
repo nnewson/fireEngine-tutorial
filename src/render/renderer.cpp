@@ -1,11 +1,13 @@
 #include <fire_engine/render/renderer.hpp>
 
 #include <fire_engine/core/log.hpp>
+#include <fire_engine/graphics/detail/frame_capture.hpp>
 #include <fire_engine/graphics/render_assets.hpp>
 #include <fire_engine/graphics/render_preparation.hpp>
 #include <fire_engine/platform/glfw.hpp>
 #include <fire_engine/platform/window.hpp>
 #include <fire_engine/render/detail/allocator.hpp>
+#include <fire_engine/render/detail/capture_format_mapping.hpp>
 #include <fire_engine/render/detail/compiled_resource_graph.hpp>
 #include <fire_engine/render/detail/compiled_resources.hpp>
 #include <fire_engine/render/detail/depth_buffer.hpp>
@@ -15,6 +17,7 @@
 #include <fire_engine/render/detail/frame_slot.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
 #include <fire_engine/render/detail/pipeline.hpp>
+#include <fire_engine/render/detail/readback_buffer.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
 #include <fire_engine/render/detail/recording_input.hpp>
 #include <fire_engine/render/detail/resource_compiler.hpp>
@@ -28,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -109,6 +113,16 @@ struct FrameResources final
         secondaries; ///< One recording context per participant.
 };
 
+/** @brief Immutable image-copy metadata captured with one selected attempt. */
+struct CaptureAttempt final
+{
+    vk::Extent2D extent;                 ///< Swapchain dimensions recorded by the copy.
+    vk::Format imageFormat;              ///< Vulkan format recorded by the copy.
+    detail::CaptureFormat captureFormat; ///< Matching byte conversion selected before acquire.
+    std::size_t rowPitch = 0;            ///< Tightly packed copy row in bytes.
+    std::size_t byteCount = 0;           ///< Complete tightly packed image size.
+};
+
 /** @brief Replaceable swapchain, attachments, pipeline, and presentation completion state. */
 class PresentationState final
 {
@@ -118,10 +132,12 @@ public:
      * @param device Device and queues used for rendering and presentation.
      * @param allocator VMA owner used for the depth attachment.
      * @param framebufferExtent Drawable size used to select the swapchain extent.
+     * @param captureEnabled Whether presentable images must support readback.
      * @param oldSwapchain Previous swapchain offered for implementation reuse.
      */
     PresentationState(const detail::Device& device, const detail::MemoryAllocator& allocator,
-                      FramebufferExtent framebufferExtent, vk::SwapchainKHR oldSwapchain = nullptr);
+                      FramebufferExtent framebufferExtent, bool captureEnabled,
+                      vk::SwapchainKHR oldSwapchain = nullptr);
 
     /** @brief Returns the owned swapchain. @return Presentation images and semaphores. */
     [[nodiscard]] const detail::Swapchain& swapchain() const noexcept;
@@ -172,6 +188,15 @@ private:
 };
 
 /* --- File-local function declarations --- */
+
+/**
+ * @brief Validates and adopts an optional one-shot capture request.
+ * @param request Application-owned request moved into renderer lifetime.
+ * @return Valid request, or no value when capture is disabled.
+ * @throws std::invalid_argument if an enabled request is incomplete.
+ */
+[[nodiscard]] std::optional<FrameCaptureRequest>
+validatedCaptureRequest(std::optional<FrameCaptureRequest> request);
 
 [[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept;
 
@@ -305,36 +330,45 @@ public:
     /** @brief Describes the selected Vulkan and presentation state. @return Public summary. */
     [[nodiscard]] RendererInfo info() const;
 
+    /** @brief Reports whether a requested one-shot capture committed. @return Completion state. */
+    [[nodiscard]] bool captureComplete() const noexcept;
+
 private:
     /**
      * @brief Records the complete command-buffer sequence for one acquired image.
      * @param frameSlotIndex Cycled submission slot whose command buffers are reusable.
      * @param imageIndex Acquired swapchain-image index.
      * @param input Compiler-produced immutable recording input.
+     * @param captureAttempt Selected readback copy, or null for ordinary rendering.
      * @param timings Optional output receiving the serial and secondary recording phases.
      */
     void recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                        const detail::RecordingInput& input, RendererCpuTimings* timings);
+                        const detail::RecordingInput& input, const CaptureAttempt* captureAttempt,
+                        RendererCpuTimings* timings);
 
     /**
      * @brief Records inherited draws and executes them from one primary geometry pass.
      * @param frameSlotIndex Cycled submission slot owning this frame's recording contexts.
      * @param imageIndex Acquired swapchain-image index.
      * @param input Compiler-produced immutable recording input.
+     * @param captureAttempt Selected readback copy, or null for ordinary rendering.
      * @param timings Optional output receiving both command-buffer recording phases.
      */
     void recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                 const detail::RecordingInput& input, RendererCpuTimings* timings);
+                                 const detail::RecordingInput& input,
+                                 const CaptureAttempt* captureAttempt, RendererCpuTimings* timings);
 
     /**
      * @brief Records the complete geometry pass directly into one primary command buffer.
      * @param frameSlotIndex Cycled submission slot owning this frame's recording context.
      * @param imageIndex Acquired swapchain-image index.
      * @param input Compiler-produced immutable recording input.
+     * @param captureAttempt Selected readback copy, or null for ordinary rendering.
      * @param timings Optional output receiving the direct primary recording phase.
      */
     void recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                              const detail::RecordingInput& input, RendererCpuTimings* timings);
+                              const detail::RecordingInput& input,
+                              const CaptureAttempt* captureAttempt, RendererCpuTimings* timings);
 
     /**
      * @brief Begins a primary command buffer and its geometry rendering instance.
@@ -351,9 +385,10 @@ private:
      * @brief Ends the geometry instance and records the primary command-buffer suffix.
      * @param commandBuffer Primary command buffer receiving the frame suffix.
      * @param imageIndex Acquired swapchain-image index transitioned for presentation.
+     * @param captureAttempt Selected readback copy, or null for an attachment-to-present suffix.
      */
-    void endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
-                             std::uint32_t imageIndex) const;
+    void endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer, std::uint32_t imageIndex,
+                             const CaptureAttempt* captureAttempt) const;
 
     /**
      * @brief Orders acquisition before the transition to color-attachment use.
@@ -398,6 +433,33 @@ private:
     void transitionToPresent(const vk::raii::CommandBuffer& commandBuffer,
                              std::uint32_t imageIndex) const;
 
+    /**
+     * @brief Transitions and copies one rendered image into the readback allocation.
+     * @param commandBuffer Primary command buffer receiving the capture suffix.
+     * @param imageIndex Acquired swapchain-image index copied before presentation.
+     * @param attempt Extent and tightly packed readback layout recorded for this attempt.
+     */
+    void recordCapture(const vk::raii::CommandBuffer& commandBuffer, std::uint32_t imageIndex,
+                       const CaptureAttempt& attempt) const;
+
+    /**
+     * @brief Allocates readback storage and snapshots the current presentation description.
+     * @return Metadata for recording and decoding the selected attempt.
+     */
+    [[nodiscard]] CaptureAttempt prepareCaptureAttempt();
+
+    /**
+     * @brief Waits for one submitted slot before host access to its readback bytes.
+     * @param frameSlot Slot whose submission fence was signaled by the capture copy.
+     */
+    void waitForCaptureSubmission(const detail::FrameSlot& frameSlot) const;
+
+    /**
+     * @brief Invalidates, converts, and writes one successfully presented capture.
+     * @param attempt Extent and format snapshot used when the copy was recorded.
+     */
+    void commitCapture(const CaptureAttempt& attempt);
+
     // Reverse destruction keeps every allocation ahead of its VMA and Vulkan
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
@@ -405,15 +467,20 @@ private:
     CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
     /// Diagnostic override, or unset when the workload selects the participant count.
     std::optional<std::size_t> forcedSecondaryRecordingThreadCount_;
+    std::optional<FrameCaptureRequest> captureRequest_; ///< Owned one-shot diagnostic request.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
     detail::ResourceCompiler resourceCompiler_; ///< Dedicated setup-time upload context.
+    std::unique_ptr<detail::ReadbackBuffer> readbackBuffer_; ///< Lazy one-shot capture storage.
 
     // Presentation-dependent state replaced as one ownership group.
     std::unique_ptr<PresentationState> presentation_; ///< Swapchain-compatible resources.
 
     std::array<FrameResources, kFrameSlotCount> frames_; ///< Presentation-independent slot state.
-    std::size_t nextFrameSlotIndex_ = 0; ///< Slot selected independently of acquired images.
+    std::size_t nextFrameSlotIndex_ = 0;    ///< Slot selected independently of acquired images.
+    std::uint64_t presentedFrameCount_ = 0; ///< Successful presentations seen by capture logic.
+    std::uint64_t presentationRecreationCount_ = 0; ///< Completed presentation replacements.
+    bool captureComplete_ = false; ///< Whether the configured PNG committed successfully.
 
     // Prepared state compiled from the current scene dependencies.
     RenderPreparation renderPreparation_;           ///< Vulkan-free validation and plan cache.
@@ -431,7 +498,8 @@ private:
 
 Renderer::Renderer(const Glfw& glfw, const Window& window, const std::string& applicationName,
                    RendererConfiguration configuration)
-    : implementation_{std::make_unique<Impl>(glfw, window, applicationName, configuration)}
+    : implementation_{
+          std::make_unique<Impl>(glfw, window, applicationName, std::move(configuration))}
 {
 }
 
@@ -453,6 +521,11 @@ bool Renderer::recreatePresentation(FramebufferExtent framebufferExtent)
     return implementation_->recreatePresentation(framebufferExtent);
 }
 
+bool Renderer::captureComplete() const noexcept
+{
+    return implementation_->captureComplete();
+}
+
 void Renderer::waitIdle()
 {
     implementation_->waitIdle();
@@ -470,11 +543,14 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
                      RendererConfiguration configuration)
     : commandRecordingMode_{configuration.commandRecordingMode},
       forcedSecondaryRecordingThreadCount_{configuration.forcedSecondaryRecordingThreadCount},
+      // Validate the Vulkan-free request before constructing the device and
+      // capture-enabled swapchain.
+      captureRequest_{validatedCaptureRequest(std::move(configuration.captureRequest))},
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
-      presentation_{
-          std::make_unique<PresentationState>(device_, allocator_, window.framebufferExtent())},
+      presentation_{std::make_unique<PresentationState>(
+          device_, allocator_, window.framebufferExtent(), captureRequest_.has_value())},
       // Frame storage depends on the presentation extent sampled here, so the
       // presentation owner must be constructed before the submission slots.
       // Identity is only valid initialization; drawFrame writes the sampled
@@ -587,6 +663,14 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     {
         throw std::logic_error("Renderer::prepare must be called before drawFrame");
     }
+    std::optional<CaptureAttempt> captureAttempt;
+    if (captureRequest_.has_value() && !captureComplete_ &&
+        presentedFrameCount_ + 1 == captureRequest_->frameOrdinal)
+    {
+        // Allocation and format validation precede acquisition. A failure
+        // therefore cannot abandon a signaled image-available semaphore.
+        captureAttempt.emplace(prepareCaptureAttempt());
+    }
     const std::size_t frameSlotIndex = nextFrameSlotIndex_;
     FrameResources& frame = frames_[frameSlotIndex];
     detail::FrameSlot& frameSlot = frame.slot;
@@ -654,7 +738,8 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->coordinatorCommandPoolReset};
         frame.coordinator.resetCommands();
     }
-    recordCommands(frameSlotIndex, imageIndex, recordingInput, timings);
+    recordCommands(frameSlotIndex, imageIndex, recordingInput,
+                   captureAttempt.has_value() ? &*captureAttempt : nullptr, timings);
     if (timings != nullptr)
     {
         timings->commandPoolReset =
@@ -683,13 +768,30 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
             .pWaitSemaphoreInfos = &waitInfo,
             .commandBufferInfoCount = 1,
             .pCommandBufferInfos = &commandInfo,
-            .signalSemaphoreInfoCount = 1,
-            .pSignalSemaphoreInfos = &signalInfo,
+            // Capture retires this complete submission on the host before
+            // presentation. Do not signal a binary semaphore that the capture
+            // presentation will not consume; it would remain signaled when
+            // this swapchain image is reused.
+            .signalSemaphoreInfoCount = captureAttempt.has_value() ? 0U : 1U,
+            .pSignalSemaphoreInfos = captureAttempt.has_value() ? nullptr : &signalInfo,
         };
         device_.graphicsQueue().submit2(submitInfo, *frameSlot.frameFinished());
     }
     frameSlot.markWorkPending();
     nextFrameSlotIndex_ = (frameSlotIndex + 1) % kFrameSlotCount;
+    if (captureAttempt.has_value())
+    {
+        // Capture is a one-shot diagnostic, so retire the complete submission
+        // before enqueueing presentation. This host wait guarantees that the
+        // copy and final present transition have completed. Ordinary frames
+        // retain their presentation-semaphore dependency.
+        //
+        // KosmicKrisp's technical-preview driver stalled when presentation
+        // waited on a semaphore whose signal covered the capture transfer.
+        // Re-test that GPU-side path when a release driver is available; this
+        // bounded diagnostic path deliberately favours portability over overlap.
+        waitForCaptureSubmission(frameSlot);
+    }
 
     const vk::Semaphore renderFinished = *presentation_->swapchain().renderFinished(imageIndex);
     const vk::SwapchainKHR swapchain = *presentation_->swapchain().handle();
@@ -700,8 +802,10 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     };
     const vk::PresentInfoKHR presentInfo{
         .pNext = &presentFenceInfo,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &renderFinished,
+        // The capture submission was retired on the host before this call.
+        // Ordinary frames retain the GPU-side semaphore dependency.
+        .waitSemaphoreCount = captureAttempt.has_value() ? 0U : 1U,
+        .pWaitSemaphores = captureAttempt.has_value() ? nullptr : &renderFinished,
         .swapchainCount = 1,
         .pSwapchains = &swapchain,
         .pImageIndices = &imageIndex,
@@ -720,7 +824,15 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     {
         // Out-of-date still enqueues the presentation operation and its fence.
         presentation_->markPresentSubmitted(imageIndex);
+        // A selected capture was already retired before presentation, but this
+        // ordinal did not present and is therefore discarded and retried.
         return RenderResult::eNotPresented;
+    }
+
+    ++presentedFrameCount_;
+    if (captureAttempt.has_value())
+    {
+        commitCapture(*captureAttempt);
     }
 
     return swapchainIsSuboptimal ? RenderResult::ePresentedSuboptimal : RenderResult::ePresented;
@@ -769,10 +881,16 @@ bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
     // released the old swapchain and its binary wait semaphores.
     waitIdle();
     const vk::SwapchainKHR oldSwapchain = *presentation_->swapchain().handle();
-    auto replacement =
-        std::make_unique<PresentationState>(device_, allocator_, framebufferExtent, oldSwapchain);
+    auto replacement = std::make_unique<PresentationState>(
+        device_, allocator_, framebufferExtent, captureRequest_.has_value(), oldSwapchain);
     presentation_ = std::move(replacement);
+    ++presentationRecreationCount_;
     return true;
+}
+
+bool Renderer::Impl::captureComplete() const noexcept
+{
+    return captureComplete_;
 }
 
 RendererInfo Renderer::Impl::info() const
@@ -799,6 +917,7 @@ RendererInfo Renderer::Impl::info() const
 
 void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                     const detail::RecordingInput& input,
+                                    const CaptureAttempt* captureAttempt,
                                     RendererCpuTimings* timings)
 {
     if (commandRecordingMode_ == CommandRecordingMode::eDirectPrimary)
@@ -825,14 +944,15 @@ void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t im
             timings->workerResetRegionSpan = elapsed;
             timings->workerRegionCriticalPath = elapsed;
         }
-        recordDirectCommands(frameSlotIndex, imageIndex, input, timings);
+        recordDirectCommands(frameSlotIndex, imageIndex, input, captureAttempt, timings);
         return;
     }
-    recordSecondaryCommands(frameSlotIndex, imageIndex, input, timings);
+    recordSecondaryCommands(frameSlotIndex, imageIndex, input, captureAttempt, timings);
 }
 
 void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                              const detail::RecordingInput& input,
+                                             const CaptureAttempt* captureAttempt,
                                              RendererCpuTimings* timings)
 {
     const FrameResources& frame = frames_[frameSlotIndex];
@@ -905,12 +1025,13 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
-        endPrimaryRecording(primaryCommandBuffer, imageIndex);
+        endPrimaryRecording(primaryCommandBuffer, imageIndex, captureAttempt);
     }
 }
 
 void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
                                           const detail::RecordingInput& input,
+                                          const CaptureAttempt* captureAttempt,
                                           RendererCpuTimings* timings)
 {
     CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
@@ -919,7 +1040,7 @@ void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint3
     beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex, {});
     detail::DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer, input.state());
     recordDraws(primaryCommandBuffer, input.state(), input.draws(), std::move(bindingState));
-    endPrimaryRecording(primaryCommandBuffer, imageIndex);
+    endPrimaryRecording(primaryCommandBuffer, imageIndex, captureAttempt);
 }
 
 void Renderer::Impl::beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
@@ -936,10 +1057,18 @@ void Renderer::Impl::beginPrimaryRecording(const vk::raii::CommandBuffer& comman
 }
 
 void Renderer::Impl::endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
-                                         std::uint32_t imageIndex) const
+                                         std::uint32_t imageIndex,
+                                         const CaptureAttempt* captureAttempt) const
 {
     commandBuffer.endRendering();
-    transitionToPresent(commandBuffer, imageIndex);
+    if (captureAttempt == nullptr)
+    {
+        transitionToPresent(commandBuffer, imageIndex);
+    }
+    else
+    {
+        recordCapture(commandBuffer, imageIndex, *captureAttempt);
+    }
     commandBuffer.end();
 }
 
@@ -1055,22 +1184,181 @@ void Renderer::Impl::transitionToPresent(const vk::raii::CommandBuffer& commandB
     commandBuffer.pipelineBarrier2(endDependency);
 }
 
+void Renderer::Impl::recordCapture(const vk::raii::CommandBuffer& commandBuffer,
+                                   std::uint32_t imageIndex, const CaptureAttempt& attempt) const
+{
+    assert(readbackBuffer_ != nullptr);
+    assert(attempt.extent == presentation_->swapchain().extent());
+    assert(attempt.imageFormat == presentation_->swapchain().imageFormat());
+
+    const vk::ImageMemoryBarrier2 toTransfer{
+        .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+        .oldLayout = vk::ImageLayout::eAttachmentOptimal,
+        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = presentation_->swapchain().image(imageIndex),
+        .subresourceRange = detail::kColorSubresourceRange,
+    };
+    const vk::DependencyInfo transferDependency{
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &toTransfer,
+    };
+    commandBuffer.pipelineBarrier2(transferDependency);
+
+    const vk::BufferImageCopy2 copyRegion{
+        .bufferOffset = 0,
+        // Zero selects tightly packed rows for image-to-buffer copies.
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource =
+            {
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        .imageOffset = {},
+        .imageExtent = {.width = attempt.extent.width, .height = attempt.extent.height, .depth = 1},
+    };
+    const vk::CopyImageToBufferInfo2 copyInfo{
+        .srcImage = presentation_->swapchain().image(imageIndex),
+        .srcImageLayout = vk::ImageLayout::eTransferSrcOptimal,
+        .dstBuffer = readbackBuffer_->handle(),
+        .regionCount = 1,
+        .pRegions = &copyRegion,
+    };
+    commandBuffer.copyImageToBuffer2(copyInfo);
+
+    const vk::ImageMemoryBarrier2 toPresent{
+        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+        .dstStageMask = vk::PipelineStageFlagBits2::eNone,
+        .dstAccessMask = vk::AccessFlagBits2::eNone,
+        .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+        .newLayout = vk::ImageLayout::ePresentSrcKHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = presentation_->swapchain().image(imageIndex),
+        .subresourceRange = detail::kColorSubresourceRange,
+    };
+    const vk::DependencyInfo presentDependency{
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &toPresent,
+    };
+    commandBuffer.pipelineBarrier2(presentDependency);
+}
+
+CaptureAttempt Renderer::Impl::prepareCaptureAttempt()
+{
+    constexpr std::size_t kBytesPerPixel = 4;
+    const detail::Swapchain& swapchain = presentation_->swapchain();
+    const vk::Extent2D extent = swapchain.extent();
+    const std::size_t width = extent.width;
+    if (extent.width == 0 || extent.height == 0 ||
+        width > std::numeric_limits<std::size_t>::max() / kBytesPerPixel)
+    {
+        throw std::runtime_error("The capture extent cannot be represented as RGBA8 rows");
+    }
+    const std::optional<detail::CaptureFormat> captureFormat =
+        detail::captureFormatFor(swapchain.imageFormat());
+    if (!captureFormat.has_value())
+    {
+        throw std::runtime_error("Frame capture requires an RGBA8 or BGRA8 sRGB swapchain format");
+    }
+
+    const std::size_t rowPitch = width * kBytesPerPixel;
+    const std::size_t byteCount = detail::captureByteSize(extent.height, rowPitch);
+    if (byteCount == std::numeric_limits<std::size_t>::max() ||
+        byteCount > std::numeric_limits<vk::DeviceSize>::max())
+    {
+        throw std::runtime_error("The capture extent exceeds the readback address space");
+    }
+    if (readbackBuffer_ == nullptr || readbackBuffer_->size() != byteCount)
+    {
+        readbackBuffer_ = std::make_unique<detail::ReadbackBuffer>(allocator_, byteCount);
+    }
+    return {
+        .extent = extent,
+        .imageFormat = swapchain.imageFormat(),
+        .captureFormat = *captureFormat,
+        .rowPitch = rowPitch,
+        .byteCount = byteCount,
+    };
+}
+
+void Renderer::Impl::waitForCaptureSubmission(const detail::FrameSlot& frameSlot) const
+{
+    const vk::Result result = device_.logicalDevice().waitForFences(
+        *frameSlot.frameFinished(), vk::True, std::numeric_limits<std::uint64_t>::max());
+    if (result != vk::Result::eSuccess)
+    {
+        throw vk::SystemError{vk::make_error_code(result), "Waiting for frame capture completion"};
+    }
+}
+
+void Renderer::Impl::commitCapture(const CaptureAttempt& attempt)
+{
+    assert(captureRequest_.has_value());
+    assert(readbackBuffer_ != nullptr);
+    assert(presentedFrameCount_ == captureRequest_->frameOrdinal);
+
+    const std::span<const std::byte> mapped = readbackBuffer_->bytes(attempt.byteCount);
+    const std::vector<std::uint8_t> rgba =
+        detail::toRgba8(mapped, attempt.extent.width, attempt.extent.height, attempt.rowPitch,
+                        attempt.captureFormat);
+    if (rgba.empty())
+    {
+        throw std::runtime_error("The captured swapchain image could not be converted to RGBA8");
+    }
+    if (!detail::writeRgba8Png(captureRequest_->outputPath, rgba, attempt.extent.width,
+                               attempt.extent.height))
+    {
+        throw std::runtime_error("Writing the frame capture failed for '" +
+                                 captureRequest_->outputPath.string() + "'");
+    }
+
+    std::error_code fileError;
+    const bool isRegularFile =
+        std::filesystem::is_regular_file(captureRequest_->outputPath, fileError);
+    const std::uintmax_t fileSize =
+        isRegularFile ? std::filesystem::file_size(captureRequest_->outputPath, fileError) : 0;
+    if (fileError || !isRegularFile || fileSize == 0)
+    {
+        throw std::runtime_error("The frame capture did not produce a non-empty regular file at '" +
+                                 captureRequest_->outputPath.string() + "'");
+    }
+
+    fire_engine::log("Captured frame {} to {} ({}x{}, {}, {} presentation recreations).",
+                     captureRequest_->frameOrdinal, captureRequest_->outputPath.string(),
+                     attempt.extent.width, attempt.extent.height,
+                     vk::to_string(attempt.imageFormat), presentationRecreationCount_);
+    captureComplete_ = true;
+}
+
 namespace
 {
 /* --- File-local class member functions --- */
 
 PresentationState::PresentationState(const detail::Device& device,
                                      const detail::MemoryAllocator& allocator,
-                                     FramebufferExtent framebufferExtent,
+                                     FramebufferExtent framebufferExtent, bool captureEnabled,
                                      vk::SwapchainKHR oldSwapchain)
     : logicalDevice_{&device.logicalDevice()},
-      swapchain_{device, framebufferExtent, oldSwapchain},
+      swapchain_{device, framebufferExtent, captureEnabled, oldSwapchain},
       depthBuffers_{detail::DepthBuffer{device, allocator, swapchain_.extent()},
                     detail::DepthBuffer{device, allocator, swapchain_.extent()}},
       pipeline_{device, kScenePipelineDescription, swapchain_.imageFormat(),
                 depthBuffers_.front().format()},
       presentSubmitted_(swapchain_.imageCount(), 0)
 {
+    if (captureEnabled && !detail::captureFormatFor(swapchain_.imageFormat()).has_value())
+    {
+        throw std::runtime_error("Frame capture requires an RGBA8 or BGRA8 sRGB swapchain format");
+    }
     if (swapchain_.imageCount() == 0 ||
         swapchain_.imageViews().size() != swapchain_.images().size() ||
         swapchain_.renderFinished().size() != swapchain_.imageCount())
@@ -1137,6 +1425,17 @@ void PresentationState::waitForPresentations()
 }
 
 /* --- File-local functions --- */
+
+std::optional<FrameCaptureRequest>
+validatedCaptureRequest(std::optional<FrameCaptureRequest> request)
+{
+    if (request.has_value() && (request->outputPath.empty() || request->frameOrdinal == 0))
+    {
+        throw std::invalid_argument(
+            "A frame capture requires a non-empty path and positive frame ordinal");
+    }
+    return request;
+}
 
 /**
  * @brief Maps positive normalized-device Y upward in framebuffer space.

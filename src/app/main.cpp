@@ -47,7 +47,8 @@ constexpr float kSmokeAnimationStepSeconds = 0.8f;
 constexpr std::string_view kCommandLineUsage =
     "Usage: fireEngineTutorial [--benchmark positive-instances [--direct-primary] "
     "[--recording-threads count] | --frames positive-count [--recreate-every-frame] | "
-    "--smoke scenario [--recording-threads count]] (options may appear in any order)";
+    "--smoke scenario [--recording-threads count]] "
+    "[--capture path --capture-frame positive-ordinal] (options may appear in any order)";
 
 /** @brief Fixed application-owned camera used by every tutorial scenario. */
 constexpr fire_engine::Camera kTutorialCamera{
@@ -92,6 +93,7 @@ struct RunOptions
     bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
     /// Diagnostic override forcing a participant count, or unset to use the workload policy.
     std::optional<std::size_t> forcedRecordingThreads;
+    std::optional<fire_engine::FrameCaptureRequest> captureRequest; ///< Grouped one-shot capture.
 };
 
 /** @brief Data defining one named device-level integration scenario. */
@@ -221,6 +223,7 @@ try
                                     ? fire_engine::CommandRecordingMode::eDirectPrimary
                                     : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
         .forcedSecondaryRecordingThreadCount = options.forcedRecordingThreads,
+        .captureRequest = options.captureRequest,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
     if (options.smokeScenario == SmokeScenario::eResize &&
@@ -358,6 +361,11 @@ try
     // Together they make submitted and presentation resources safe to destroy.
     renderer.waitIdle();
 
+    if (options.captureRequest.has_value() && !renderer.captureComplete())
+    {
+        throw std::runtime_error("The requested frame capture did not complete");
+    }
+
     if (benchmark.has_value())
     {
         if (!benchmark->complete())
@@ -392,6 +400,10 @@ try
     bool directPrimarySeen = false;
     bool recreateEveryFrameSeen = false;
     bool recordingThreadsSeen = false;
+    bool captureSeen = false;
+    bool captureFrameSeen = false;
+    std::optional<std::filesystem::path> capturePath;
+    std::optional<std::uint64_t> captureFrame;
 
     const auto selectMode = [&mode](RunMode selectedMode, std::string_view optionName)
     {
@@ -485,6 +497,24 @@ try
             options.forcedRecordingThreads =
                 parseRecordingThreadCount(requireValue(argumentIndex, option));
         }
+        else if (option == "--capture")
+        {
+            if (captureSeen)
+            {
+                throw std::invalid_argument("Repeated option: --capture");
+            }
+            captureSeen = true;
+            capturePath = std::filesystem::path{requireValue(argumentIndex, option)};
+        }
+        else if (option == "--capture-frame")
+        {
+            if (captureFrameSeen)
+            {
+                throw std::invalid_argument("Repeated option: --capture-frame");
+            }
+            captureFrameSeen = true;
+            captureFrame = parsePositiveInteger(requireValue(argumentIndex, option), option);
+        }
         else
         {
             throw std::invalid_argument{"Unknown option: " + std::string{option}};
@@ -510,6 +540,31 @@ try
         throw std::invalid_argument(
             "--direct-primary records no secondary command buffer, so it cannot be combined "
             "with more than one recording thread");
+    }
+    if (capturePath.has_value() != captureFrame.has_value())
+    {
+        throw std::invalid_argument("--capture and --capture-frame must be supplied together");
+    }
+    if (capturePath.has_value())
+    {
+        if (mode == RunMode::eBenchmark)
+        {
+            throw std::invalid_argument("--capture cannot be combined with --benchmark");
+        }
+        if (mode != RunMode::eFrames && mode != RunMode::eSmoke)
+        {
+            throw std::invalid_argument("--capture requires --frames or --smoke");
+        }
+        // Mode validation above guarantees a positive bound. value_or(0)
+        // nevertheless fails closed if a future mode forgets to populate it.
+        if (*captureFrame > options.frameLimit.value_or(0))
+        {
+            throw std::invalid_argument("--capture-frame exceeds the requested frame limit");
+        }
+        options.captureRequest = fire_engine::FrameCaptureRequest{
+            .outputPath = std::move(*capturePath),
+            .frameOrdinal = *captureFrame,
+        };
     }
     return options;
 }

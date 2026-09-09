@@ -37,11 +37,21 @@ A positive frame limit remains available for quick validation:
 ./build/fireEngineTutorial --frames 1
 ```
 
-CTest runs the Vulkan-free Catch2 suite plus five bounded device scenarios:
+A one-shot diagnostic capture must be paired with a finite frame or smoke run.
+The one-based capture ordinal must not exceed that run's frame limit:
+
+```sh
+./build/fireEngineTutorial --frames 3 --capture frame.png --capture-frame 3
+```
+
+Capture does not shorten the requested run and cannot be combined with a
+performance benchmark.
+
+CTest runs the Vulkan-free Catch2 suite plus bounded device scenarios covering
 normal AnimatedCube animation, replacement after changed preparation inputs,
-an untextured fallback draw, repeated swapchain recreation, and a one-instance
-benchmark correctness run. The four smoke paths can be selected directly with
-`--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`, or
+an untextured fallback draw, repeated swapchain recreation, frame capture, and
+benchmark recording controls. The four smoke paths can be selected directly
+with `--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`, or
 `--smoke resize`.
 
 Options belonging to the same mode may be supplied in any order.

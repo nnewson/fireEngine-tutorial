@@ -8,6 +8,22 @@
 namespace fire_engine::detail
 {
 /** @cond INTERNAL */
+
+/**
+ * @brief Selects swapchain image usage without changing ordinary presentation.
+ * @param captureEnabled Whether the final image must support a readback copy.
+ * @return Color-attachment usage, plus transfer-source usage only for capture.
+ */
+[[nodiscard]] constexpr vk::ImageUsageFlags swapchainImageUsage(bool captureEnabled) noexcept
+{
+    vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eColorAttachment;
+    if (captureEnabled)
+    {
+        usage |= vk::ImageUsageFlagBits::eTransferSrc;
+    }
+    return usage;
+}
+
 /**
  * @brief Chooses a four-channel 8-bit sRGB format in the nonlinear sRGB color space.
  * @param formats Non-empty format and color-space pairs reported by the surface.
