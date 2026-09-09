@@ -38,7 +38,7 @@ createRenderFinishedSemaphores(const vk::raii::Device& device, std::size_t image
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-Swapchain::Swapchain(const Device& device, FramebufferExtent framebufferExtent,
+Swapchain::Swapchain(const Device& device, FramebufferExtent framebufferExtent, bool captureEnabled,
                      vk::SwapchainKHR oldSwapchain)
 {
     const SurfaceSupport support = querySurfaceSupport(device);
@@ -50,6 +50,12 @@ Swapchain::Swapchain(const Device& device, FramebufferExtent framebufferExtent,
                            vk::ImageUsageFlagBits::eColorAttachment))
     {
         throw std::runtime_error("The presentation surface does not support color attachments");
+    }
+    if (captureEnabled && !static_cast<bool>(support.capabilities.supportedUsageFlags &
+                                             vk::ImageUsageFlagBits::eTransferSrc))
+    {
+        throw std::runtime_error(
+            "The presentation surface does not support transfer-source capture");
     }
     const vk::SurfaceFormatKHR surfaceFormat = detail::chooseSurfaceFormat(support.formats);
     const vk::PresentModeKHR presentMode = detail::choosePresentMode(support.presentModes);
@@ -69,7 +75,7 @@ Swapchain::Swapchain(const Device& device, FramebufferExtent framebufferExtent,
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = imageExtent,
         .imageArrayLayers = 1,
-        .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+        .imageUsage = detail::swapchainImageUsage(captureEnabled),
         .imageSharingMode =
             usesSeparateQueueFamilies ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
         .queueFamilyIndexCount =

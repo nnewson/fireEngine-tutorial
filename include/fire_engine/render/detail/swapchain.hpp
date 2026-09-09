@@ -37,11 +37,12 @@ public:
      * @brief Creates a swapchain suited to the selected device and framebuffer hint.
      * @param device Device, surface, and queue families used by the swapchain.
      * @param framebufferExtent Drawable size used when the surface exposes a variable extent.
+     * @param captureEnabled Whether images must support transfer-source capture.
      * @param oldSwapchain Retired presentation state whose resources may be reused.
      * @throws std::runtime_error if the surface no longer supports presentation.
      * @throws vk::SystemError if swapchain, image-view, or semaphore creation fails.
      */
-    Swapchain(const Device& device, FramebufferExtent framebufferExtent,
+    Swapchain(const Device& device, FramebufferExtent framebufferExtent, bool captureEnabled,
               vk::SwapchainKHR oldSwapchain = nullptr);
 
     /**

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,6 +37,13 @@ inline constexpr std::size_t kMaxSecondaryRecordingThreads = 2;
 
 /* --- POD structs --- */
 
+/** @brief One-shot request for a presented frame to be written as a PNG. */
+struct FrameCaptureRequest
+{
+    std::filesystem::path outputPath; ///< Destination PNG path owned by the renderer.
+    std::uint64_t frameOrdinal = 0;   ///< One-based successfully presented frame to capture.
+};
+
 /** @brief Construction-time renderer choices that remain fixed for its lifetime. */
 struct RendererConfiguration
 {
@@ -44,6 +52,7 @@ struct RendererConfiguration
     /// Diagnostic override forcing a participant count, counting the coordinator itself.
     /// Unset selects the participant count from the workload, which is the production policy.
     std::optional<std::size_t> forcedSecondaryRecordingThreadCount;
+    std::optional<FrameCaptureRequest> captureRequest; ///< Optional one-shot diagnostic capture.
 };
 
 /** @brief Vulkan-free summary of the renderer selected for this window. */
@@ -156,6 +165,7 @@ public:
      * @param window Window used to create and size the presentation surface.
      * @param applicationName Name reported to the Vulkan runtime.
      * @param configuration Fixed command-recording choices for this renderer.
+     * @throws std::invalid_argument if an enabled capture request is incomplete.
      * @throws std::runtime_error if no suitable Vulkan configuration can be created.
      */
     Renderer(const Glfw& glfw, const Window& window, const std::string& applicationName,
@@ -206,6 +216,12 @@ public:
      * error. Prepared meshes, textures, and render objects remain unchanged.
      */
     [[nodiscard]] bool recreatePresentation(FramebufferExtent framebufferExtent);
+
+    /**
+     * @brief Reports whether the configured one-shot capture has been written successfully.
+     * @return true only after a requested capture has committed its PNG.
+     */
+    [[nodiscard]] bool captureComplete() const noexcept;
 
     /** @brief Waits for device and presentation work before resources are destroyed. */
     void waitIdle();

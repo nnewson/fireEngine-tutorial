@@ -11,6 +11,12 @@ namespace
 {
 namespace selection = fire_engine::detail;
 
+static_assert(selection::swapchainImageUsage(false) == vk::ImageUsageFlagBits::eColorAttachment);
+static_assert(static_cast<bool>(selection::swapchainImageUsage(true) &
+                                vk::ImageUsageFlagBits::eTransferSrc));
+static_assert(!static_cast<bool>(selection::swapchainImageUsage(false) &
+                                 vk::ImageUsageFlagBits::eTransferSrc));
+
 [[nodiscard]] vk::SurfaceCapabilitiesKHR variableExtentCapabilities()
 {
     vk::SurfaceCapabilitiesKHR capabilities{};

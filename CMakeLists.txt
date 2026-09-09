@@ -60,6 +60,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/allocator.cpp
     src/render/buffer.cpp
     src/render/camera.cpp
+    src/render/capture_format_mapping.cpp
     src/render/compiled_resources.cpp
     src/render/depth_buffer.cpp
     src/render/device.cpp
@@ -68,6 +69,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/image.cpp
     src/render/instance_support.cpp
     src/render/pipeline.cpp
+    src/render/readback_buffer.cpp
     src/render/recording_context.cpp
     src/render/recording_input.cpp
     src/render/renderer.cpp
@@ -235,6 +237,7 @@ add_executable(fireEngineTutorialTests
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
     tests/render/test_camera.cpp
+    tests/render/test_capture_format_mapping.cpp
     tests/render/test_draw_binding_state.cpp
     tests/render/test_recording_input.cpp
     tests/render/test_secondary_recording_worker.cpp
@@ -315,6 +318,12 @@ add_test(NAME fireEngineTutorialAutomaticRecordingCorrectness
 add_test(NAME fireEngineTutorialAutomaticSplitCorrectness
     COMMAND fireEngineTutorial --benchmark 10000
 )
+add_test(NAME fireEngineTutorialFrameCaptureCorrectness
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        -DOUTPUT_PATH=${CMAKE_CURRENT_BINARY_DIR}/capture-test/animated-cube.png
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_frame_capture.cmake
+)
 
 # These parser failures occur before GLFW or Vulkan initialization, so they
 # remain device-free even though they exercise the application executable.
@@ -383,6 +392,108 @@ add_test(NAME fireEngineTutorialDirectPrimarySplitRejected
         -DARGUMENT_5=1
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
 )
+add_test(NAME fireEngineTutorialIncompleteCaptureRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--capture and --capture-frame must be supplied together"
+        -DARGUMENT_COUNT=4
+        -DARGUMENT_1=--frames
+        -DARGUMENT_2=3
+        -DARGUMENT_3=--capture
+        -DARGUMENT_4=unused.png
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialRepeatedCaptureRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=Repeated option: --capture"
+        -DARGUMENT_COUNT=8
+        -DARGUMENT_1=--frames
+        -DARGUMENT_2=3
+        -DARGUMENT_3=--capture
+        -DARGUMENT_4=first.png
+        -DARGUMENT_5=--capture
+        -DARGUMENT_6=second.png
+        -DARGUMENT_7=--capture-frame
+        -DARGUMENT_8=1
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialZeroCaptureFrameRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--capture-frame requires a positive integer"
+        -DARGUMENT_COUNT=6
+        -DARGUMENT_1=--frames
+        -DARGUMENT_2=3
+        -DARGUMENT_3=--capture
+        -DARGUMENT_4=unused.png
+        -DARGUMENT_5=--capture-frame
+        -DARGUMENT_6=0
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialMalformedCaptureFrameRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--capture-frame requires a positive integer"
+        -DARGUMENT_COUNT=6
+        -DARGUMENT_1=--frames
+        -DARGUMENT_2=3
+        -DARGUMENT_3=--capture
+        -DARGUMENT_4=unused.png
+        -DARGUMENT_5=--capture-frame
+        -DARGUMENT_6=invalid
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialUnboundedCaptureRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--capture requires --frames or --smoke"
+        -DARGUMENT_COUNT=4
+        -DARGUMENT_1=--capture
+        -DARGUMENT_2=unused.png
+        -DARGUMENT_3=--capture-frame
+        -DARGUMENT_4=1
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialSmokeCaptureFrameOutOfRangeRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--capture-frame exceeds the requested frame limit"
+        -DARGUMENT_COUNT=6
+        -DARGUMENT_1=--smoke
+        -DARGUMENT_2=basic
+        -DARGUMENT_3=--capture
+        -DARGUMENT_4=unused.png
+        -DARGUMENT_5=--capture-frame
+        -DARGUMENT_6=4
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialFrameCaptureFrameOutOfRangeRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--capture-frame exceeds the requested frame limit"
+        -DARGUMENT_COUNT=6
+        -DARGUMENT_1=--frames
+        -DARGUMENT_2=2
+        -DARGUMENT_3=--capture
+        -DARGUMENT_4=unused.png
+        -DARGUMENT_5=--capture-frame
+        -DARGUMENT_6=3
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialBenchmarkCaptureRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--capture cannot be combined with --benchmark"
+        -DARGUMENT_COUNT=6
+        -DARGUMENT_1=--benchmark
+        -DARGUMENT_2=1
+        -DARGUMENT_3=--capture
+        -DARGUMENT_4=unused.png
+        -DARGUMENT_5=--capture-frame
+        -DARGUMENT_6=1
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
 set_tests_properties(
     fireEngineTutorialRepeatedOptionRejected
     fireEngineTutorialMissingOptionValueRejected
@@ -391,6 +502,14 @@ set_tests_properties(
     fireEngineTutorialRecreationWithoutFramesRejected
     fireEngineTutorialRecordingThreadsWithoutModeRejected
     fireEngineTutorialDirectPrimarySplitRejected
+    fireEngineTutorialIncompleteCaptureRejected
+    fireEngineTutorialRepeatedCaptureRejected
+    fireEngineTutorialZeroCaptureFrameRejected
+    fireEngineTutorialMalformedCaptureFrameRejected
+    fireEngineTutorialUnboundedCaptureRejected
+    fireEngineTutorialSmokeCaptureFrameOutOfRangeRejected
+    fireEngineTutorialFrameCaptureFrameOutOfRangeRejected
+    fireEngineTutorialBenchmarkCaptureRejected
     PROPERTIES
         LABELS device-free
         TIMEOUT 5
@@ -425,6 +544,13 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND fireEngineTutorial --smoke prepare-twice --recording-threads 2
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
+    add_test(NAME fireEngineTutorialFrameCaptureSyncValidation
+        COMMAND ${CMAKE_COMMAND}
+            -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+            -DOUTPUT_PATH=${CMAKE_CURRENT_BINARY_DIR}/capture-test/animated-cube-sync.png
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_frame_capture.cmake
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
     # The ordinary benchmark controls check CLI/reporting and standard validation;
     # these separate runs deliberately enable synchronization checks.
     set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
@@ -433,6 +559,7 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         fireEngineTutorialDirectPrimarySyncValidation
         fireEngineTutorialSplitRecordingSyncValidation
         fireEngineTutorialSplitRecordingMixedResourceSyncValidation
+        fireEngineTutorialFrameCaptureSyncValidation
     )
     set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
         ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
@@ -455,6 +582,7 @@ set_tests_properties(
     fireEngineTutorialSplitRecordingMixedResourceSmoke
     fireEngineTutorialAutomaticRecordingCorrectness
     fireEngineTutorialAutomaticSplitCorrectness
+    fireEngineTutorialFrameCaptureCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
