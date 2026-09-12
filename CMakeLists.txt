@@ -69,6 +69,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/image.cpp
     src/render/instance_support.cpp
     src/render/pipeline.cpp
+    src/render/presentation_state.cpp
     src/render/readback_buffer.cpp
     src/render/recording_context.cpp
     src/render/recording_input.cpp
