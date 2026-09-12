@@ -65,6 +65,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/depth_buffer.cpp
     src/render/device.cpp
     src/render/draw_binding_state.cpp
+    src/render/forward_frame_uniform_buffer.cpp
     src/render/frame_slot.cpp
     src/render/image.cpp
     src/render/instance_support.cpp
