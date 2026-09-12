@@ -472,25 +472,23 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
       resourceCompiler_{device_, allocator_},
       presentation_{std::make_unique<detail::PresentationState>(
           device_, allocator_, window.framebufferExtent(), captureRequest_.has_value())},
-      // Frame storage depends on the presentation extent sampled here, so the
-      // presentation owner must be constructed before the submission slots.
-      // Identity is only valid initialization; drawFrame writes the sampled
-      // camera after each slot retires and before that slot is submitted.
-      frames_{
-          detail::FrameResources{
-              .slot = detail::FrameSlot{device_, allocator_,
-                                        detail::FrameUniforms{.viewProjection = Mat4::identity()}},
-              .coordinator =
-                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-              .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
-                              detail::RecordingContext{device_, workerBufferKind()}}},
-          detail::FrameResources{
-              .slot = detail::FrameSlot{device_, allocator_,
-                                        detail::FrameUniforms{.viewProjection = Mat4::identity()}},
-              .coordinator =
-                  detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-              .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
-                              detail::RecordingContext{device_, workerBufferKind()}}}}
+      // Frame resources are presentation-independent. Their synchronization
+      // objects and recording contexts borrow the device, while their uniform
+      // storage borrows the allocator; both owners are declared earlier.
+      frames_{detail::FrameResources{
+                  .slot = detail::FrameSlot{device_},
+                  .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
+                  .coordinator =
+                      detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+                  .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
+                                  detail::RecordingContext{device_, workerBufferKind()}}},
+              detail::FrameResources{
+                  .slot = detail::FrameSlot{device_},
+                  .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
+                  .coordinator =
+                      detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+                  .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
+                                  detail::RecordingContext{device_, workerBufferKind()}}}}
 {
     if (forcedSecondaryRecordingThreadCount_.has_value() &&
         (*forcedSecondaryRecordingThreadCount_ == 0 ||
@@ -604,7 +602,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
         const detail::RecordingState recordingState{
             .pipeline = *presentation_->pipeline().pipeline(),
             .pipelineLayout = *presentation_->pipeline().pipelineLayout(),
-            .frameUniformBuffer = frameSlot.uniformBuffer().handle(),
+            .frameUniformBuffer = frame.forwardUniforms.handle(),
             .frameUniforms = {.viewProjection = cameraViewProjection(
                                   camera, static_cast<float>(extent.width) /
                                               static_cast<float>(extent.height))},
@@ -630,7 +628,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameUniformUpdate};
-        frameSlot.writeUniforms(recordingInput.state().frameUniforms);
+        frame.forwardUniforms.update(recordingInput.state().frameUniforms);
     }
 
     std::uint32_t imageIndex = 0;
