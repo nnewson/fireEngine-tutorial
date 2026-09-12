@@ -15,8 +15,8 @@ namespace
 /** @cond INTERNAL */
 /* --- File-local constants --- */
 
-/** @brief Vulkan-free mesh layout required by the tutorial scene pipeline. */
-constexpr PipelineDescription kScenePipelineDescription{};
+/** @brief Vulkan-free mesh layout required by the tutorial forward pipeline. */
+constexpr PipelineDescription kForwardPipelineDescription{};
 /** @endcond */
 } // namespace
 
@@ -30,8 +30,8 @@ PresentationState::PresentationState(const Device& device, const MemoryAllocator
       swapchain_{device, framebufferExtent, captureEnabled, oldSwapchain},
       depthBuffers_{DepthBuffer{device, allocator, swapchain_.extent()},
                     DepthBuffer{device, allocator, swapchain_.extent()}},
-      pipeline_{device, kScenePipelineDescription, swapchain_.imageFormat(),
-                depthBuffers_.front().format()},
+      forwardPipeline_{device, kForwardPipelineDescription, swapchain_.imageFormat(),
+                       depthBuffers_.front().format()},
       presentSubmitted_(swapchain_.imageCount(), 0)
 {
     if (captureEnabled && !captureFormatFor(swapchain_.imageFormat()).has_value())
@@ -63,9 +63,9 @@ const DepthBuffer& PresentationState::depthBuffer(std::size_t frameSlotIndex) co
     return depthBuffers_.at(frameSlotIndex);
 }
 
-const Pipeline& PresentationState::pipeline() const noexcept
+const ForwardPipeline& PresentationState::forwardPipeline() const noexcept
 {
-    return pipeline_;
+    return forwardPipeline_;
 }
 
 void PresentationState::preparePresentFence(std::size_t imageIndex)
