@@ -15,9 +15,16 @@ execute_process(
     ERROR_VARIABLE COMMAND_ERROR
 )
 string(CONCAT COMPLETE_OUTPUT "${COMMAND_OUTPUT}" "${COMMAND_ERROR}")
+message("${COMPLETE_OUTPUT}")
 
 if(NOT COMMAND_RESULT EQUAL 0)
     message(FATAL_ERROR "Capture command failed:\n${COMPLETE_OUTPUT}")
+endif()
+# The wrapper owns this check because it captures the child output. Echoing the
+# output above also lets CTest's FAIL_REGULAR_EXPRESSION enforce the same rule
+# independently; retain both guards deliberately.
+if(COMPLETE_OUTPUT MATCHES "Vulkan validation error:")
+    message(FATAL_ERROR "Capture command reported a Vulkan validation error")
 endif()
 if(NOT COMPLETE_OUTPUT MATCHES
    "Captured frame 3 to [^\n]* \\(([0-9]+)x([0-9]+), [^,]+, [0-9]+ presentation recreations\\)\\.")

@@ -70,3 +70,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Only track the README.md
+/*.md
+!/README.md
