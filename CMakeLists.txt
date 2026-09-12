@@ -318,11 +318,83 @@ add_test(NAME fireEngineTutorialAutomaticRecordingCorrectness
 add_test(NAME fireEngineTutorialAutomaticSplitCorrectness
     COMMAND fireEngineTutorial --benchmark 10000
 )
-add_test(NAME fireEngineTutorialFrameCaptureCorrectness
-    COMMAND ${CMAKE_COMMAND}
+
+# Keep capture registration and its Vulkan-device properties together. A new
+# scenario must not be able to omit validation rejection, serialization, or its
+# label by appearing in one manually maintained list but not another.
+function(fire_engine_add_capture_test)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "SYNC"
+        "NAME;MODE;MINIMUM_RECREATIONS;MAXIMUM_RECREATIONS;OUTPUT_PATH" ""
+    )
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "Unknown fire_engine_add_capture_test arguments: ${ARG_UNPARSED_ARGUMENTS}"
+        )
+    endif()
+    if("${ARG_NAME}" STREQUAL "" OR "${ARG_MODE}" STREQUAL "" OR
+       "${ARG_MINIMUM_RECREATIONS}" STREQUAL "" OR
+       "${ARG_OUTPUT_PATH}" STREQUAL "")
+        message(FATAL_ERROR
+            "Capture tests require NAME, MODE, MINIMUM_RECREATIONS, and OUTPUT_PATH"
+        )
+    endif()
+
+    set(CAPTURE_TEST_COMMAND
+        ${CMAKE_COMMAND}
         -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
-        -DOUTPUT_PATH=${CMAKE_CURRENT_BINARY_DIR}/capture-test/animated-cube.png
+        -DOUTPUT_PATH=${ARG_OUTPUT_PATH}
+        -DCAPTURE_MODE=${ARG_MODE}
+        -DMINIMUM_RECREATIONS=${ARG_MINIMUM_RECREATIONS}
+    )
+    if(NOT "${ARG_MAXIMUM_RECREATIONS}" STREQUAL "")
+        list(APPEND CAPTURE_TEST_COMMAND
+            -DMAXIMUM_RECREATIONS=${ARG_MAXIMUM_RECREATIONS}
+        )
+    endif()
+    list(APPEND CAPTURE_TEST_COMMAND
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_frame_capture.cmake
+    )
+
+    set(CAPTURE_TEST_CONFIGURATIONS)
+    if(ARG_SYNC AND CMAKE_CONFIGURATION_TYPES)
+        list(APPEND CAPTURE_TEST_CONFIGURATIONS CONFIGURATIONS Debug)
+    endif()
+    add_test(NAME ${ARG_NAME}
+        COMMAND ${CAPTURE_TEST_COMMAND}
+        ${CAPTURE_TEST_CONFIGURATIONS}
+    )
+    # Keep this CTest-side guard in addition to the wrapper's own rejection.
+    # Direct application tests rely on this property; wrapped capture tests
+    # expose their child output so both independent routes remain live.
+    set_tests_properties(${ARG_NAME} PROPERTIES
+        FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
+        LABELS vulkan-device
+        RESOURCE_LOCK fireEngineTutorialVulkan
+        TIMEOUT 30
+    )
+    if(ARG_SYNC)
+        set_tests_properties(${ARG_NAME} PROPERTIES
+            ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
+        )
+    endif()
+endfunction()
+
+fire_engine_add_capture_test(
+    NAME fireEngineTutorialFrameCaptureCorrectness
+    MODE smoke-basic
+    MINIMUM_RECREATIONS 0
+    MAXIMUM_RECREATIONS 0
+    OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR}/capture-test/animated-cube.png
+)
+# This structural capture uses wall-clock animation and deliberately asserts no
+# image hash. It proves readback remains enabled through at least the two
+# requested presentation replacements before frame three is captured; an
+# additional platform startup resize is permitted.
+fire_engine_add_capture_test(
+    NAME fireEngineTutorialFrameCaptureRecreationCorrectness
+    MODE recreate-every-frame
+    MINIMUM_RECREATIONS 2
+    OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR}/capture-test/recreated-frame.png
 )
 
 # These parser failures occur before GLFW or Vulkan initialization, so they
@@ -544,12 +616,20 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND fireEngineTutorial --smoke prepare-twice --recording-threads 2
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
-    add_test(NAME fireEngineTutorialFrameCaptureSyncValidation
-        COMMAND ${CMAKE_COMMAND}
-            -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
-            -DOUTPUT_PATH=${CMAKE_CURRENT_BINARY_DIR}/capture-test/animated-cube-sync.png
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/run_frame_capture.cmake
-        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    fire_engine_add_capture_test(
+        NAME fireEngineTutorialFrameCaptureSyncValidation
+        MODE smoke-basic
+        MINIMUM_RECREATIONS 0
+        MAXIMUM_RECREATIONS 0
+        OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR}/capture-test/animated-cube-sync.png
+        SYNC
+    )
+    fire_engine_add_capture_test(
+        NAME fireEngineTutorialFrameCaptureRecreationSyncValidation
+        MODE recreate-every-frame
+        MINIMUM_RECREATIONS 2
+        OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR}/capture-test/recreated-frame-sync.png
+        SYNC
     )
     # The ordinary benchmark controls check CLI/reporting and standard validation;
     # these separate runs deliberately enable synchronization checks.
@@ -559,7 +639,6 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         fireEngineTutorialDirectPrimarySyncValidation
         fireEngineTutorialSplitRecordingSyncValidation
         fireEngineTutorialSplitRecordingMixedResourceSyncValidation
-        fireEngineTutorialFrameCaptureSyncValidation
     )
     set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
         ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
@@ -582,7 +661,6 @@ set_tests_properties(
     fireEngineTutorialSplitRecordingMixedResourceSmoke
     fireEngineTutorialAutomaticRecordingCorrectness
     fireEngineTutorialAutomaticSplitCorrectness
-    fireEngineTutorialFrameCaptureCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
