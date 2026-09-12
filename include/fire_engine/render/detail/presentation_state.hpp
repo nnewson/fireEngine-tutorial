@@ -9,8 +9,8 @@
 
 #include <fire_engine/platform/framebuffer_extent.hpp>
 #include <fire_engine/render/detail/depth_buffer.hpp>
+#include <fire_engine/render/detail/forward_pipeline.hpp>
 #include <fire_engine/render/detail/frame_slot_count.hpp>
-#include <fire_engine/render/detail/pipeline.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 
 namespace fire_engine::detail
@@ -23,7 +23,9 @@ class MemoryAllocator;
 
 /* --- Classes --- */
 
-/** @brief Replaceable swapchain, attachments, pipeline, and presentation completion state. */
+/**
+ * @brief Replaceable swapchain, attachments, forward pipeline, and presentation completion state.
+ */
 class PresentationState final
 {
 public:
@@ -48,8 +50,8 @@ public:
      * @throws std::out_of_range if frameSlotIndex does not identify a submission slot.
      */
     [[nodiscard]] const DepthBuffer& depthBuffer(std::size_t frameSlotIndex) const;
-    /** @brief Returns the attachment-compatible graphics pipeline. @return Owned pipeline. */
-    [[nodiscard]] const Pipeline& pipeline() const noexcept;
+    /** @brief Returns the attachment-compatible forward pipeline. @return Owned pipeline. */
+    [[nodiscard]] const ForwardPipeline& forwardPipeline() const noexcept;
 
     /**
      * @brief Waits and resets an earlier presentation fence before its image reuses it.
@@ -74,15 +76,15 @@ public:
     void waitForPresentations();
 
 private:
-    // Reverse destruction releases fences and the pipeline before attachment
+    // Reverse destruction releases fences and the forward pipeline before attachment
     // resources, and releases the depth allocation before the swapchain.
     const vk::raii::Device* logicalDevice_ = nullptr; ///< Borrowed owner used for fence waits.
     Swapchain swapchain_; ///< Images, views, and per-image binary semaphores.
-    // Every entry selects the same device depth format. Pipeline creation and
-    // public reporting may therefore use the first entry's format.
+    // Every entry selects the same device depth format. Forward-pipeline
+    // creation and public reporting may therefore use the first entry's format.
     std::array<DepthBuffer, kFrameSlotCount>
-        depthBuffers_;  ///< Presentation-dependent attachment per submission slot.
-    Pipeline pipeline_; ///< Compatible color/depth graphics pipeline.
+        depthBuffers_;                ///< Presentation-dependent attachment per submission slot.
+    ForwardPipeline forwardPipeline_; ///< Compatible color/depth forward pipeline.
     std::vector<vk::raii::Fence> presentFences_; ///< Completion fence per image.
     std::vector<std::uint8_t> presentSubmitted_; ///< Whether each fence has pending work.
 };

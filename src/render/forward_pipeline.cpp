@@ -1,4 +1,4 @@
-#include <fire_engine/render/detail/pipeline.hpp>
+#include <fire_engine/render/detail/forward_pipeline.hpp>
 
 #include <fire_engine/graphics/vertex.hpp>
 #include <fire_engine/render/detail/device.hpp>
@@ -28,7 +28,7 @@ namespace
  * per module, and a pipeline stage selects one by name, so the two stages below
  * share a single file and a single read.
  */
-constexpr std::string_view kShaderPath = FIRE_ENGINE_SHADER_DIRECTORY "/scene.spv";
+constexpr std::string_view kForwardShaderPath = FIRE_ENGINE_SHADER_DIRECTORY "/forward.spv";
 
 // Slang rewrites an entry point to "main" when it compiles just one. The shader
 // target in CMakeLists.txt passes -fvk-use-entrypoint-name so the emitted SPIR-V
@@ -134,14 +134,14 @@ createPipelineLayout(const vk::raii::Device& device,
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-Pipeline::Pipeline(const Device& device, PipelineDescription description, vk::Format colorFormat,
-                   vk::Format depthFormat)
+ForwardPipeline::ForwardPipeline(const Device& device, PipelineDescription description,
+                                 vk::Format colorFormat, vk::Format depthFormat)
     : description_{description}
 {
     // Push descriptors allocate no descriptor sets. Vulkan no longer requires
     // this handle after pipeline-layout creation, but retaining it keeps the
     // construction relationship explicit and avoids the validation behavior
-    // described by Pipeline.
+    // described by ForwardPipeline.
     descriptorSetLayout_ = createPushDescriptorLayout(device.logicalDevice());
     pipelineLayout_ = createPipelineLayout(device.logicalDevice(), descriptorSetLayout_);
 
@@ -151,17 +151,17 @@ Pipeline::Pipeline(const Device& device, PipelineDescription description, vk::Fo
                                                description_, colorFormat, depthFormat);
 }
 
-const vk::raii::PipelineLayout& Pipeline::pipelineLayout() const noexcept
+const vk::raii::PipelineLayout& ForwardPipeline::pipelineLayout() const noexcept
 {
     return pipelineLayout_;
 }
 
-const vk::raii::Pipeline& Pipeline::pipeline() const noexcept
+const vk::raii::Pipeline& ForwardPipeline::pipeline() const noexcept
 {
     return pipeline_;
 }
 
-const PipelineDescription& Pipeline::description() const noexcept
+const PipelineDescription& ForwardPipeline::description() const noexcept
 {
     return description_;
 }
@@ -251,7 +251,7 @@ createPipelineLayout(const vk::raii::Device& device,
 }
 
 /**
- * @brief Creates the scene pipeline without a render pass or shader modules.
+ * @brief Creates the forward pipeline without a render pass or shader modules.
  * @param device Logical device that owns the pipeline.
  * @param pipelineLayout Layout containing the push-descriptor set zero.
  * @param description Vulkan-free vertex layout mapped into fixed pipeline state.
@@ -269,7 +269,7 @@ createPipelineLayout(const vk::raii::Device& device,
         compileVertexBinding(description.vertexLayout);
     const std::span<const vk::VertexInputAttributeDescription> vertexAttributes =
         compileVertexAttributes(description.vertexLayout);
-    const std::vector<std::uint32_t> shaderCode = detail::loadSpirv(kShaderPath);
+    const std::vector<std::uint32_t> shaderCode = detail::loadSpirv(kForwardShaderPath);
     const vk::ShaderModuleCreateInfo moduleInfo{
         .codeSize = shaderCode.size() * sizeof(std::uint32_t),
         .pCode = shaderCode.data(),

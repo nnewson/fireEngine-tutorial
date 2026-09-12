@@ -169,7 +169,7 @@ frame-uniform, sampled-image, and depth-image allocations. A Vulkan driver must
 still be installed on the machine and expose Vulkan 1.4, dynamic rendering,
 synchronization 2, push descriptors, maintenance5, swapchain presentation, and
 the KHR or equivalent EXT swapchain-maintenance path used for presentation
-fences. Pipeline creation reads the compiled `scene.spv` directly through
+fences. The forward pipeline reads the compiled `forward.spv` directly through
 maintenance5, so no `VkShaderModule` is created.
 
 Each event-loop iteration waits for the previous frame, acquires a swapchain
@@ -177,7 +177,7 @@ image, recycles the command pool, and records dynamic-rendering draws from the
 scene. The command buffer uses synchronization-2 barriers to discard prior
 attachment contents, clear color and depth, bind compiled mesh and texture
 resources, push the node transform and material factor, and transition the
-completed image for presentation. The Slang scene shader applies the current
+completed image for presentation. The Slang forward shader applies the current
 view-projection and samples the glTF base-color texture. `submit2` orders
 rendering after acquisition, then the presentation queue waits for the semaphore
 belonging to that acquired image.

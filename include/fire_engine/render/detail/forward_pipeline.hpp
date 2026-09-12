@@ -14,7 +14,7 @@ class Device;
 /* --- Classes --- */
 
 /**
- * @brief Owns a pipeline layout and dynamic-rendering graphics pipeline.
+ * @brief Owns the forward pipeline layout and dynamic-rendering graphics pipeline.
  *
  * The pipeline targets one swapchain color format and one depth format without
  * using a render pass. Its set-zero layout accepts a uniform buffer and sampled
@@ -25,11 +25,11 @@ class Device;
  * frame's view-projection matrix, while push constants carry each draw's world
  * transform and material color.
  */
-class Pipeline final
+class ForwardPipeline final
 {
 public:
     /**
-     * @brief Creates the pipeline layout and graphics pipeline.
+     * @brief Creates the forward pipeline layout and graphics pipeline.
      * @param device Logical device with dynamic rendering, push descriptors, and
      *               maintenance5 enabled.
      * @param description Vulkan-free vertex compatibility requirements.
@@ -38,20 +38,20 @@ public:
      * @throws std::runtime_error if the compiled shader cannot be loaded.
      * @throws vk::SystemError if Vulkan cannot create a pipeline object.
      */
-    Pipeline(const Device& device, PipelineDescription description, vk::Format colorFormat,
-             vk::Format depthFormat);
+    ForwardPipeline(const Device& device, PipelineDescription description, vk::Format colorFormat,
+                    vk::Format depthFormat);
 
     /** @brief Releases the pipeline, pipeline layout, and retained set layout in order. */
-    ~Pipeline() = default;
+    ~ForwardPipeline() = default;
 
     /// @brief Copy construction is disabled because Vulkan handles have unique ownership.
-    Pipeline(const Pipeline&) = delete;
+    ForwardPipeline(const ForwardPipeline&) = delete;
     /// @brief Copy assignment is disabled because Vulkan handles have unique ownership.
-    Pipeline& operator=(const Pipeline&) = delete;
+    ForwardPipeline& operator=(const ForwardPipeline&) = delete;
     /// @brief Move construction is disabled so the pipeline lifetime remains explicit.
-    Pipeline(Pipeline&&) = delete;
+    ForwardPipeline(ForwardPipeline&&) = delete;
     /// @brief Move assignment is disabled so the pipeline lifetime remains explicit.
-    Pipeline& operator=(Pipeline&&) = delete;
+    ForwardPipeline& operator=(ForwardPipeline&&) = delete;
 
     /**
      * @brief Returns the layout required by each push-descriptor write.
@@ -77,7 +77,7 @@ private:
     PipelineDescription description_; ///< Vertex layout compiled into pipeline state.
     vk::raii::DescriptorSetLayout descriptorSetLayout_{nullptr}; ///< Set-zero push layout.
     vk::raii::PipelineLayout pipelineLayout_{nullptr}; ///< Supplied to each push-descriptor write.
-    vk::raii::Pipeline pipeline_{nullptr};             ///< Dynamic-rendering graphics pipeline.
+    vk::raii::Pipeline pipeline_{nullptr};             ///< Dynamic-rendering forward pipeline.
 };
 /** @endcond */
 } // namespace fire_engine::detail

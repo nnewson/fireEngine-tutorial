@@ -17,7 +17,6 @@
 #include <fire_engine/render/detail/frame_resources.hpp>
 #include <fire_engine/render/detail/frame_slot.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
-#include <fire_engine/render/detail/pipeline.hpp>
 #include <fire_engine/render/detail/presentation_state.hpp>
 #include <fire_engine/render/detail/readback_buffer.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
@@ -551,7 +550,7 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& dr
     // Planning validates every CPU relationship before the first Vulkan
     // allocation, keeping malformed input failures deterministic and cheap.
     const RenderPreparationPlan& plan =
-        renderPreparation_.build(assets, drawList, presentation_->pipeline().description());
+        renderPreparation_.build(assets, drawList, presentation_->forwardPipeline().description());
     if (compiledGeneration_.has_value() && *compiledGeneration_ == renderPreparation_.generation())
     {
         return;
@@ -600,8 +599,8 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->recordingInputBuild};
         const vk::Extent2D extent = presentation_->swapchain().extent();
         const detail::RecordingState recordingState{
-            .pipeline = *presentation_->pipeline().pipeline(),
-            .pipelineLayout = *presentation_->pipeline().pipelineLayout(),
+            .pipeline = *presentation_->forwardPipeline().pipeline(),
+            .pipelineLayout = *presentation_->forwardPipeline().pipelineLayout(),
             .frameUniformBuffer = frame.forwardUniforms.handle(),
             .frameUniforms = {.viewProjection = cameraViewProjection(
                                   camera, static_cast<float>(extent.width) /
@@ -610,7 +609,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
             .scissor = {.offset = {.x = 0, .y = 0}, .extent = extent},
             .colorAttachmentFormat = presentation_->swapchain().imageFormat(),
             .depthAttachmentFormat = presentation_->depthBuffer(frameSlotIndex).format(),
-            .vertexLayout = presentation_->pipeline().description().vertexLayout,
+            .vertexLayout = presentation_->forwardPipeline().description().vertexLayout,
         };
         return recordingInputCompiler_.compile(drawList, compiledResources_.view(), recordingState);
     }();

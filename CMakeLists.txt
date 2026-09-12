@@ -66,10 +66,10 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/device.cpp
     src/render/draw_binding_state.cpp
     src/render/forward_frame_uniform_buffer.cpp
+    src/render/forward_pipeline.cpp
     src/render/frame_slot.cpp
     src/render/image.cpp
     src/render/instance_support.cpp
-    src/render/pipeline.cpp
     src/render/presentation_state.cpp
     src/render/readback_buffer.cpp
     src/render/recording_context.cpp
@@ -152,16 +152,17 @@ target_link_libraries(fireEngineTutorialEngine
         Vulkan::Loader
 )
 
-# Compile the shader once into a single SPIR-V module. Slang finds every
+# Compile the forward shader once into a single SPIR-V module. Slang finds every
 # [shader(...)] entry point in the file, and SPIR-V permits any number of entry
 # points per module, so both stages come from one compiler invocation and one
-# file that src/render/pipeline.cpp reads once.
+# file that src/render/forward_pipeline.cpp reads once.
 #
 # Slang emits SPIR-V 1.6 directly, which Vulkan 1.4 accepts, and every shader
 # warning is treated as a build failure.
 #
 # -fvk-use-entrypoint-name preserves "vertexMain" and "fragmentMain" in the
-# output. Those names must match the pName values in src/render/pipeline.cpp.
+# output. Those names must match the pName values in
+# src/render/forward_pipeline.cpp.
 # Slang only collapses an entry point to "main" when it emits exactly one, so
 # this flag is what keeps the names stable if the shader is ever split up.
 #
@@ -169,27 +170,29 @@ target_link_libraries(fireEngineTutorialEngine
 # through vcpkg forces a recompile. It does not track Slang `import`ed or
 # `#include`d modules; add `-depfile` and DEPFILE once the shader spans more
 # than this one file.
-set(FIRE_ENGINE_SHADER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/scene.slang")
-set(FIRE_ENGINE_SHADER_BINARY "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}/scene.spv")
+set(FIRE_ENGINE_FORWARD_SHADER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/forward.slang")
+set(FIRE_ENGINE_FORWARD_SHADER_BINARY
+    "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}/forward.spv")
 
 add_custom_command(
-    OUTPUT "${FIRE_ENGINE_SHADER_BINARY}"
+    OUTPUT "${FIRE_ENGINE_FORWARD_SHADER_BINARY}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}"
     COMMAND slang::slangc
-        "${FIRE_ENGINE_SHADER_SOURCE}"
+        "${FIRE_ENGINE_FORWARD_SHADER_SOURCE}"
         -target spirv
         -profile spirv_1_6
         -matrix-layout-column-major
         -fvk-use-entrypoint-name
         -restrictive-capability-check
         -warnings-as-errors all
-        -o "${FIRE_ENGINE_SHADER_BINARY}"
-    DEPENDS "${FIRE_ENGINE_SHADER_SOURCE}" slang::slangc
-    COMMENT "Compiling Slang shader to SPIR-V"
+        -o "${FIRE_ENGINE_FORWARD_SHADER_BINARY}"
+    DEPENDS "${FIRE_ENGINE_FORWARD_SHADER_SOURCE}" slang::slangc
+    COMMENT "Compiling forward Slang shader to SPIR-V"
     VERBATIM
 )
 
-add_custom_target(fireEngineShaders ALL DEPENDS "${FIRE_ENGINE_SHADER_BINARY}")
+add_custom_target(fireEngineShaders ALL DEPENDS "${FIRE_ENGINE_FORWARD_SHADER_BINARY}")
 add_dependencies(fireEngineTutorial fireEngineShaders)
 
 # Keep the example's external glTF buffer and images beside the executable.
