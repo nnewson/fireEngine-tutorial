@@ -10,12 +10,11 @@
 #include <fire_engine/render/detail/capture_format_mapping.hpp>
 #include <fire_engine/render/detail/compiled_resource_graph.hpp>
 #include <fire_engine/render/detail/compiled_resources.hpp>
+#include <fire_engine/render/detail/cpu_phase_timer.hpp>
 #include <fire_engine/render/detail/depth_buffer.hpp>
 #include <fire_engine/render/detail/device.hpp>
-#include <fire_engine/render/detail/draw_binding_state.hpp>
-#include <fire_engine/render/detail/draw_constants.hpp>
+#include <fire_engine/render/detail/forward_recorder.hpp>
 #include <fire_engine/render/detail/forward_recording_input.hpp>
-#include <fire_engine/render/detail/forward_secondary_recording_worker.hpp>
 #include <fire_engine/render/detail/frame_resources.hpp>
 #include <fire_engine/render/detail/frame_slot.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
@@ -28,7 +27,6 @@
 
 #include <array>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -46,55 +44,7 @@ namespace fire_engine
 namespace
 {
 /** @cond INTERNAL */
-/* --- File-local constants --- */
-
-/**
- * @brief Smallest per-participant draw count at which recording is split.
- *
- * Release measurements showed a benefit at 10,000 draws on both
- * decision-bearing implementations in the synthetic benchmark, and a
- * regression on one of them at 1,000. This threshold is that measured boundary
- * rather than an estimate of where the crossover lies, which nothing in those
- * runs locates. It is an empirical policy rather than an interface, so it stays
- * internal and reaches reports only as a value on RendererInfo.
- */
-constexpr std::size_t kMinimumDrawsPerForwardRecordingParticipant = 5000;
-
-/* --- File-local classes --- */
-
-/** @brief Accumulates one optional host phase without adding renderer state. */
-class CpuPhaseTimer final
-{
-public:
-    /** @brief Starts timing when output is non-null. @param output Optional phase accumulator. */
-    explicit CpuPhaseTimer(std::chrono::nanoseconds* output) noexcept
-        : output_{output}
-    {
-        if (output_ != nullptr)
-        {
-            start_ = std::chrono::steady_clock::now();
-        }
-    }
-
-    /** @brief Adds elapsed host time to the supplied accumulator. */
-    ~CpuPhaseTimer() noexcept
-    {
-        if (output_ != nullptr)
-        {
-            *output_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - start_);
-        }
-    }
-
-    CpuPhaseTimer(const CpuPhaseTimer&) = delete;
-    CpuPhaseTimer& operator=(const CpuPhaseTimer&) = delete;
-    CpuPhaseTimer(CpuPhaseTimer&&) = delete;
-    CpuPhaseTimer& operator=(CpuPhaseTimer&&) = delete;
-
-private:
-    std::chrono::nanoseconds* output_ = nullptr;    ///< Optional duration receiving elapsed time.
-    std::chrono::steady_clock::time_point start_{}; ///< Start sampled only when output exists.
-};
+using detail::CpuPhaseTimer;
 
 /** @brief Immutable image-copy metadata captured with one selected attempt. */
 struct CaptureAttempt final
@@ -118,83 +68,6 @@ struct CaptureAttempt final
 validatedCaptureRequest(std::optional<FrameCaptureRequest> request);
 
 [[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept;
-
-/**
- * @brief Selects how many participants record one frame when nothing forces a count.
- * @param drawCount Resolved packets in the frozen forward recording input.
- * @return Participant count, at least one and never above the supported maximum.
- */
-[[nodiscard]] constexpr std::size_t
-automaticForwardParticipantCount(std::size_t drawCount) noexcept;
-
-/**
- * @brief Records fixed state shared by every draw in one command buffer.
- * @param commandBuffer Primary or secondary command buffer receiving the state.
- * @param state Plain handles and dynamic state proved by the input compiler.
- * @return Fresh draw-binding cache scoped to the established descriptor state.
- */
-[[nodiscard]] detail::DrawBindingState
-bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
-                  const detail::ForwardRecordingState& state);
-
-/**
- * @brief Records the bindings, constants, and indexed draw for each packet.
- * @param commandBuffer Command buffer inside the active color pass.
- * @param state Compatible pipeline layout shared by every packet.
- * @param draws Contiguous resolved packets recorded in order.
- * @param bindingState Cache created when the complete geometry state was established.
- */
-void recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                 const detail::ForwardRecordingState& state,
-                 std::span<const detail::ForwardRecordingDraw> draws,
-                 detail::DrawBindingState bindingState);
-
-/**
- * @brief Resets one participant's pool and records its chunk into its secondary.
- * @param job Recording context, fixed state, and contiguous packets for this chunk.
- * @param timings Participant-local block receiving this chunk's timestamps.
- */
-void recordForwardSecondaryChunk(const detail::ForwardSecondaryChunkJob& job,
-                                 detail::ChunkRecordingTimings* timings);
-
-/**
- * @brief Merges participant timestamp blocks into the public per-frame timings.
- * @param chunkTimings Participant-local blocks written during this attempt.
- * @param participants Number of leading blocks that recorded a chunk.
- * @param completionWait Coordinator wait outcome when a helper ran, otherwise null.
- * @param timings Optional public output receiving durations and the critical path.
- */
-void mergeChunkTimings(
-    const std::array<detail::ChunkRecordingTimings, kMaxForwardRecordingParticipants>& chunkTimings,
-    std::size_t participants, const detail::CompletionWait* completionWait,
-    RendererCpuTimings* timings);
-
-/* --- File-local classes --- */
-
-/** @brief Waits for the dispatched forward helper chunk, including while unwinding. */
-class ForwardChunkJoin final
-{
-public:
-    /** @brief Adopts a helper with one outstanding chunk. @param helper Dispatched helper. */
-    explicit ForwardChunkJoin(detail::ForwardSecondaryRecordingWorker& helper) noexcept
-        : helper_{&helper}
-    {
-    }
-
-    /** @brief Blocks until the helper has stopped reading its job. */
-    ~ForwardChunkJoin() noexcept
-    {
-        helper_->awaitCompletion();
-    }
-
-    ForwardChunkJoin(const ForwardChunkJoin&) = delete;
-    ForwardChunkJoin& operator=(const ForwardChunkJoin&) = delete;
-    ForwardChunkJoin(ForwardChunkJoin&&) = delete;
-    ForwardChunkJoin& operator=(ForwardChunkJoin&&) = delete;
-
-private:
-    detail::ForwardSecondaryRecordingWorker* helper_; ///< Borrowed for one dispatch.
-};
 } // namespace
 
 /* --- Private implementation class declaration --- */
@@ -256,54 +129,13 @@ public:
 
 private:
     /**
-     * @brief Records the complete command-buffer sequence for one acquired image.
-     * @param frameSlotIndex Cycled submission slot whose command buffers are reusable.
-     * @param imageIndex Acquired swapchain-image index.
-     * @param input Compiler-produced immutable forward recording input.
-     * @param captureAttempt Selected readback copy, or null for ordinary rendering.
-     * @param timings Optional output receiving the serial and secondary recording phases.
+     * @brief Begins one reset primary command buffer before pass recording.
+     * @param commandBuffer Selected frame-slot primary command buffer.
      */
-    void recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                        const detail::ForwardRecordingInput& input,
-                        const CaptureAttempt* captureAttempt, RendererCpuTimings* timings);
+    static void beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer);
 
     /**
-     * @brief Records inherited draws and executes them from one primary geometry pass.
-     * @param frameSlotIndex Cycled submission slot owning this frame's recording contexts.
-     * @param imageIndex Acquired swapchain-image index.
-     * @param input Compiler-produced immutable forward recording input.
-     * @param captureAttempt Selected readback copy, or null for ordinary rendering.
-     * @param timings Optional output receiving both command-buffer recording phases.
-     */
-    void recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                 const detail::ForwardRecordingInput& input,
-                                 const CaptureAttempt* captureAttempt, RendererCpuTimings* timings);
-
-    /**
-     * @brief Records the complete geometry pass directly into one primary command buffer.
-     * @param frameSlotIndex Cycled submission slot owning this frame's recording context.
-     * @param imageIndex Acquired swapchain-image index.
-     * @param input Compiler-produced immutable forward recording input.
-     * @param captureAttempt Selected readback copy, or null for ordinary rendering.
-     * @param timings Optional output receiving the direct primary recording phase.
-     */
-    void recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                              const detail::ForwardRecordingInput& input,
-                              const CaptureAttempt* captureAttempt, RendererCpuTimings* timings);
-
-    /**
-     * @brief Begins a primary command buffer and its geometry rendering instance.
-     * @param commandBuffer Primary command buffer receiving the frame prefix.
-     * @param frameSlotIndex Cycled submission slot selecting its depth attachment.
-     * @param imageIndex Acquired swapchain-image index used as the color attachment.
-     * @param flags Rendering flags selecting direct or secondary-command contents.
-     */
-    void beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
-                               std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                               vk::RenderingFlags flags) const;
-
-    /**
-     * @brief Ends the geometry instance and records the primary command-buffer suffix.
+     * @brief Records frame-output policy and ends one primary command buffer.
      * @param commandBuffer Primary command buffer receiving the frame suffix.
      * @param imageIndex Acquired swapchain-image index transitioned for presentation.
      * @param captureAttempt Selected readback copy, or null for an attachment-to-present suffix.
@@ -311,40 +143,8 @@ private:
     void endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer, std::uint32_t imageIndex,
                              const CaptureAttempt* captureAttempt) const;
 
-    /**
-     * @brief Orders acquisition before the transition to color-attachment use.
-     * @param commandBuffer Command buffer receiving the image barrier.
-     * @param imageIndex Acquired swapchain-image index.
-     */
-    void transitionToAttachment(const vk::raii::CommandBuffer& commandBuffer,
-                                std::uint32_t imageIndex) const;
-
-    /**
-     * @brief Discards earlier depth and transitions it for this frame's writes.
-     * @param commandBuffer Command buffer receiving the image barrier.
-     * @param frameSlotIndex Cycled submission slot selecting its depth attachment.
-     */
-    void transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer,
-                                     std::size_t frameSlotIndex) const;
-
-    /**
-     * @brief Begins dynamic rendering for direct or secondary-command contents.
-     * @param commandBuffer Primary command buffer receiving the rendering boundary.
-     * @param frameSlotIndex Cycled submission slot selecting its depth attachment.
-     * @param imageIndex Acquired swapchain-image index used as the color attachment.
-     * @param flags Rendering flags selecting direct or secondary-command contents.
-     */
-    void beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer, std::size_t frameSlotIndex,
-                           std::uint32_t imageIndex, vk::RenderingFlags flags) const;
-
     /** @brief Reports whether any submission slot may still be in use. @return Pending state. */
     [[nodiscard]] bool workMayBePending() const noexcept;
-
-    /**
-     * @brief Selects the buffer a forward secondary context allocates for this mode.
-     * @return Secondary for the production path, or none for the direct-primary control.
-     */
-    [[nodiscard]] detail::RecordingBufferKind forwardSecondaryBufferKind() const noexcept;
 
     /**
      * @brief Orders color writes before the transition to presentation.
@@ -385,9 +185,6 @@ private:
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
     // Foundational long-lived state.
-    ForwardRecordingMode forwardRecordingMode_; ///< Fixed production or attribution path.
-    /// Diagnostic override, or unset when the workload selects the participant count.
-    std::optional<std::size_t> forcedForwardRecordingParticipantCount_;
     std::optional<FrameCaptureRequest> captureRequest_; ///< Owned one-shot diagnostic request.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
@@ -411,10 +208,9 @@ private:
     detail::ForwardRecordingInputCompiler
         forwardRecordingInputCompiler_; ///< Reusable forward packet-freeze arena.
 
-    // Declared last so reverse member destruction stops the helper before the
+    // Declared last so reverse member destruction stops its helper before the
     // recording contexts whose pools it writes into.
-    detail::ForwardSecondaryRecordingWorker
-        forwardSecondaryHelper_; ///< Records the second forward chunk on request.
+    detail::ForwardRecorder forwardRecorder_; ///< Concrete forward-pass recording boundary.
 };
 /** @endcond */
 
@@ -465,11 +261,9 @@ RendererInfo Renderer::info() const
 
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
                      RendererConfiguration configuration)
-    : forwardRecordingMode_{configuration.forwardRecordingMode},
-      forcedForwardRecordingParticipantCount_{configuration.forcedForwardRecordingParticipantCount},
-      // Validate the Vulkan-free request before constructing the device and
-      // capture-enabled swapchain.
-      captureRequest_{validatedCaptureRequest(std::move(configuration.captureRequest))},
+    // Validate the Vulkan-free request before constructing the device and
+    // capture-enabled swapchain.
+    : captureRequest_{validatedCaptureRequest(std::move(configuration.captureRequest))},
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
@@ -483,23 +277,26 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
                   .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
                   .coordinator =
                       detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-                  .secondaries = {detail::RecordingContext{device_, forwardSecondaryBufferKind()},
-                                  detail::RecordingContext{device_, forwardSecondaryBufferKind()}}},
+                  .secondaries = {detail::RecordingContext{
+                                      device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                   configuration.forwardRecordingMode)},
+                                  detail::RecordingContext{
+                                      device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                   configuration.forwardRecordingMode)}}},
               detail::FrameResources{
                   .slot = detail::FrameSlot{device_},
                   .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
                   .coordinator =
                       detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-                  .secondaries = {detail::RecordingContext{device_, forwardSecondaryBufferKind()},
-                                  detail::RecordingContext{device_, forwardSecondaryBufferKind()}}}}
+                  .secondaries = {detail::RecordingContext{
+                                      device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                   configuration.forwardRecordingMode)},
+                                  detail::RecordingContext{
+                                      device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                   configuration.forwardRecordingMode)}}}},
+      forwardRecorder_{configuration.forwardRecordingMode,
+                       configuration.forcedForwardRecordingParticipantCount}
 {
-    if (forcedForwardRecordingParticipantCount_.has_value() &&
-        (*forcedForwardRecordingParticipantCount_ == 0 ||
-         *forcedForwardRecordingParticipantCount_ > kMaxForwardRecordingParticipants))
-    {
-        throw std::invalid_argument(
-            "Forward recording participant count is outside the supported range");
-    }
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
         throw std::runtime_error("Vulkan returned a null device queue");
@@ -522,7 +319,7 @@ Renderer::Impl::~Impl() noexcept
     // drawFrame() waits for the helper synchronously, so every entry point
     // below begins with it idle. Assert the invariant rather than joining,
     // which would defeat the helper's persistence.
-    assert(forwardSecondaryHelper_.idle());
+    assert(forwardRecorder_.idle());
     if (!workMayBePending())
     {
         return;
@@ -550,7 +347,7 @@ Renderer::Impl::~Impl() noexcept
 
 void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& drawList)
 {
-    assert(forwardSecondaryHelper_.idle());
+    assert(forwardRecorder_.idle());
     // Planning validates every CPU relationship before the first Vulkan
     // allocation, keeping malformed input failures deterministic and cheap.
     const RenderPreparationPlan& plan =
@@ -663,8 +460,32 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
                                                : &timings->forward.coordinatorCommandPoolReset};
         frame.coordinator.resetCommands();
     }
-    recordCommands(frameSlotIndex, imageIndex, forwardRecordingInput,
-                   captureAttempt.has_value() ? &*captureAttempt : nullptr, timings);
+    const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
+    detail::ForwardPassTarget forwardTarget{};
+    {
+        // This begins before helper dispatch after the extraction. All command
+        // work and timing membership remain unchanged; only that host order moves.
+        CpuPhaseTimer timer{timings == nullptr ? nullptr
+                                               : &timings->forward.primaryCommandRecording};
+        beginPrimaryRecording(primaryCommandBuffer);
+        forwardTarget = {
+            .colorImage = presentation_->swapchain().image(imageIndex),
+            .colorView = *presentation_->swapchain().imageView(imageIndex),
+            .colorFormat = presentation_->swapchain().imageFormat(),
+            .depthImage = presentation_->depthBuffer(frameSlotIndex).image(),
+            .depthView = *presentation_->depthBuffer(frameSlotIndex).view(),
+            .depthFormat = presentation_->depthBuffer(frameSlotIndex).format(),
+            .extent = presentation_->swapchain().extent(),
+        };
+    }
+    forwardRecorder_.record(frame.coordinator, std::span{frame.secondaries}, forwardRecordingInput,
+                            forwardTarget, timings == nullptr ? nullptr : &timings->forward);
+    {
+        CpuPhaseTimer timer{timings == nullptr ? nullptr
+                                               : &timings->forward.primaryCommandRecording};
+        endPrimaryRecording(primaryCommandBuffer, imageIndex,
+                            captureAttempt.has_value() ? &*captureAttempt : nullptr);
+    }
     // Nothing intentionally abandons the frame after this reset: a
     // successful submission will signal the fence, while errors unwind.
     {
@@ -759,7 +580,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
 
 void Renderer::Impl::waitIdle()
 {
-    assert(forwardSecondaryHelper_.idle());
+    assert(forwardRecorder_.idle());
     device_.logicalDevice().waitIdle();
     presentation_->waitForPresentations();
     for (detail::FrameResources& frame : frames_)
@@ -780,16 +601,9 @@ bool Renderer::Impl::workMayBePending() const noexcept
     return false;
 }
 
-detail::RecordingBufferKind Renderer::Impl::forwardSecondaryBufferKind() const noexcept
-{
-    return forwardRecordingMode_ == ForwardRecordingMode::eSecondaryCommandBuffer
-               ? detail::RecordingBufferKind::eSecondary
-               : detail::RecordingBufferKind::eNone;
-}
-
 bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
 {
-    assert(forwardSecondaryHelper_.idle());
+    assert(forwardRecorder_.idle());
     if (framebufferExtent.width == 0 || framebufferExtent.height == 0)
     {
         return false;
@@ -828,164 +642,24 @@ RendererInfo Renderer::Impl::info() const
         .imageFormat = vk::to_string(presentation_->swapchain().imageFormat()),
         .depthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
-        .forwardRecordingMode = forwardRecordingMode_,
-        .forcedForwardRecordingParticipantCount = forcedForwardRecordingParticipantCount_,
-        .minimumDrawsPerForwardRecordingParticipant = kMinimumDrawsPerForwardRecordingParticipant,
+        .forwardRecordingMode = forwardRecorder_.mode(),
+        .forcedForwardRecordingParticipantCount = forwardRecorder_.forcedParticipantCount(),
+        .minimumDrawsPerForwardRecordingParticipant = forwardRecorder_.minimumDrawsPerParticipant(),
     };
 }
 
-void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                    const detail::ForwardRecordingInput& input,
-                                    const CaptureAttempt* captureAttempt,
-                                    RendererCpuTimings* timings)
-{
-    if (forwardRecordingMode_ == ForwardRecordingMode::eDirectPrimary)
-    {
-        // The direct control still owns a secondary pool and still resets it, so
-        // its empty-pool cost stays measurable and comparable. That reset is the
-        // whole of its secondary-recording region.
-        const detail::RecordingContext& emptyContext = frames_[frameSlotIndex].secondaries.front();
-        if (timings == nullptr)
-        {
-            emptyContext.resetCommands();
-        }
-        else
-        {
-            const auto resetStart = std::chrono::steady_clock::now();
-            emptyContext.resetCommands();
-            const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - resetStart);
-            // No chunk is marked recorded: this path records no secondary at
-            // all, so it has zero recording participants even though its empty
-            // pool is still reset and timed as the fixed-cost floor.
-            timings->forward.workerCommandPoolReset = elapsed;
-            timings->forward.secondaryRecordingRegion = elapsed;
-            timings->forward.workerResetRegionSpan = elapsed;
-            timings->forward.workerRegionCriticalPath = elapsed;
-        }
-        recordDirectCommands(frameSlotIndex, imageIndex, input, captureAttempt, timings);
-        return;
-    }
-    recordSecondaryCommands(frameSlotIndex, imageIndex, input, captureAttempt, timings);
-}
-
-void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                             const detail::ForwardRecordingInput& input,
-                                             const CaptureAttempt* captureAttempt,
-                                             RendererCpuTimings* timings)
-{
-    const detail::FrameResources& frame = frames_[frameSlotIndex];
-    const detail::ForwardRecordingState& state = input.state();
-    const std::span<const detail::ForwardRecordingDraw> draws = input.draws();
-
-    // The production policy selects the count from the workload. A diagnostic
-    // override replaces that choice so a forced split can be measured below the
-    // threshold and compared with an explicitly single-participant control.
-    // Either way the ranges must stay non-empty.
-    const std::size_t requested = forcedForwardRecordingParticipantCount_.value_or(
-        automaticForwardParticipantCount(draws.size()));
-    const std::size_t participants = requested > 1 && draws.size() >= requested ? requested : 1;
-    const std::size_t firstChunkSize = participants > 1 ? (draws.size() + 1) / 2 : draws.size();
-
-    std::array<detail::ChunkRecordingTimings, kMaxForwardRecordingParticipants> chunkTimings{};
-    const auto chunkBlock = [&chunkTimings, timings](std::size_t index)
-    { return timings == nullptr ? nullptr : &chunkTimings[index]; };
-    const detail::ForwardSecondaryChunkJob coordinatorJob{
-        .context = &frame.secondaries.front(),
-        .state = state,
-        .draws = draws.first(firstChunkSize),
-    };
-    {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr
-                                               : &timings->forward.secondaryRecordingRegion};
-        if (participants > 1)
-        {
-            const detail::ForwardSecondaryChunkJob helperJob{
-                .context = &frame.secondaries[1],
-                .state = state,
-                .draws = draws.subspan(firstChunkSize),
-            };
-            forwardSecondaryHelper_.dispatch(&recordForwardSecondaryChunk, helperJob,
-                                             chunkBlock(1));
-            // The guard's destructor waits for the helper, so completion is
-            // observed even while an exception from the coordinator's own chunk
-            // unwinds this scope. The job itself was copied by dispatch; what
-            // must stay alive is the context, draw storage, and timing block.
-            const ForwardChunkJoin join{forwardSecondaryHelper_};
-            recordForwardSecondaryChunk(coordinatorJob, chunkBlock(0));
-        }
-        else
-        {
-            recordForwardSecondaryChunk(coordinatorJob, chunkBlock(0));
-        }
-    }
-    forwardSecondaryHelper_.rethrowIfFailed();
-    mergeChunkTimings(chunkTimings, participants,
-                      participants > 1 ? &forwardSecondaryHelper_.lastCompletionWait() : nullptr,
-                      timings);
-
-    const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
-    {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr
-                                               : &timings->forward.primaryCommandRecording};
-        beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex,
-                              vk::RenderingFlagBits::eContentsSecondaryCommandBuffers);
-    }
-    {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr
-                                               : &timings->forward.secondaryCommandExecution};
-        // Chunk order is preserved so recorded draw order survives the split.
-        if (participants > 1)
-        {
-            const std::array secondaryCommands{*frame.secondaries.front().commandBuffer(),
-                                               *frame.secondaries[1].commandBuffer()};
-            primaryCommandBuffer.executeCommands(secondaryCommands);
-        }
-        else
-        {
-            const std::array secondaryCommands{*frame.secondaries.front().commandBuffer()};
-            primaryCommandBuffer.executeCommands(secondaryCommands);
-        }
-    }
-    {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr
-                                               : &timings->forward.primaryCommandRecording};
-        endPrimaryRecording(primaryCommandBuffer, imageIndex, captureAttempt);
-    }
-}
-
-void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                          const detail::ForwardRecordingInput& input,
-                                          const CaptureAttempt* captureAttempt,
-                                          RendererCpuTimings* timings)
-{
-    CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->forward.primaryCommandRecording};
-    const detail::FrameResources& frame = frames_[frameSlotIndex];
-    const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
-    beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex, {});
-    detail::DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer, input.state());
-    recordDraws(primaryCommandBuffer, input.state(), input.draws(), std::move(bindingState));
-    endPrimaryRecording(primaryCommandBuffer, imageIndex, captureAttempt);
-}
-
-void Renderer::Impl::beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
-                                           std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                           vk::RenderingFlags flags) const
+void Renderer::Impl::beginPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer)
 {
     const vk::CommandBufferBeginInfo beginInfo{
         .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
     };
     commandBuffer.begin(beginInfo);
-    transitionToAttachment(commandBuffer, imageIndex);
-    transitionDepthToAttachment(commandBuffer, frameSlotIndex);
-    beginGeometryPass(commandBuffer, frameSlotIndex, imageIndex, flags);
 }
 
 void Renderer::Impl::endPrimaryRecording(const vk::raii::CommandBuffer& commandBuffer,
                                          std::uint32_t imageIndex,
                                          const CaptureAttempt* captureAttempt) const
 {
-    commandBuffer.endRendering();
     if (captureAttempt == nullptr)
     {
         transitionToPresent(commandBuffer, imageIndex);
@@ -995,96 +669,6 @@ void Renderer::Impl::endPrimaryRecording(const vk::raii::CommandBuffer& commandB
         recordCapture(commandBuffer, imageIndex, *captureAttempt);
     }
     commandBuffer.end();
-}
-
-void Renderer::Impl::transitionDepthToAttachment(const vk::raii::CommandBuffer& commandBuffer,
-                                                 std::size_t frameSlotIndex) const
-{
-    // The depth value is cleared before every use, so no previous contents need
-    // preserving. This slot's fence has completed before its command buffer is
-    // recorded, making it safe to discard that slot's previous depth writes.
-    const vk::ImageMemoryBarrier2 toAttachment{
-        .srcStageMask = vk::PipelineStageFlagBits2::eNone,
-        .srcAccessMask = vk::AccessFlagBits2::eNone,
-        .dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                        vk::PipelineStageFlagBits2::eLateFragmentTests,
-        .dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead |
-                         vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = presentation_->depthBuffer(frameSlotIndex).image(),
-        .subresourceRange = detail::kDepthSubresourceRange,
-    };
-    const vk::DependencyInfo dependency{
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toAttachment,
-    };
-    commandBuffer.pipelineBarrier2(dependency);
-}
-
-void Renderer::Impl::transitionToAttachment(const vk::raii::CommandBuffer& commandBuffer,
-                                            std::uint32_t imageIndex) const
-{
-    // The full image is cleared, so previous presentation contents can be
-    // discarded instead of tracking a first-use layout for every image.
-    const vk::ImageMemoryBarrier2 toAttachment{
-        .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .srcAccessMask = vk::AccessFlagBits2::eNone,
-        .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eAttachmentOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = presentation_->swapchain().image(imageIndex),
-        .subresourceRange = detail::kColorSubresourceRange,
-    };
-    const vk::DependencyInfo beginDependency{
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toAttachment,
-    };
-    commandBuffer.pipelineBarrier2(beginDependency);
-}
-
-void Renderer::Impl::beginGeometryPass(const vk::raii::CommandBuffer& commandBuffer,
-                                       std::size_t frameSlotIndex, std::uint32_t imageIndex,
-                                       vk::RenderingFlags flags) const
-{
-    const vk::ClearValue clearValue{
-        .color = {.float32 = std::array{0.015f, 0.02f, 0.03f, 1.0f}},
-    };
-    const vk::RenderingAttachmentInfo colorAttachment{
-        .imageView = *presentation_->swapchain().imageView(imageIndex),
-        .imageLayout = vk::ImageLayout::eAttachmentOptimal,
-        .loadOp = vk::AttachmentLoadOp::eClear,
-        .storeOp = vk::AttachmentStoreOp::eStore,
-        .clearValue = clearValue,
-    };
-    const vk::ClearValue depthClear{
-        .depthStencil = {.depth = 1.0f, .stencil = 0},
-    };
-    const vk::RenderingAttachmentInfo depthAttachment{
-        .imageView = *presentation_->depthBuffer(frameSlotIndex).view(),
-        .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-        .loadOp = vk::AttachmentLoadOp::eClear,
-        .storeOp = vk::AttachmentStoreOp::eDontCare,
-        .clearValue = depthClear,
-    };
-    const vk::RenderingInfo renderingInfo{
-        .flags = flags,
-        .renderArea =
-            {
-                .offset = {.x = 0, .y = 0},
-                .extent = presentation_->swapchain().extent(),
-            },
-        .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &colorAttachment,
-        .pDepthAttachment = &depthAttachment,
-    };
-    commandBuffer.beginRendering(renderingInfo);
 }
 
 void Renderer::Impl::transitionToPresent(const vk::raii::CommandBuffer& commandBuffer,
@@ -1302,209 +886,6 @@ validatedCaptureRequest(std::optional<FrameCaptureRequest> request)
 
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).height == -600.0f);
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).y == 600.0f);
-
-constexpr std::size_t automaticForwardParticipantCount(std::size_t drawCount) noexcept
-{
-    const std::size_t supported = drawCount / kMinimumDrawsPerForwardRecordingParticipant;
-    if (supported < 2)
-    {
-        return 1;
-    }
-    return supported > kMaxForwardRecordingParticipants ? kMaxForwardRecordingParticipants
-                                                        : supported;
-}
-
-static_assert(automaticForwardParticipantCount(0) == 1);
-static_assert(automaticForwardParticipantCount(1) == 1);
-static_assert(automaticForwardParticipantCount(1000) == 1);
-// One participant below the measured boundary, two at it.
-static_assert(automaticForwardParticipantCount(kMinimumDrawsPerForwardRecordingParticipant * 2 -
-                                               1) == 1);
-static_assert(automaticForwardParticipantCount(kMinimumDrawsPerForwardRecordingParticipant * 2) ==
-              2);
-// Never above the supported maximum, however large the workload.
-static_assert(automaticForwardParticipantCount(kMinimumDrawsPerForwardRecordingParticipant * 100) ==
-              kMaxForwardRecordingParticipants);
-
-detail::DrawBindingState bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
-                                           const detail::ForwardRecordingState& state)
-{
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, state.pipeline);
-    commandBuffer.setViewport(0, state.viewport);
-    commandBuffer.setScissor(0, state.scissor);
-
-    const vk::DescriptorBufferInfo uniformInfo{
-        .buffer = state.frameUniformBuffer,
-        .offset = 0,
-        .range = sizeof(detail::FrameUniforms),
-    };
-    const vk::WriteDescriptorSet uniformWrite{
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = vk::DescriptorType::eUniformBuffer,
-        .pBufferInfo = &uniformInfo,
-    };
-    commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, state.pipelineLayout, 0,
-                                    uniformWrite);
-    return {};
-}
-
-void recordDraws(const vk::raii::CommandBuffer& commandBuffer,
-                 const detail::ForwardRecordingState& state,
-                 std::span<const detail::ForwardRecordingDraw> draws,
-                 detail::DrawBindingState bindingState)
-{
-    constexpr vk::DeviceSize bufferOffset = 0;
-    for (const detail::ForwardRecordingDraw& draw : draws)
-    {
-        const detail::DrawBindingChanges changes =
-            bindingState.update(draw.vertexBuffer, draw.indexBuffer, draw.sampler, draw.imageView);
-        if (changes.geometry)
-        {
-            commandBuffer.bindVertexBuffers(0, draw.vertexBuffer, bufferOffset);
-            commandBuffer.bindIndexBuffer(draw.indexBuffer, 0, vk::IndexType::eUint32);
-        }
-        if (changes.texture)
-        {
-            const vk::DescriptorImageInfo textureInfo{
-                .sampler = draw.sampler,
-                .imageView = draw.imageView,
-                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-            };
-            const vk::WriteDescriptorSet textureWrite{
-                .dstBinding = 1,
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-                .pImageInfo = &textureInfo,
-            };
-            commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, state.pipelineLayout,
-                                            0, textureWrite);
-        }
-
-        commandBuffer.pushConstants<detail::DrawConstants>(
-            state.pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, draw.constants);
-        commandBuffer.drawIndexed(draw.indexCount, 1, 0, 0, 0);
-    }
-}
-
-void recordForwardSecondaryChunk(const detail::ForwardSecondaryChunkJob& job,
-                                 detail::ChunkRecordingTimings* timings)
-{
-    // Each participant resets its own pool as the first act of its own work,
-    // which is the registered ownership rule for worker-local reset cost.
-    // Ordinary frames pass no timing block and take no clock samples.
-    if (timings != nullptr)
-    {
-        timings->resetStart = std::chrono::steady_clock::now();
-    }
-    job.context->resetCommands();
-    if (timings != nullptr)
-    {
-        timings->resetEnd = std::chrono::steady_clock::now();
-    }
-
-    const vk::CommandBufferInheritanceRenderingInfo renderingInheritance{
-        .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &job.state.colorAttachmentFormat,
-        .depthAttachmentFormat = job.state.depthAttachmentFormat,
-        .rasterizationSamples = vk::SampleCountFlagBits::e1,
-    };
-    const vk::CommandBufferInheritanceInfo inheritanceInfo{
-        .pNext = &renderingInheritance,
-    };
-    const vk::CommandBufferBeginInfo secondaryBeginInfo{
-        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit |
-                 vk::CommandBufferUsageFlagBits::eRenderPassContinue,
-        .pInheritanceInfo = &inheritanceInfo,
-    };
-    const vk::raii::CommandBuffer& commandBuffer = job.context->commandBuffer();
-    commandBuffer.begin(secondaryBeginInfo);
-    // Every chunk establishes its own complete geometry state, so each secondary
-    // pays a fixed preamble that does not divide with draw count.
-    detail::DrawBindingState bindingState = bindGeometryState(commandBuffer, job.state);
-    recordDraws(commandBuffer, job.state, job.draws, std::move(bindingState));
-    commandBuffer.end();
-
-    if (timings != nullptr)
-    {
-        timings->recordEnd = std::chrono::steady_clock::now();
-        timings->recorded = true;
-    }
-}
-
-void mergeChunkTimings(
-    const std::array<detail::ChunkRecordingTimings, kMaxForwardRecordingParticipants>& chunkTimings,
-    std::size_t participants, const detail::CompletionWait* completionWait,
-    RendererCpuTimings* timings)
-{
-    if (timings == nullptr)
-    {
-        return;
-    }
-
-    std::chrono::steady_clock::time_point earliestStart{};
-    std::chrono::steady_clock::time_point latestResetEnd{};
-    std::chrono::steady_clock::time_point latestEnd{};
-    for (std::size_t index = 0; index < participants; ++index)
-    {
-        const detail::ChunkRecordingTimings& chunk = chunkTimings[index];
-        assert(chunk.recorded);
-        if (index == 0 || chunk.resetStart < earliestStart)
-        {
-            earliestStart = chunk.resetStart;
-        }
-        if (index == 0 || chunk.resetEnd > latestResetEnd)
-        {
-            latestResetEnd = chunk.resetEnd;
-        }
-        if (index == 0 || chunk.recordEnd > latestEnd)
-        {
-            latestEnd = chunk.recordEnd;
-        }
-    }
-
-    for (std::size_t index = 0; index < participants; ++index)
-    {
-        const detail::ChunkRecordingTimings& chunk = chunkTimings[index];
-        const auto poolReset =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(chunk.resetEnd - chunk.resetStart);
-        const auto recording =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(chunk.recordEnd - chunk.resetEnd);
-        timings->forward.chunks[index] = ForwardParticipantCpuTimings{
-            .poolReset = poolReset,
-            .recording = recording,
-            .resetStartOffset = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                chunk.resetStart - earliestStart),
-            .recorded = true,
-        };
-        timings->forward.workerCommandPoolReset += poolReset;
-        timings->forward.secondaryCommandRecording += recording;
-    }
-
-    // The reset-region span next to the participant reset durations is what
-    // decides whether concurrent resets overlapped or serialized.
-    timings->forward.workerResetRegionSpan =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(latestResetEnd - earliestStart);
-    timings->forward.workerRegionCriticalPath =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(latestEnd - earliestStart);
-
-    if (completionWait == nullptr)
-    {
-        return;
-    }
-    timings->forward.secondaryJoinWait = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        completionWait->end - completionWait->start);
-    timings->forward.secondaryCompletionTail =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(completionWait->end - latestEnd);
-    // Defined independently of finish order: zero when the coordinator was last
-    // to finish, so no chunk work remained when it entered the wait.
-    timings->forward.secondaryHelperRemainingWork =
-        latestEnd > completionWait->start ? std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                latestEnd - completionWait->start)
-                                          : std::chrono::nanoseconds{};
-    timings->forward.secondaryCompletionAcquiredBySpin = completionWait->acquiredBySpin;
-    timings->forward.secondaryCompletionUsedBlockingWait = completionWait->usedBlockingWait;
-}
 
 } // namespace
 /** @endcond */
