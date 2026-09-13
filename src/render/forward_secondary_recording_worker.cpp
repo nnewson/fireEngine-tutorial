@@ -1,4 +1,4 @@
-#include <fire_engine/render/detail/secondary_recording_worker.hpp>
+#include <fire_engine/render/detail/forward_secondary_recording_worker.hpp>
 
 #include <cassert>
 #include <utility>
@@ -8,12 +8,12 @@ namespace fire_engine::detail
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
-SecondaryRecordingWorker::SecondaryRecordingWorker()
-    : thread_{&SecondaryRecordingWorker::run, this}
+ForwardSecondaryRecordingWorker::ForwardSecondaryRecordingWorker()
+    : thread_{&ForwardSecondaryRecordingWorker::run, this}
 {
 }
 
-SecondaryRecordingWorker::~SecondaryRecordingWorker() noexcept
+ForwardSecondaryRecordingWorker::~ForwardSecondaryRecordingWorker() noexcept
 {
     // Destruction with a chunk still outstanding would mean a dispatch escaped
     // its scope guard. The frame loop cannot reach here in that state.
@@ -23,9 +23,9 @@ SecondaryRecordingWorker::~SecondaryRecordingWorker() noexcept
     thread_.join();
 }
 
-void SecondaryRecordingWorker::dispatch(SecondaryChunkRecorder recorder,
-                                        const SecondaryChunkJob& job,
-                                        ChunkRecordingTimings* timings) noexcept
+void ForwardSecondaryRecordingWorker::dispatch(ForwardSecondaryChunkRecorder recorder,
+                                               const ForwardSecondaryChunkJob& job,
+                                               ChunkRecordingTimings* timings) noexcept
 {
     assert(idle());
     // Clear the previous failure so an earlier chunk cannot be reported twice.
@@ -38,7 +38,7 @@ void SecondaryRecordingWorker::dispatch(SecondaryChunkRecorder recorder,
     request_.release();
 }
 
-void SecondaryRecordingWorker::awaitCompletion() noexcept
+void ForwardSecondaryRecordingWorker::awaitCompletion() noexcept
 {
     if (!outstanding_)
     {
@@ -84,12 +84,12 @@ void SecondaryRecordingWorker::awaitCompletion() noexcept
     outstanding_ = false;
 }
 
-const CompletionWait& SecondaryRecordingWorker::lastCompletionWait() const noexcept
+const CompletionWait& ForwardSecondaryRecordingWorker::lastCompletionWait() const noexcept
 {
     return lastCompletionWait_;
 }
 
-void SecondaryRecordingWorker::rethrowIfFailed()
+void ForwardSecondaryRecordingWorker::rethrowIfFailed()
 {
     assert(idle());
     if (failure_)
@@ -98,12 +98,12 @@ void SecondaryRecordingWorker::rethrowIfFailed()
     }
 }
 
-bool SecondaryRecordingWorker::idle() const noexcept
+bool ForwardSecondaryRecordingWorker::idle() const noexcept
 {
     return !outstanding_;
 }
 
-void SecondaryRecordingWorker::run() noexcept
+void ForwardSecondaryRecordingWorker::run() noexcept
 {
     while (true)
     {

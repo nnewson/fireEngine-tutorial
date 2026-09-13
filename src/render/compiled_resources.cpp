@@ -113,18 +113,18 @@ const vk::raii::Sampler& CompiledTexture::sampler() const noexcept
 /* --- Public member functions --- */
 
 CompiledResourcesView::CompiledResourcesView(
-    std::span<const std::optional<CompiledDraw>> draws) noexcept
-    : draws_{draws}
+    std::span<const std::optional<CompiledRenderObject>> objects) noexcept
+    : objects_{objects}
 {
 }
 
-std::optional<CompiledDraw> CompiledResourcesView::find(RenderObjectId id) const noexcept
+std::optional<CompiledRenderObject> CompiledResourcesView::find(RenderObjectId id) const noexcept
 {
-    if (!id.valid() || id.value >= draws_.size())
+    if (!id.valid() || id.value >= objects_.size())
     {
         return std::nullopt;
     }
-    return draws_[id.value];
+    return objects_[id.value];
 }
 
 CompiledResources::CompiledResources()

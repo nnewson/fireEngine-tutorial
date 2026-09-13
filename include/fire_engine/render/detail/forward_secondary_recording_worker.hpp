@@ -7,7 +7,7 @@
 #include <span>
 #include <thread>
 
-#include <fire_engine/render/detail/recording_input.hpp>
+#include <fire_engine/render/detail/forward_recording_input.hpp>
 
 namespace fire_engine::detail
 {
@@ -57,12 +57,12 @@ struct alignas(64) ChunkRecordingTimings
 #pragma warning(pop)
 #endif
 
-/** @brief Everything one participant needs to record its contiguous draw range. */
-struct SecondaryChunkJob
+/** @brief Everything one participant needs to record its contiguous forward draw range. */
+struct ForwardSecondaryChunkJob
 {
-    const RecordingContext* context = nullptr; ///< Pool and secondary buffer owned by the chunk.
-    RecordingState state{};                    ///< Fixed state copied so no caller frame is read.
-    std::span<const RecordingDraw> draws;      ///< Contiguous packets recorded by this chunk.
+    const RecordingContext* context = nullptr;   ///< Pool and secondary buffer owned by the chunk.
+    ForwardRecordingState state{};               ///< Fixed state copied so no caller frame is read.
+    std::span<const ForwardRecordingDraw> draws; ///< Contiguous packets recorded by this chunk.
 };
 
 /**
@@ -87,44 +87,49 @@ struct CompletionWait
  * The timing block is null on ordinary frames so production recording does not
  * pay for instrumentation.
  */
-using SecondaryChunkRecorder = void (*)(const SecondaryChunkJob&, ChunkRecordingTimings*);
+using ForwardSecondaryChunkRecorder = void (*)(const ForwardSecondaryChunkJob&,
+                                               ChunkRecordingTimings*);
 
 /* --- Classes --- */
 
 /**
- * @brief One persistent thread that records a single secondary chunk on request.
+ * @brief One persistent thread that records a forward secondary chunk on request.
  *
  * This is deliberately not a scheduler or a general thread pool. The
  * coordinator records the first chunk itself and hands exactly one chunk to
  * this helper, so the fixed cost per frame is one request and one completion.
  *
  * The helper never receives renderer ownership. Its job carries one recording
- * context, a copy of the fixed recording state, and a span of already resolved
- * packets, so it cannot reach presentation state, queues, the allocator, or a
- * resource owner.
+ * context, a copy of the fixed forward recording state, and a span of already
+ * resolved packets, so it cannot reach presentation state, queues, the
+ * allocator, or a resource owner.
+ *
+ * Only the concrete job stored by value makes this mechanism forward-specific.
+ * If another pass later proves it needs the same lifecycle, extract one typed
+ * mechanism rather than duplicating this worker.
  *
  * No helper state survives one frame. dispatch() must be followed by
  * awaitCompletion() before the caller's job arguments expire, which the
  * renderer guarantees with a scope guard so the wait also happens while an
  * exception unwinds.
  */
-class SecondaryRecordingWorker final
+class ForwardSecondaryRecordingWorker final
 {
 public:
     /** @brief Starts the helper thread parked on its request semaphore. */
-    SecondaryRecordingWorker();
+    ForwardSecondaryRecordingWorker();
 
     /** @brief Requests shutdown and joins the helper. */
-    ~SecondaryRecordingWorker() noexcept;
+    ~ForwardSecondaryRecordingWorker() noexcept;
 
     /// @brief Copy construction is disabled because the helper owns a thread.
-    SecondaryRecordingWorker(const SecondaryRecordingWorker&) = delete;
+    ForwardSecondaryRecordingWorker(const ForwardSecondaryRecordingWorker&) = delete;
     /// @brief Copy assignment is disabled because the helper owns a thread.
-    SecondaryRecordingWorker& operator=(const SecondaryRecordingWorker&) = delete;
+    ForwardSecondaryRecordingWorker& operator=(const ForwardSecondaryRecordingWorker&) = delete;
     /// @brief Move construction is disabled so the running thread's owner is fixed.
-    SecondaryRecordingWorker(SecondaryRecordingWorker&&) = delete;
+    ForwardSecondaryRecordingWorker(ForwardSecondaryRecordingWorker&&) = delete;
     /// @brief Move assignment is disabled so the running thread's owner is fixed.
-    SecondaryRecordingWorker& operator=(SecondaryRecordingWorker&&) = delete;
+    ForwardSecondaryRecordingWorker& operator=(ForwardSecondaryRecordingWorker&&) = delete;
 
     /**
      * @brief Publishes one chunk and wakes the helper.
@@ -135,7 +140,7 @@ public:
      * instrumentation. It must outlive the matching awaitCompletion().
      * @pre The helper is idle.
      */
-    void dispatch(SecondaryChunkRecorder recorder, const SecondaryChunkJob& job,
+    void dispatch(ForwardSecondaryChunkRecorder recorder, const ForwardSecondaryChunkJob& job,
                   ChunkRecordingTimings* timings) noexcept;
 
     /**
@@ -180,11 +185,11 @@ private:
 
     // Written by the coordinator before releasing request_ and read by the
     // helper after acquiring it, so the semaphore supplies the ordering.
-    SecondaryChunkRecorder recorder_ = nullptr; ///< Recording function for the current chunk.
-    SecondaryChunkJob job_;                     ///< Current chunk description.
-    ChunkRecordingTimings* timings_ = nullptr;  ///< Optional participant block for the chunk.
-    std::exception_ptr failure_;                ///< Failure captured by the current chunk.
-    std::atomic<bool> stopping_{false};         ///< Set once, before the final request.
+    ForwardSecondaryChunkRecorder recorder_ = nullptr; ///< Recording function for the chunk.
+    ForwardSecondaryChunkJob job_;                     ///< Current chunk description.
+    ChunkRecordingTimings* timings_ = nullptr; ///< Optional participant block for the chunk.
+    std::exception_ptr failure_;               ///< Failure captured by the current chunk.
+    std::atomic<bool> stopping_{false};        ///< Set once, before the final request.
     // Cleared by dispatch and published by the helper. Its acquire observation
     // supplies the happens-before for the participant timings and any captured
     // failure, so no separate completion semaphore is needed.
