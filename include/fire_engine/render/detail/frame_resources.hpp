@@ -22,7 +22,7 @@ struct FrameResources final
     // Both contexts exist in every configuration so one-thread and two-thread
     // measurements share an ownership topology. An allocated pool that is never
     // reset or recorded into contributes no measured work.
-    std::array<RecordingContext, kMaxSecondaryRecordingThreads>
+    std::array<RecordingContext, kMaxForwardRecordingParticipants>
         secondaries; ///< One recording context per participant.
 };
 /** @endcond */

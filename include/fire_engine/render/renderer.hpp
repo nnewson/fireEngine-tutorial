@@ -23,8 +23,8 @@ struct SceneDrawList;
 
 /* --- Enums --- */
 
-/** @brief Command-buffer structure used to record one geometry pass. */
-enum class CommandRecordingMode : std::uint8_t
+/** @brief Command-buffer structure used to record the forward pass. */
+enum class ForwardRecordingMode : std::uint8_t
 {
     eSecondaryCommandBuffer, ///< Record draws in a secondary executed by the primary.
     eDirectPrimary,          ///< Record draws directly for attribution benchmarks.
@@ -32,8 +32,8 @@ enum class CommandRecordingMode : std::uint8_t
 
 /* --- Constants --- */
 
-/** @brief Largest number of threads that may record secondary command buffers. */
-inline constexpr std::size_t kMaxSecondaryRecordingThreads = 2;
+/** @brief Largest number of participants that may record forward secondary commands. */
+inline constexpr std::size_t kMaxForwardRecordingParticipants = 2;
 
 /* --- POD structs --- */
 
@@ -47,11 +47,11 @@ struct FrameCaptureRequest
 /** @brief Construction-time renderer choices that remain fixed for its lifetime. */
 struct RendererConfiguration
 {
-    CommandRecordingMode commandRecordingMode =
-        CommandRecordingMode::eSecondaryCommandBuffer; ///< Geometry recording structure.
+    ForwardRecordingMode forwardRecordingMode =
+        ForwardRecordingMode::eSecondaryCommandBuffer; ///< Forward recording structure.
     /// Diagnostic override forcing a participant count, counting the coordinator itself.
     /// Unset selects the participant count from the workload, which is the production policy.
-    std::optional<std::size_t> forcedSecondaryRecordingThreadCount;
+    std::optional<std::size_t> forcedForwardRecordingParticipantCount;
     std::optional<FrameCaptureRequest> captureRequest; ///< Optional one-shot diagnostic capture.
 };
 
@@ -71,11 +71,11 @@ struct RendererInfo
     std::string imageFormat;                   ///< Human-readable Vulkan image format.
     std::string depthFormat;                   ///< Human-readable depth attachment format.
     std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
-    CommandRecordingMode commandRecordingMode; ///< Geometry recording structure in use.
+    ForwardRecordingMode forwardRecordingMode; ///< Forward recording structure in use.
     /// Diagnostic override in force, or unset when the workload selects the participant count.
-    std::optional<std::size_t> forcedSecondaryRecordingThreadCount;
+    std::optional<std::size_t> forcedForwardRecordingParticipantCount;
     /// Per-participant draw count at or above which the workload policy splits recording.
-    std::size_t minimumDrawsPerRecordingParticipant;
+    std::size_t minimumDrawsPerForwardRecordingParticipant;
 };
 
 /** @brief Pool-reset and recording durations for one secondary recording participant. */
@@ -125,7 +125,7 @@ struct RendererCpuTimings
     /// Whether the coordinator actually blocked. Not the complement of the flag above: completion
     /// can land after the last poll but before the fallback's first load, blocking neither way.
     bool secondaryCompletionUsedBlockingWait = false;
-    std::array<ChunkCpuTimings, kMaxSecondaryRecordingThreads>
+    std::array<ChunkCpuTimings, kMaxForwardRecordingParticipants>
         chunks{};                                         ///< Per-participant detail.
     std::chrono::nanoseconds primaryCommandRecording{};   ///< Serial pass and transition recording.
     std::chrono::nanoseconds secondaryCommandExecution{}; ///< Serial secondary execution call.
@@ -164,7 +164,7 @@ public:
      * @param glfw Initialized GLFW lifetime owner.
      * @param window Window used to create and size the presentation surface.
      * @param applicationName Name reported to the Vulkan runtime.
-     * @param configuration Fixed command-recording choices for this renderer.
+     * @param configuration Fixed forward-recording and capture choices.
      * @throws std::invalid_argument if an enabled capture request is incomplete.
      * @throws std::runtime_error if no suitable Vulkan configuration can be created.
      */

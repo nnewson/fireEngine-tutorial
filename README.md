@@ -70,36 +70,38 @@ its cube geometry:
 ./build/fireEngineTutorial --benchmark 10000
 ```
 
-Add `--direct-primary` to record the same workload directly into the primary
-command buffer. This is an attribution control for comparing driver work around
-secondary command buffers, not an alternative production renderer:
+Add `--forward-direct-primary` to record the same workload directly into the
+primary command buffer. This is an attribution control for comparing driver
+work around forward secondary command buffers, not an alternative production
+renderer:
 
 ```sh
-./build/fireEngineTutorial --benchmark 10000 --direct-primary
+./build/fireEngineTutorial --benchmark 10000 --forward-direct-primary
 ```
 
 Recording is split between the coordinator and one helper thread only when the
 frame is large enough to have shown a benefit on both decision-bearing
 implementations in the synthetic benchmark, currently 5,000 draws per
-participant. `--recording-threads 2` overrides
-that policy so a forced split can be measured or validated below the threshold;
-it is a diagnostic control rather than a production setting. The same option
-applies to `--smoke` scenarios so the mixed-resource fixture can be validated
-in split form:
+participant. `--forward-recording-participants 2` overrides that policy so a
+forced split can be measured or validated below the threshold; it is a
+diagnostic control rather than a production setting. The same option applies to
+`--smoke` scenarios so the mixed-resource fixture can be validated in split
+form:
 
 ```sh
-./build/fireEngineTutorial --benchmark 10000 --recording-threads 2
-./build/fireEngineTutorial --smoke prepare-twice --recording-threads 2
+./build/fireEngineTutorial --benchmark 10000 --forward-recording-participants 2
+./build/fireEngineTutorial --smoke prepare-twice --forward-recording-participants 2
 ```
 
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
-draw-list construction, recording-input compilation, frame-uniform updates,
-coordinator and worker command-pool reset, primary and secondary recording,
-submission, and presentation waits. The per-slot report attributes worker-owned
-reset and recording work; it does not claim a placement speedup before workers
-exist. Two Vulkan submission slots are cycled independently of the
-driver-selected swapchain image. Frames affected by out-of-date or suboptimal
+draw-list construction, forward recording-input compilation, forward
+frame-uniform updates, forward coordinator and participant command-pool resets,
+forward primary and secondary recording, submission, and presentation waits.
+The per-slot report attributes participant-owned reset and recording work; it
+does not claim a placement speedup before participants exist. Two Vulkan
+submission slots are cycled independently of the driver-selected swapchain
+image. Frames affected by out-of-date or suboptimal
 presentation are excluded from the measured sample set.
 
 Use a Release build for performance results. Values are comparable only for

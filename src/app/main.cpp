@@ -45,9 +45,10 @@ constexpr float kSmokeAnimationStepSeconds = 0.8f;
 
 /** @brief Complete command-line grammar appended to every parsing failure. */
 constexpr std::string_view kCommandLineUsage =
-    "Usage: fireEngineTutorial [--benchmark positive-instances [--direct-primary] "
-    "[--recording-threads count] | --frames positive-count [--recreate-every-frame] | "
-    "--smoke scenario [--recording-threads count]] "
+    "Usage: fireEngineTutorial [--benchmark positive-instances [--forward-direct-primary] "
+    "[--forward-recording-participants count] | --frames positive-count "
+    "[--recreate-every-frame] | --smoke scenario "
+    "[--forward-recording-participants count]] "
     "[--capture path --capture-frame positive-ordinal] (options may appear in any order)";
 
 /** @brief Fixed application-owned camera used by every tutorial scenario. */
@@ -90,9 +91,9 @@ struct RunOptions
     std::optional<std::size_t> benchmarkInstanceCount;  ///< Repeated cubes in benchmark mode.
     SmokeScenario smokeScenario = SmokeScenario::eNone; ///< Optional device scenario.
     bool recreateEveryFrame = false; ///< Whether every presented frame replaces presentation state.
-    bool recordDirectly = false; ///< Whether the benchmark bypasses the secondary command buffer.
+    bool recordForwardDirectly = false; ///< Whether the benchmark bypasses forward secondaries.
     /// Diagnostic override forcing a participant count, or unset to use the workload policy.
-    std::optional<std::size_t> forcedRecordingThreads;
+    std::optional<std::size_t> forcedForwardRecordingParticipantCount;
     std::optional<fire_engine::FrameCaptureRequest> captureRequest; ///< Grouped one-shot capture.
 };
 
@@ -163,12 +164,12 @@ constexpr std::array<SmokeDefinition, 4> kSmokeDefinitions{{
                                                  std::string_view optionName);
 
 /**
- * @brief Parses the supported secondary-recording participant count.
- * @param text Argument text following --recording-threads.
+ * @brief Parses the supported forward secondary-recording participant count.
+ * @param text Argument text following --forward-recording-participants.
  * @return Participant count including the coordinator.
  * @throws std::invalid_argument if the count is not positive or exceeds the supported maximum.
  */
-[[nodiscard]] std::size_t parseRecordingThreadCount(std::string_view text);
+[[nodiscard]] std::size_t parseForwardRecordingParticipantCount(std::string_view text);
 
 /**
  * @brief Adds an untextured render object that reuses AnimatedCube's imported mesh.
@@ -219,10 +220,10 @@ try
     fire_engine::Glfw glfw;
     fire_engine::Window window{800, 600, applicationName};
     const fire_engine::RendererConfiguration rendererConfiguration{
-        .commandRecordingMode = options.recordDirectly
-                                    ? fire_engine::CommandRecordingMode::eDirectPrimary
-                                    : fire_engine::CommandRecordingMode::eSecondaryCommandBuffer,
-        .forcedSecondaryRecordingThreadCount = options.forcedRecordingThreads,
+        .forwardRecordingMode = options.recordForwardDirectly
+                                    ? fire_engine::ForwardRecordingMode::eDirectPrimary
+                                    : fire_engine::ForwardRecordingMode::eSecondaryCommandBuffer,
+        .forcedForwardRecordingParticipantCount = options.forcedForwardRecordingParticipantCount,
         .captureRequest = options.captureRequest,
     };
     fire_engine::Renderer renderer{glfw, window, applicationName, rendererConfiguration};
@@ -397,9 +398,9 @@ try
 {
     RunOptions options;
     RunMode mode = RunMode::eInteractive;
-    bool directPrimarySeen = false;
+    bool forwardDirectPrimarySeen = false;
     bool recreateEveryFrameSeen = false;
-    bool recordingThreadsSeen = false;
+    bool forwardRecordingParticipantsSeen = false;
     bool captureSeen = false;
     bool captureFrameSeen = false;
     std::optional<std::filesystem::path> capturePath;
@@ -469,14 +470,14 @@ try
             options.smokeScenario = definition->scenario;
             options.recreateEveryFrame = definition->recreateEveryFrame;
         }
-        else if (option == "--direct-primary")
+        else if (option == "--forward-direct-primary")
         {
-            if (directPrimarySeen)
+            if (forwardDirectPrimarySeen)
             {
-                throw std::invalid_argument("Repeated option: --direct-primary");
+                throw std::invalid_argument("Repeated option: --forward-direct-primary");
             }
-            directPrimarySeen = true;
-            options.recordDirectly = true;
+            forwardDirectPrimarySeen = true;
+            options.recordForwardDirectly = true;
         }
         else if (option == "--recreate-every-frame")
         {
@@ -487,15 +488,15 @@ try
             recreateEveryFrameSeen = true;
             options.recreateEveryFrame = true;
         }
-        else if (option == "--recording-threads")
+        else if (option == "--forward-recording-participants")
         {
-            if (recordingThreadsSeen)
+            if (forwardRecordingParticipantsSeen)
             {
-                throw std::invalid_argument("Repeated option: --recording-threads");
+                throw std::invalid_argument("Repeated option: --forward-recording-participants");
             }
-            recordingThreadsSeen = true;
-            options.forcedRecordingThreads =
-                parseRecordingThreadCount(requireValue(argumentIndex, option));
+            forwardRecordingParticipantsSeen = true;
+            options.forcedForwardRecordingParticipantCount =
+                parseForwardRecordingParticipantCount(requireValue(argumentIndex, option));
         }
         else if (option == "--capture")
         {
@@ -515,31 +516,42 @@ try
             captureFrameSeen = true;
             captureFrame = parsePositiveInteger(requireValue(argumentIndex, option), option);
         }
+        else if (option == "--direct-primary")
+        {
+            throw std::invalid_argument("--direct-primary was renamed to --forward-direct-primary");
+        }
+        else if (option == "--recording-threads")
+        {
+            throw std::invalid_argument(
+                "--recording-threads was renamed to --forward-recording-participants");
+        }
         else
         {
             throw std::invalid_argument{"Unknown option: " + std::string{option}};
         }
     }
 
-    if (options.recordDirectly && mode != RunMode::eBenchmark)
+    if (options.recordForwardDirectly && mode != RunMode::eBenchmark)
     {
-        throw std::invalid_argument("--direct-primary requires --benchmark");
+        throw std::invalid_argument("--forward-direct-primary requires --benchmark");
     }
     if (recreateEveryFrameSeen && mode != RunMode::eFrames)
     {
         throw std::invalid_argument("--recreate-every-frame requires --frames");
     }
-    if (recordingThreadsSeen && mode != RunMode::eBenchmark && mode != RunMode::eSmoke)
-    {
-        throw std::invalid_argument("--recording-threads requires --benchmark or --smoke");
-    }
-    // The direct control records no secondary at all, so a split request
-    // there would silently have no effect.
-    if (options.recordDirectly && options.forcedRecordingThreads.value_or(1) > 1)
+    if (forwardRecordingParticipantsSeen && mode != RunMode::eBenchmark && mode != RunMode::eSmoke)
     {
         throw std::invalid_argument(
-            "--direct-primary records no secondary command buffer, so it cannot be combined "
-            "with more than one recording thread");
+            "--forward-recording-participants requires --benchmark or --smoke");
+    }
+    // The forward direct control records no secondary at all, so a split request
+    // there would silently have no effect.
+    if (options.recordForwardDirectly &&
+        options.forcedForwardRecordingParticipantCount.value_or(1) > 1)
+    {
+        throw std::invalid_argument(
+            "--forward-direct-primary records no forward secondary command buffer, so it "
+            "cannot be combined with more than one forward recording participant");
     }
     if (capturePath.has_value() != captureFrame.has_value())
     {
@@ -573,14 +585,16 @@ catch (const std::invalid_argument& error)
     throw std::invalid_argument{std::string{error.what()} + '\n' + std::string{kCommandLineUsage}};
 }
 
-[[nodiscard]] std::size_t parseRecordingThreadCount(std::string_view text)
+[[nodiscard]] std::size_t parseForwardRecordingParticipantCount(std::string_view text)
 {
-    const std::uint64_t threads = parsePositiveInteger(text, "--recording-threads");
-    if (threads > fire_engine::kMaxSecondaryRecordingThreads)
+    const std::uint64_t participants =
+        parsePositiveInteger(text, "--forward-recording-participants");
+    if (participants > fire_engine::kMaxForwardRecordingParticipants)
     {
-        throw std::invalid_argument("--recording-threads exceeds the supported participant count");
+        throw std::invalid_argument(
+            "--forward-recording-participants exceeds the supported participant count");
     }
-    return static_cast<std::size_t>(threads);
+    return static_cast<std::size_t>(participants);
 }
 
 std::uint64_t parsePositiveInteger(std::string_view text, std::string_view optionName)
