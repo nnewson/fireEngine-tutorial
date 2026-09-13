@@ -171,14 +171,20 @@ ResourceCompiler::compile(const RenderAssets& assets, const RenderPreparationPla
                 : *candidate->fallbackTexture;
         assert(mesh.vertexLayout() == object.vertexLayout);
         assert(object.vertexLayout == plan.pipeline.vertexLayout);
-        candidate->objects[object.id.value] = CompiledDraw{
-            .vertexBuffer = mesh.vertexBuffer().handle(),
-            .indexBuffer = mesh.indexBuffer().handle(),
-            .indexCount = mesh.indexCount(),
-            .sampler = *texture.sampler(),
-            .imageView = *texture.image().view(),
-            .baseColor = material.baseColor,
-            .vertexLayout = object.vertexLayout,
+        candidate->objects[object.id.value] = CompiledRenderObject{
+            .geometry =
+                {
+                    .vertexBuffer = mesh.vertexBuffer().handle(),
+                    .indexBuffer = mesh.indexBuffer().handle(),
+                    .indexCount = mesh.indexCount(),
+                    .vertexLayout = object.vertexLayout,
+                },
+            .forwardMaterial =
+                {
+                    .sampler = *texture.sampler(),
+                    .imageView = *texture.image().view(),
+                    .baseColor = material.baseColor,
+                },
         };
     }
 

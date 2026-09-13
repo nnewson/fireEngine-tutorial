@@ -10,7 +10,7 @@
 #include <fire_engine/graphics/mesh.hpp>
 #include <fire_engine/graphics/pipeline_description.hpp>
 #include <fire_engine/render/detail/buffer.hpp>
-#include <fire_engine/render/detail/compiled_draw.hpp>
+#include <fire_engine/render/detail/compiled_render_object.hpp>
 #include <fire_engine/render/detail/image.hpp>
 
 namespace fire_engine
@@ -143,8 +143,8 @@ private:
  *
  * Only the image/texture declaration order is a lifetime constraint: image
  * owners precede texture borrowers so reverse destruction releases every
- * texture before the image it references. Meshes and the plain-handle packet
- * table have no borrower-before-owner ordering requirement.
+ * texture before the image it references. Meshes and the plain-handle
+ * render-object table have no borrower-before-owner ordering requirement.
  */
 struct CompiledResourceGraph
 {
@@ -153,7 +153,8 @@ struct CompiledResourceGraph
     std::vector<std::unique_ptr<CompiledTexture>> textures; ///< Dense TextureId lookup.
     std::shared_ptr<CompiledTexture> fallbackTexture;       ///< Sampler paired with fallbackImage.
     std::vector<std::unique_ptr<CompiledMesh>> meshes;      ///< Dense MeshId lookup.
-    std::vector<std::optional<CompiledDraw>> objects;       ///< Dense RenderObjectId packet lookup.
+    /// Dense RenderObjectId lookup containing geometry and forward material state.
+    std::vector<std::optional<CompiledRenderObject>> objects;
 };
 /** @endcond */
 } // namespace detail

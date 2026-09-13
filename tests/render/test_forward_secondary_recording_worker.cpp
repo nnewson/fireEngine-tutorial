@@ -1,4 +1,4 @@
-#include "fire_engine/render/detail/secondary_recording_worker.hpp"
+#include "fire_engine/render/detail/forward_secondary_recording_worker.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,13 +10,13 @@
 namespace
 {
 using fire_engine::detail::ChunkRecordingTimings;
-using fire_engine::detail::SecondaryChunkJob;
-using fire_engine::detail::SecondaryRecordingWorker;
+using fire_engine::detail::ForwardSecondaryChunkJob;
+using fire_engine::detail::ForwardSecondaryRecordingWorker;
 
 std::atomic<int> gCompletedChunks{0};
 
 /** @brief Records nothing but proves the helper invoked the recorder. */
-void countingRecorder(const SecondaryChunkJob&, ChunkRecordingTimings* timings)
+void countingRecorder(const ForwardSecondaryChunkJob&, ChunkRecordingTimings* timings)
 {
     gCompletedChunks.fetch_add(1, std::memory_order_relaxed);
     if (timings != nullptr)
@@ -26,23 +26,24 @@ void countingRecorder(const SecondaryChunkJob&, ChunkRecordingTimings* timings)
 }
 
 /** @brief Fails the way a Vulkan call inside a chunk would. */
-void throwingRecorder(const SecondaryChunkJob&, ChunkRecordingTimings*)
+void throwingRecorder(const ForwardSecondaryChunkJob&, ChunkRecordingTimings*)
 {
     throw std::runtime_error("chunk failure");
 }
 } // namespace
 
-static_assert(!std::is_copy_constructible_v<SecondaryRecordingWorker>);
-static_assert(!std::is_move_constructible_v<SecondaryRecordingWorker>);
+static_assert(!std::is_copy_constructible_v<ForwardSecondaryRecordingWorker>);
+static_assert(!std::is_move_constructible_v<ForwardSecondaryRecordingWorker>);
+static_assert(std::is_trivially_copyable_v<ForwardSecondaryChunkJob>);
 
-TEST_CASE("Secondary recording worker runs a dispatched chunk and reports idleness")
+TEST_CASE("Forward secondary recording worker runs a dispatched chunk and reports idleness")
 {
     gCompletedChunks.store(0, std::memory_order_relaxed);
-    SecondaryRecordingWorker worker;
+    ForwardSecondaryRecordingWorker worker;
     REQUIRE(worker.idle());
 
     ChunkRecordingTimings timings;
-    const SecondaryChunkJob job;
+    const ForwardSecondaryChunkJob job;
     worker.dispatch(&countingRecorder, job, &timings);
     worker.awaitCompletion();
 
@@ -52,11 +53,11 @@ TEST_CASE("Secondary recording worker runs a dispatched chunk and reports idlene
     REQUIRE_NOTHROW(worker.rethrowIfFailed());
 }
 
-TEST_CASE("Secondary recording worker reports ordered completion-wait boundaries")
+TEST_CASE("Forward secondary recording worker reports ordered completion-wait boundaries")
 {
-    SecondaryRecordingWorker worker;
+    ForwardSecondaryRecordingWorker worker;
 
-    const SecondaryChunkJob job;
+    const ForwardSecondaryChunkJob job;
     worker.dispatch(&countingRecorder, job, nullptr);
     worker.awaitCompletion();
 
@@ -69,23 +70,23 @@ TEST_CASE("Secondary recording worker reports ordered completion-wait boundaries
     REQUIRE_FALSE((wait.acquiredBySpin && wait.usedBlockingWait));
 }
 
-TEST_CASE("Secondary recording worker omits instrumentation when no block is supplied")
+TEST_CASE("Forward secondary recording worker omits instrumentation when no block is supplied")
 {
     gCompletedChunks.store(0, std::memory_order_relaxed);
-    SecondaryRecordingWorker worker;
+    ForwardSecondaryRecordingWorker worker;
 
-    const SecondaryChunkJob job;
+    const ForwardSecondaryChunkJob job;
     worker.dispatch(&countingRecorder, job, nullptr);
     worker.awaitCompletion();
 
     REQUIRE(gCompletedChunks.load(std::memory_order_relaxed) == 1);
 }
 
-TEST_CASE("Secondary recording worker reports a chunk failure only after completion")
+TEST_CASE("Forward secondary recording worker reports a chunk failure only after completion")
 {
-    SecondaryRecordingWorker worker;
+    ForwardSecondaryRecordingWorker worker;
 
-    const SecondaryChunkJob job;
+    const ForwardSecondaryChunkJob job;
     worker.dispatch(&throwingRecorder, job, nullptr);
     // Completion is signalled even though the chunk threw, so the coordinator
     // can always wait before its job arguments expire.
@@ -94,11 +95,11 @@ TEST_CASE("Secondary recording worker reports a chunk failure only after complet
     REQUIRE_THROWS_AS(worker.rethrowIfFailed(), std::runtime_error);
 }
 
-TEST_CASE("Secondary recording worker clears a previous failure before the next chunk")
+TEST_CASE("Forward secondary recording worker clears a previous failure before the next chunk")
 {
-    SecondaryRecordingWorker worker;
+    ForwardSecondaryRecordingWorker worker;
 
-    const SecondaryChunkJob job;
+    const ForwardSecondaryChunkJob job;
     worker.dispatch(&throwingRecorder, job, nullptr);
     worker.awaitCompletion();
 
@@ -112,11 +113,11 @@ TEST_CASE("Secondary recording worker clears a previous failure before the next 
     REQUIRE_NOTHROW(worker.rethrowIfFailed());
 }
 
-TEST_CASE("Secondary recording worker rethrows a failure that was never observed")
+TEST_CASE("Forward secondary recording worker rethrows a failure that was never observed")
 {
-    SecondaryRecordingWorker worker;
+    ForwardSecondaryRecordingWorker worker;
 
-    const SecondaryChunkJob job;
+    const ForwardSecondaryChunkJob job;
     worker.dispatch(&throwingRecorder, job, nullptr);
     worker.awaitCompletion();
     // Dropping the failure without rethrowing must not leak into the next

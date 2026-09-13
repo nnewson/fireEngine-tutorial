@@ -67,16 +67,16 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/draw_binding_state.cpp
     src/render/forward_frame_uniform_buffer.cpp
     src/render/forward_pipeline.cpp
+    src/render/forward_recording_input.cpp
+    src/render/forward_secondary_recording_worker.cpp
     src/render/frame_slot.cpp
     src/render/image.cpp
     src/render/instance_support.cpp
     src/render/presentation_state.cpp
     src/render/readback_buffer.cpp
     src/render/recording_context.cpp
-    src/render/recording_input.cpp
     src/render/renderer.cpp
     src/render/resource_compiler.cpp
-    src/render/secondary_recording_worker.cpp
     src/render/spirv_loader.cpp
     src/render/swapchain.cpp
     src/render/swapchain_selection.cpp
@@ -244,8 +244,8 @@ add_executable(fireEngineTutorialTests
     tests/render/test_camera.cpp
     tests/render/test_capture_format_mapping.cpp
     tests/render/test_draw_binding_state.cpp
-    tests/render/test_recording_input.cpp
-    tests/render/test_secondary_recording_worker.cpp
+    tests/render/test_forward_recording_input.cpp
+    tests/render/test_forward_secondary_recording_worker.cpp
     tests/render/test_spirv_loader.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp

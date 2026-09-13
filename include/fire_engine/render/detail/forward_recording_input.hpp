@@ -20,8 +20,8 @@ namespace detail
 /** @cond INTERNAL */
 /* --- POD structs --- */
 
-/** @brief Fixed plain-handle state required by an independent recording context. */
-struct RecordingState
+/** @brief Fixed plain-handle state required by one forward recording context. */
+struct ForwardRecordingState
 {
     vk::Pipeline pipeline;             ///< Graphics pipeline compatible with the attachments.
     vk::PipelineLayout pipelineLayout; ///< Layout used by descriptors and push constants.
@@ -34,8 +34,8 @@ struct RecordingState
     VertexLayoutKey vertexLayout;      ///< Layout compiled into pipeline vertex input state.
 };
 
-/** @brief One fully resolved draw packet copied into the recording-input arena. */
-struct RecordingDraw
+/** @brief One fully resolved forward draw copied into the recording-input arena. */
+struct ForwardRecordingDraw
 {
     vk::Buffer vertexBuffer;  ///< Device-local vertex buffer.
     vk::Buffer indexBuffer;   ///< Device-local 32-bit index buffer.
@@ -48,75 +48,77 @@ struct RecordingDraw
 /* --- Classes --- */
 
 /**
- * @brief Immutable capability view consumed during one CPU recording transaction.
+ * @brief Immutable forward capability consumed during one CPU recording transaction.
  *
  * The input contains plain Vulkan handles rather than RAII owners. Its draw
- * span remains valid until RecordingInputCompiler compiles another input.
+ * span remains valid until ForwardRecordingInputCompiler compiles another input.
  * Renderer creates it inside one non-reentrant drawFrame transaction, keeps
  * every referenced owner stable until all synchronous CPU recording consumers
- * have returned, and joins any future internal workers before the transaction
+ * have returned, and joins every internal worker before the transaction
  * continues. Normal submission retirement protects resources subsequently
  * consumed by the GPU.
  */
-class RecordingInput final
+class ForwardRecordingInput final
 {
 public:
-    /** @brief Ends the non-owning recording-input transaction. */
-    ~RecordingInput() = default;
+    /** @brief Ends the non-owning forward-recording transaction. */
+    ~ForwardRecordingInput() = default;
 
-    RecordingInput(const RecordingInput&) = delete;
-    RecordingInput& operator=(const RecordingInput&) = delete;
-    RecordingInput(RecordingInput&&) = delete;
-    RecordingInput& operator=(RecordingInput&&) = delete;
+    ForwardRecordingInput(const ForwardRecordingInput&) = delete;
+    ForwardRecordingInput& operator=(const ForwardRecordingInput&) = delete;
+    ForwardRecordingInput(ForwardRecordingInput&&) = delete;
+    ForwardRecordingInput& operator=(ForwardRecordingInput&&) = delete;
 
     /** @brief Returns fixed worker-visible state. @return Plain handles and dynamic state. */
-    [[nodiscard]] const RecordingState& state() const noexcept;
+    [[nodiscard]] const ForwardRecordingState& state() const noexcept;
 
     /** @brief Returns ordered compiled packets. @return Read-only arena-backed draw span. */
-    [[nodiscard]] std::span<const RecordingDraw> draws() const noexcept;
+    [[nodiscard]] std::span<const ForwardRecordingDraw> draws() const noexcept;
 
 private:
-    friend class RecordingInputCompiler;
+    friend class ForwardRecordingInputCompiler;
 
     /**
      * @brief Freezes one complete worker-visible input.
-     * @param state Fixed plain-handle recording state.
+     * @param state Fixed plain-handle forward recording state.
      * @param draws Compiled packets owned by the compiler until its next build.
      */
-    RecordingInput(RecordingState state, std::span<const RecordingDraw> draws) noexcept;
+    ForwardRecordingInput(ForwardRecordingState state,
+                          std::span<const ForwardRecordingDraw> draws) noexcept;
 
-    RecordingState state_;                 ///< Complete fixed recording capability.
-    std::span<const RecordingDraw> draws_; ///< Immutable packets in stable arena storage.
+    ForwardRecordingState state_;                 ///< Complete fixed recording capability.
+    std::span<const ForwardRecordingDraw> draws_; ///< Immutable packets in stable arena storage.
 };
 
-/** @brief Resolves external scene draws into one immutable recording-input transaction. */
-class RecordingInputCompiler final
+/** @brief Resolves external scene draws into one immutable forward-recording transaction. */
+class ForwardRecordingInputCompiler final
 {
 public:
     /** @brief Creates an empty reusable compiled-packet arena. */
-    RecordingInputCompiler() = default;
+    ForwardRecordingInputCompiler() = default;
     /** @brief Releases packet storage after the active input has expired. */
-    ~RecordingInputCompiler() = default;
+    ~ForwardRecordingInputCompiler() = default;
 
-    RecordingInputCompiler(const RecordingInputCompiler&) = delete;
-    RecordingInputCompiler& operator=(const RecordingInputCompiler&) = delete;
-    RecordingInputCompiler(RecordingInputCompiler&&) = delete;
-    RecordingInputCompiler& operator=(RecordingInputCompiler&&) = delete;
+    ForwardRecordingInputCompiler(const ForwardRecordingInputCompiler&) = delete;
+    ForwardRecordingInputCompiler& operator=(const ForwardRecordingInputCompiler&) = delete;
+    ForwardRecordingInputCompiler(ForwardRecordingInputCompiler&&) = delete;
+    ForwardRecordingInputCompiler& operator=(ForwardRecordingInputCompiler&&) = delete;
 
     /**
      * @brief Resolves, validates, and freezes every draw for one recording transaction.
      * @param drawList External immutable scene snapshot consumed only during this call.
      * @param resources Restricted lookup into the current compiled-resource generation.
-     * @param state Current presentation and frame-slot recording state.
+     * @param state Current presentation and frame-slot forward recording state.
      * @return Immutable input valid until this compiler is used again.
      * @throws std::logic_error if a draw was not prepared or is pipeline-incompatible.
      * @pre The previous input returned by this compiler has no remaining CPU consumers.
      */
-    [[nodiscard]] RecordingInput compile(const SceneDrawList& drawList,
-                                         CompiledResourcesView resources, RecordingState state);
+    [[nodiscard]] ForwardRecordingInput compile(const SceneDrawList& drawList,
+                                                CompiledResourcesView resources,
+                                                ForwardRecordingState state);
 
 private:
-    std::vector<RecordingDraw> draws_; ///< Reused high-water packet storage.
+    std::vector<ForwardRecordingDraw> draws_; ///< Reused high-water packet storage.
 };
 /** @endcond */
 } // namespace detail

@@ -5,7 +5,7 @@
 #include <span>
 
 #include <fire_engine/graphics/render_ids.hpp>
-#include <fire_engine/render/detail/compiled_draw.hpp>
+#include <fire_engine/render/detail/compiled_render_object.hpp>
 
 namespace fire_engine::detail
 {
@@ -13,7 +13,7 @@ struct CompiledResourceGraph;
 
 /* --- Classes --- */
 
-/** @brief Read-only draw lookup capability borrowing one compiled-resource graph. */
+/** @brief Read-only render-object lookup borrowing one compiled-resource graph. */
 class CompiledResourcesView final
 {
 public:
@@ -22,18 +22,19 @@ public:
      * @param id Render-object ID selected by the current scene.
      * @return Complete packet by value, or nullopt when the ID was not prepared.
      */
-    [[nodiscard]] std::optional<CompiledDraw> find(RenderObjectId id) const noexcept;
+    [[nodiscard]] std::optional<CompiledRenderObject> find(RenderObjectId id) const noexcept;
 
 private:
     friend class CompiledResources;
 
     /**
-     * @brief Creates a restricted view of one stable packet table.
-     * @param draws Borrowed dense RenderObjectId lookup.
+     * @brief Creates a restricted view of one stable render-object table.
+     * @param objects Borrowed dense RenderObjectId lookup.
      */
-    explicit CompiledResourcesView(std::span<const std::optional<CompiledDraw>> draws) noexcept;
+    explicit CompiledResourcesView(
+        std::span<const std::optional<CompiledRenderObject>> objects) noexcept;
 
-    std::span<const std::optional<CompiledDraw>> draws_; ///< Borrowed packet-only capability.
+    std::span<const std::optional<CompiledRenderObject>> objects_; ///< Borrowed lookup capability.
 };
 
 /** @brief Owns the GPU resources compiled from the current render-preparation plan. */
@@ -58,13 +59,14 @@ public:
      */
     [[nodiscard]] CompiledResourcesView view() const noexcept;
 
-    /** @brief Returns the complete stable graph. @return Current compiler input and draw owner. */
+    /** @brief Returns the complete stable graph. @return Current compiler input and object owner.
+     */
     [[nodiscard]] const CompiledResourceGraph& graph() const noexcept;
 
     /**
      * @brief Commits one complete compiler-produced ownership graph.
      * @param replacement Complete candidate whose borrowers refer only to its owners.
-     * @pre No CompiledResourcesView or recording input still borrows the current graph.
+     * @pre No CompiledResourcesView or forward recording input still borrows the current graph.
      */
     void replace(std::unique_ptr<CompiledResourceGraph> replacement) noexcept;
 
