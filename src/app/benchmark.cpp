@@ -194,7 +194,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     // A configured split still falls back to one participant when the workload
     // is too small to form two non-empty ranges, so report what actually ran.
     std::size_t effectiveParticipants = 0;
-    for (const ChunkCpuTimings& chunk : samples_.front().renderer.chunks)
+    for (const ForwardParticipantCpuTimings& chunk : samples_.front().renderer.forward.chunks)
     {
         if (chunk.recorded)
         {
@@ -204,7 +204,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     for (const Sample& sample : samples_)
     {
         std::size_t sampleParticipants = 0;
-        for (const ChunkCpuTimings& chunk : sample.renderer.chunks)
+        for (const ForwardParticipantCpuTimings& chunk : sample.renderer.forward.chunks)
         {
             if (chunk.recorded)
             {
@@ -260,61 +260,62 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     printPhase("transform update", &Sample::transformUpdate);
     printPhase("draw-list build", &Sample::drawListBuild);
     printPhase("forward recording-input build",
-               [](const Sample& sample) { return sample.renderer.recordingInputBuild; });
+               [](const Sample& sample) { return sample.renderer.forward.recordingInputBuild; });
     printPhase("forward frame-uniform update",
-               [](const Sample& sample) { return sample.renderer.frameUniformUpdate; });
-    printPhase("forward coordinator command-pool reset",
-               [](const Sample& sample) { return sample.renderer.coordinatorCommandPoolReset; });
+               [](const Sample& sample) { return sample.renderer.forward.frameUniformUpdate; });
+    printPhase("forward coordinator command-pool reset", [](const Sample& sample)
+               { return sample.renderer.forward.coordinatorCommandPoolReset; });
     // With more than one participant these are summed participant CPU time, not
     // an elapsed phase: the participants overlap, so the sums are diagnostics
     // rather than a contribution to active work.
     printPhase(effectiveParticipants > 1 ? "forward participant pool reset (summed CPU)"
                                          : "forward participant command-pool reset",
-               [](const Sample& sample) { return sample.renderer.workerCommandPoolReset; });
+               [](const Sample& sample) { return sample.renderer.forward.workerCommandPoolReset; });
     printPhase(effectiveParticipants > 1 ? "forward secondary recording (summed CPU)"
                                          : "forward secondary command recording",
-               [](const Sample& sample) { return sample.renderer.secondaryCommandRecording; });
-    printPhase("forward secondary recording region",
-               [](const Sample& sample) { return sample.renderer.secondaryRecordingRegion; });
+               [](const Sample& sample)
+               { return sample.renderer.forward.secondaryCommandRecording; });
+    printPhase("forward secondary recording region", [](const Sample& sample)
+               { return sample.renderer.forward.secondaryRecordingRegion; });
     if (effectiveParticipants > 1)
     {
-        printPhase("forward participant-region critical path",
-                   [](const Sample& sample) { return sample.renderer.workerRegionCriticalPath; });
-        printPhase("forward participant reset-region span",
-                   [](const Sample& sample) { return sample.renderer.workerResetRegionSpan; });
+        printPhase("forward participant-region critical path", [](const Sample& sample)
+                   { return sample.renderer.forward.workerRegionCriticalPath; });
+        printPhase("forward participant reset-region span", [](const Sample& sample)
+                   { return sample.renderer.forward.workerResetRegionSpan; });
         printPhase("forward completion join wait",
-                   [](const Sample& sample) { return sample.renderer.secondaryJoinWait; });
-        printPhase("forward completion tail",
-                   [](const Sample& sample) { return sample.renderer.secondaryCompletionTail; });
+                   [](const Sample& sample) { return sample.renderer.forward.secondaryJoinWait; });
+        printPhase("forward completion tail", [](const Sample& sample)
+                   { return sample.renderer.forward.secondaryCompletionTail; });
         printPhase("forward helper work remaining at join", [](const Sample& sample)
-                   { return sample.renderer.secondaryHelperRemainingWork; });
+                   { return sample.renderer.forward.secondaryHelperRemainingWork; });
         for (std::size_t participant = 0; participant < effectiveParticipants; ++participant)
         {
             printPhase(std::format("forward participant {} pool reset", participant),
                        [participant](const Sample& sample)
-                       { return sample.renderer.chunks[participant].poolReset; });
+                       { return sample.renderer.forward.chunks[participant].poolReset; });
             printPhase(std::format("forward participant {} recording", participant),
                        [participant](const Sample& sample)
-                       { return sample.renderer.chunks[participant].recording; });
+                       { return sample.renderer.forward.chunks[participant].recording; });
             printPhase(std::format("forward participant {} reset start offset", participant),
                        [participant](const Sample& sample)
-                       { return sample.renderer.chunks[participant].resetStartOffset; });
+                       { return sample.renderer.forward.chunks[participant].resetStartOffset; });
         }
     }
-    printPhase("forward primary command recording",
-               [](const Sample& sample) { return sample.renderer.primaryCommandRecording; });
-    printPhase("forward secondary command execution",
-               [](const Sample& sample) { return sample.renderer.secondaryCommandExecution; });
+    printPhase("forward primary command recording", [](const Sample& sample)
+               { return sample.renderer.forward.primaryCommandRecording; });
+    printPhase("forward secondary command execution", [](const Sample& sample)
+               { return sample.renderer.forward.secondaryCommandExecution; });
     printPhase("queue submission",
-               [](const Sample& sample) { return sample.renderer.queueSubmission; });
+               [](const Sample& sample) { return sample.renderer.common.queueSubmission; });
     printPhase("frame-fence wait",
-               [](const Sample& sample) { return sample.renderer.frameFenceWait; });
+               [](const Sample& sample) { return sample.renderer.common.frameFenceWait; });
     printPhase("image-acquisition wait",
-               [](const Sample& sample) { return sample.renderer.imageAcquisitionWait; });
+               [](const Sample& sample) { return sample.renderer.common.imageAcquisitionWait; });
     printPhase("presentation-fence wait",
-               [](const Sample& sample) { return sample.renderer.presentationFenceWait; });
+               [](const Sample& sample) { return sample.renderer.common.presentationFenceWait; });
     printPhase("presentation call",
-               [](const Sample& sample) { return sample.renderer.presentation; });
+               [](const Sample& sample) { return sample.renderer.common.presentation; });
 
     std::chrono::nanoseconds snapshot{};
     std::chrono::nanoseconds workerCommandPoolReset{};
@@ -326,24 +327,26 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::chrono::nanoseconds activeWork{};
     for (const Sample& sample : samples_)
     {
-        const std::chrono::nanoseconds sampleSnapshot =
-            sample.transformUpdate + sample.drawListBuild + sample.renderer.recordingInputBuild;
+        const std::chrono::nanoseconds sampleSnapshot = sample.transformUpdate +
+                                                        sample.drawListBuild +
+                                                        sample.renderer.forward.recordingInputBuild;
         snapshot += sampleSnapshot;
-        workerCommandPoolReset += sample.renderer.workerCommandPoolReset;
-        secondaryRecording += sample.renderer.secondaryCommandRecording;
-        secondaryRecordingRegion += sample.renderer.secondaryRecordingRegion;
-        primaryRecording += sample.renderer.primaryCommandRecording;
-        secondaryExecution += sample.renderer.secondaryCommandExecution;
-        submission += sample.renderer.queueSubmission;
+        workerCommandPoolReset += sample.renderer.forward.workerCommandPoolReset;
+        secondaryRecording += sample.renderer.forward.secondaryCommandRecording;
+        secondaryRecordingRegion += sample.renderer.forward.secondaryRecordingRegion;
+        primaryRecording += sample.renderer.forward.primaryCommandRecording;
+        secondaryExecution += sample.renderer.forward.secondaryCommandExecution;
+        submission += sample.renderer.common.queueSubmission;
         // The secondary-recording region, not the participant sums, is what
         // enters active work. With more than one participant the sums overlap
         // in time and exclude dispatch and join, so adding them would both
         // double-count parallel work and hide the cost threading introduces.
-        activeWork += sampleSnapshot + sample.renderer.coordinatorCommandPoolReset +
-                      sample.renderer.frameUniformUpdate +
-                      sample.renderer.secondaryRecordingRegion +
-                      sample.renderer.primaryCommandRecording +
-                      sample.renderer.secondaryCommandExecution + sample.renderer.queueSubmission;
+        activeWork += sampleSnapshot + sample.renderer.forward.coordinatorCommandPoolReset +
+                      sample.renderer.forward.frameUniformUpdate +
+                      sample.renderer.forward.secondaryRecordingRegion +
+                      sample.renderer.forward.primaryCommandRecording +
+                      sample.renderer.forward.secondaryCommandExecution +
+                      sample.renderer.common.queueSubmission;
     }
     if (activeWork.count() == 0)
     {
@@ -388,11 +391,11 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
             std::size_t blockedFrames = 0;
             for (const Sample& sample : samples_)
             {
-                if (sample.renderer.secondaryCompletionAcquiredBySpin)
+                if (sample.renderer.forward.secondaryCompletionAcquiredBySpin)
                 {
                     ++spunFrames;
                 }
-                if (sample.renderer.secondaryCompletionUsedBlockingWait)
+                if (sample.renderer.forward.secondaryCompletionUsedBlockingWait)
                 {
                     ++blockedFrames;
                 }
