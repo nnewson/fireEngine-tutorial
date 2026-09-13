@@ -601,7 +601,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     const detail::ForwardRecordingInput forwardRecordingInput =
         [&]() -> detail::ForwardRecordingInput
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->recordingInputBuild};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->forward.recordingInputBuild};
         const vk::Extent2D extent = presentation_->swapchain().extent();
         const detail::ForwardRecordingState forwardRecordingState{
             .pipeline = *presentation_->forwardPipeline().pipeline(),
@@ -623,7 +623,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     const vk::raii::Device& logicalDevice = device_.logicalDevice();
     vk::Result fenceResult = vk::Result::eSuccess;
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameFenceWait};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.frameFenceWait};
         fenceResult = logicalDevice.waitForFences(*frameSlot.frameFinished(), vk::True,
                                                   std::numeric_limits<std::uint64_t>::max());
     }
@@ -632,7 +632,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
         throw vk::SystemError{vk::make_error_code(fenceResult), "Waiting for the frame fence"};
     }
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->frameUniformUpdate};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->forward.frameUniformUpdate};
         frame.forwardUniforms.update(forwardRecordingInput.state().frameUniforms);
     }
 
@@ -640,7 +640,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     bool swapchainIsSuboptimal = false;
     try
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->imageAcquisitionWait};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.imageAcquisitionWait};
         const auto [result, acquiredImageIndex] =
             presentation_->swapchain().handle().acquireNextImage(
                 std::numeric_limits<std::uint64_t>::max(), *frameSlot.imageAvailable());
@@ -655,25 +655,20 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
     }
 
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->presentationFenceWait};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.presentationFenceWait};
         presentation_->preparePresentFence(imageIndex);
     }
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->coordinatorCommandPoolReset};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr
+                                               : &timings->forward.coordinatorCommandPoolReset};
         frame.coordinator.resetCommands();
     }
     recordCommands(frameSlotIndex, imageIndex, forwardRecordingInput,
                    captureAttempt.has_value() ? &*captureAttempt : nullptr, timings);
-    if (timings != nullptr)
-    {
-        timings->commandPoolReset =
-            timings->coordinatorCommandPoolReset + timings->workerCommandPoolReset;
-    }
-
     // Nothing intentionally abandons the frame after this reset: a
     // successful submission will signal the fence, while errors unwind.
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->queueSubmission};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.queueSubmission};
         logicalDevice.resetFences(*frameSlot.frameFinished());
 
         const vk::SemaphoreSubmitInfo waitInfo{
@@ -737,7 +732,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
 
     try
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->presentation};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.presentation};
         if (device_.presentQueue().presentKHR(presentInfo) == vk::Result::eSuboptimalKHR)
         {
             swapchainIsSuboptimal = true;
@@ -863,10 +858,10 @@ void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t im
             // No chunk is marked recorded: this path records no secondary at
             // all, so it has zero recording participants even though its empty
             // pool is still reset and timed as the fixed-cost floor.
-            timings->workerCommandPoolReset = elapsed;
-            timings->secondaryRecordingRegion = elapsed;
-            timings->workerResetRegionSpan = elapsed;
-            timings->workerRegionCriticalPath = elapsed;
+            timings->forward.workerCommandPoolReset = elapsed;
+            timings->forward.secondaryRecordingRegion = elapsed;
+            timings->forward.workerResetRegionSpan = elapsed;
+            timings->forward.workerRegionCriticalPath = elapsed;
         }
         recordDirectCommands(frameSlotIndex, imageIndex, input, captureAttempt, timings);
         return;
@@ -901,7 +896,8 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
         .draws = draws.first(firstChunkSize),
     };
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryRecordingRegion};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr
+                                               : &timings->forward.secondaryRecordingRegion};
         if (participants > 1)
         {
             const detail::ForwardSecondaryChunkJob helperJob{
@@ -930,12 +926,14 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
 
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr
+                                               : &timings->forward.primaryCommandRecording};
         beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex,
                               vk::RenderingFlagBits::eContentsSecondaryCommandBuffers);
     }
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->secondaryCommandExecution};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr
+                                               : &timings->forward.secondaryCommandExecution};
         // Chunk order is preserved so recorded draw order survives the split.
         if (participants > 1)
         {
@@ -950,7 +948,8 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
         }
     }
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr
+                                               : &timings->forward.primaryCommandRecording};
         endPrimaryRecording(primaryCommandBuffer, imageIndex, captureAttempt);
     }
 }
@@ -960,7 +959,7 @@ void Renderer::Impl::recordDirectCommands(std::size_t frameSlotIndex, std::uint3
                                           const CaptureAttempt* captureAttempt,
                                           RendererCpuTimings* timings)
 {
-    CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
+    CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->forward.primaryCommandRecording};
     const detail::FrameResources& frame = frames_[frameSlotIndex];
     const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
     beginPrimaryRecording(primaryCommandBuffer, frameSlotIndex, imageIndex, {});
@@ -1471,40 +1470,40 @@ void mergeChunkTimings(
             std::chrono::duration_cast<std::chrono::nanoseconds>(chunk.resetEnd - chunk.resetStart);
         const auto recording =
             std::chrono::duration_cast<std::chrono::nanoseconds>(chunk.recordEnd - chunk.resetEnd);
-        timings->chunks[index] = ChunkCpuTimings{
+        timings->forward.chunks[index] = ForwardParticipantCpuTimings{
             .poolReset = poolReset,
             .recording = recording,
             .resetStartOffset = std::chrono::duration_cast<std::chrono::nanoseconds>(
                 chunk.resetStart - earliestStart),
             .recorded = true,
         };
-        timings->workerCommandPoolReset += poolReset;
-        timings->secondaryCommandRecording += recording;
+        timings->forward.workerCommandPoolReset += poolReset;
+        timings->forward.secondaryCommandRecording += recording;
     }
 
     // The reset-region span next to the participant reset durations is what
     // decides whether concurrent resets overlapped or serialized.
-    timings->workerResetRegionSpan =
+    timings->forward.workerResetRegionSpan =
         std::chrono::duration_cast<std::chrono::nanoseconds>(latestResetEnd - earliestStart);
-    timings->workerRegionCriticalPath =
+    timings->forward.workerRegionCriticalPath =
         std::chrono::duration_cast<std::chrono::nanoseconds>(latestEnd - earliestStart);
 
     if (completionWait == nullptr)
     {
         return;
     }
-    timings->secondaryJoinWait = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    timings->forward.secondaryJoinWait = std::chrono::duration_cast<std::chrono::nanoseconds>(
         completionWait->end - completionWait->start);
-    timings->secondaryCompletionTail =
+    timings->forward.secondaryCompletionTail =
         std::chrono::duration_cast<std::chrono::nanoseconds>(completionWait->end - latestEnd);
     // Defined independently of finish order: zero when the coordinator was last
     // to finish, so no chunk work remained when it entered the wait.
-    timings->secondaryHelperRemainingWork =
+    timings->forward.secondaryHelperRemainingWork =
         latestEnd > completionWait->start ? std::chrono::duration_cast<std::chrono::nanoseconds>(
                                                 latestEnd - completionWait->start)
                                           : std::chrono::nanoseconds{};
-    timings->secondaryCompletionAcquiredBySpin = completionWait->acquiredBySpin;
-    timings->secondaryCompletionUsedBlockingWait = completionWait->usedBlockingWait;
+    timings->forward.secondaryCompletionAcquiredBySpin = completionWait->acquiredBySpin;
+    timings->forward.secondaryCompletionUsedBlockingWait = completionWait->usedBlockingWait;
 }
 
 } // namespace

@@ -78,8 +78,8 @@ struct RendererInfo
     std::size_t minimumDrawsPerForwardRecordingParticipant;
 };
 
-/** @brief Pool-reset and recording durations for one secondary recording participant. */
-struct ChunkCpuTimings
+/** @brief Pool-reset and recording durations for one forward recording participant. */
+struct ForwardParticipantCpuTimings
 {
     std::chrono::nanoseconds poolReset{}; ///< This participant's own command-pool reset.
     std::chrono::nanoseconds recording{}; ///< This participant's secondary command recording.
@@ -89,17 +89,23 @@ struct ChunkCpuTimings
     bool recorded = false; ///< Whether this participant ran during the attempt.
 };
 
-/** @brief Host timings for renderer-owned CPU phases inside one drawFrame() attempt. */
-struct RendererCpuTimings
+/** @brief Host timings for frame-lifecycle work shared by every render pass. */
+struct CommonFrameCpuTimings
+{
+    std::chrono::nanoseconds frameFenceWait{};        ///< Reusable-frame completion wait.
+    std::chrono::nanoseconds imageAcquisitionWait{};  ///< Presentable-image acquisition.
+    std::chrono::nanoseconds presentationFenceWait{}; ///< Per-image retirement wait.
+    std::chrono::nanoseconds queueSubmission{};       ///< Fence reset and graphics submission.
+    std::chrono::nanoseconds presentation{};          ///< Host presentation call.
+};
+
+/** @brief Host timings owned by forward-pass preparation and command recording. */
+struct ForwardPassCpuTimings
 {
     std::chrono::nanoseconds recordingInputBuild{};         ///< Draw validation and packet freeze.
     std::chrono::nanoseconds frameUniformUpdate{};          ///< Slot-local per-frame value write.
-    std::chrono::nanoseconds frameFenceWait{};              ///< Reusable-frame completion wait.
-    std::chrono::nanoseconds imageAcquisitionWait{};        ///< Presentable-image acquisition.
-    std::chrono::nanoseconds presentationFenceWait{};       ///< Per-image retirement wait.
-    std::chrono::nanoseconds commandPoolReset{};            ///< Sum of pool resets on this path.
     std::chrono::nanoseconds coordinatorCommandPoolReset{}; ///< Primary-context pool reset.
-    std::chrono::nanoseconds workerCommandPoolReset{};      ///< Worker-context pool reset.
+    std::chrono::nanoseconds workerCommandPoolReset{};      ///< Participant-context pool-reset sum.
     std::chrono::nanoseconds secondaryCommandRecording{};   ///< Sum of participant recording.
     /// Coordinator-observed span from publishing the helper chunk through its completion wait
     /// returning. This is the secondary-recording contribution to measured active work: unlike
@@ -125,12 +131,17 @@ struct RendererCpuTimings
     /// Whether the coordinator actually blocked. Not the complement of the flag above: completion
     /// can land after the last poll but before the fallback's first load, blocking neither way.
     bool secondaryCompletionUsedBlockingWait = false;
-    std::array<ChunkCpuTimings, kMaxForwardRecordingParticipants>
+    std::array<ForwardParticipantCpuTimings, kMaxForwardRecordingParticipants>
         chunks{};                                         ///< Per-participant detail.
     std::chrono::nanoseconds primaryCommandRecording{};   ///< Serial pass and transition recording.
     std::chrono::nanoseconds secondaryCommandExecution{}; ///< Serial secondary execution call.
-    std::chrono::nanoseconds queueSubmission{};           ///< Fence reset and graphics submission.
-    std::chrono::nanoseconds presentation{};              ///< Host presentation call.
+};
+
+/** @brief Host timings for renderer-owned CPU phases inside one drawFrame() attempt. */
+struct RendererCpuTimings
+{
+    CommonFrameCpuTimings common{};  ///< Frame lifecycle shared by every render pass.
+    ForwardPassCpuTimings forward{}; ///< Forward-pass preparation and command recording.
 };
 
 /* --- Enums --- */
