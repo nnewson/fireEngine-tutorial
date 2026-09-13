@@ -67,6 +67,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/draw_binding_state.cpp
     src/render/forward_frame_uniform_buffer.cpp
     src/render/forward_pipeline.cpp
+    src/render/forward_recorder.cpp
     src/render/forward_recording_input.cpp
     src/render/forward_secondary_recording_worker.cpp
     src/render/frame_slot.cpp
