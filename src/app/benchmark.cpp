@@ -61,7 +61,7 @@ struct PhaseStatistics
  * @param mode Recording mode selected when the renderer was constructed.
  * @return Stable human-readable label for comparisons between reports.
  */
-[[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode);
+[[nodiscard]] std::string_view forwardRecordingModeName(ForwardRecordingMode mode);
 
 /**
  * @brief Summarizes one non-empty collection of phase durations.
@@ -221,15 +221,16 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Build configuration: {}", FIRE_ENGINE_BUILD_CONFIGURATION);
     std::println("  Device: {}", rendererInfo.deviceName);
     std::println("  Driver: {} ({})", rendererInfo.driverName, rendererInfo.driverInfo);
-    std::println("  Recording path: {}", recordingModeName(rendererInfo.commandRecordingMode));
-    if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
+    std::println("  Forward recording path: {}",
+                 forwardRecordingModeName(rendererInfo.forwardRecordingMode));
+    if (rendererInfo.forwardRecordingMode == ForwardRecordingMode::eSecondaryCommandBuffer)
     {
         std::println(
-            "  Secondary recording participants: {}, {} effective",
-            rendererInfo.forcedSecondaryRecordingThreadCount.has_value()
-                ? std::format("{} forced", *rendererInfo.forcedSecondaryRecordingThreadCount)
+            "  Forward secondary recording participants: {}, {} effective",
+            rendererInfo.forcedForwardRecordingParticipantCount.has_value()
+                ? std::format("{} forced", *rendererInfo.forcedForwardRecordingParticipantCount)
                 : std::format("automatic at or above {} draws per participant",
-                              rendererInfo.minimumDrawsPerRecordingParticipant),
+                              rendererInfo.minimumDrawsPerForwardRecordingParticipant),
             effectiveParticipants);
     }
     std::println("  Ownership: cycled frame slots with per-slot recording contexts");
@@ -258,51 +259,51 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
 
     printPhase("transform update", &Sample::transformUpdate);
     printPhase("draw-list build", &Sample::drawListBuild);
-    printPhase("recording-input build",
+    printPhase("forward recording-input build",
                [](const Sample& sample) { return sample.renderer.recordingInputBuild; });
-    printPhase("frame-uniform update",
+    printPhase("forward frame-uniform update",
                [](const Sample& sample) { return sample.renderer.frameUniformUpdate; });
-    printPhase("coordinator command-pool reset",
+    printPhase("forward coordinator command-pool reset",
                [](const Sample& sample) { return sample.renderer.coordinatorCommandPoolReset; });
     // With more than one participant these are summed participant CPU time, not
     // an elapsed phase: the participants overlap, so the sums are diagnostics
     // rather than a contribution to active work.
-    printPhase(effectiveParticipants > 1 ? "worker pool reset (summed CPU)"
-                                         : "worker command-pool reset",
+    printPhase(effectiveParticipants > 1 ? "forward participant pool reset (summed CPU)"
+                                         : "forward participant command-pool reset",
                [](const Sample& sample) { return sample.renderer.workerCommandPoolReset; });
-    printPhase(effectiveParticipants > 1 ? "secondary recording (summed CPU)"
-                                         : "secondary command recording",
+    printPhase(effectiveParticipants > 1 ? "forward secondary recording (summed CPU)"
+                                         : "forward secondary command recording",
                [](const Sample& sample) { return sample.renderer.secondaryCommandRecording; });
-    printPhase("secondary recording region",
+    printPhase("forward secondary recording region",
                [](const Sample& sample) { return sample.renderer.secondaryRecordingRegion; });
     if (effectiveParticipants > 1)
     {
-        printPhase("worker-region critical path",
+        printPhase("forward participant-region critical path",
                    [](const Sample& sample) { return sample.renderer.workerRegionCriticalPath; });
-        printPhase("worker reset-region span",
+        printPhase("forward participant reset-region span",
                    [](const Sample& sample) { return sample.renderer.workerResetRegionSpan; });
-        printPhase("completion join wait",
+        printPhase("forward completion join wait",
                    [](const Sample& sample) { return sample.renderer.secondaryJoinWait; });
-        printPhase("completion tail",
+        printPhase("forward completion tail",
                    [](const Sample& sample) { return sample.renderer.secondaryCompletionTail; });
-        printPhase("helper work remaining at join", [](const Sample& sample)
+        printPhase("forward helper work remaining at join", [](const Sample& sample)
                    { return sample.renderer.secondaryHelperRemainingWork; });
         for (std::size_t participant = 0; participant < effectiveParticipants; ++participant)
         {
-            printPhase(std::format("participant {} pool reset", participant),
+            printPhase(std::format("forward participant {} pool reset", participant),
                        [participant](const Sample& sample)
                        { return sample.renderer.chunks[participant].poolReset; });
-            printPhase(std::format("participant {} recording", participant),
+            printPhase(std::format("forward participant {} recording", participant),
                        [participant](const Sample& sample)
                        { return sample.renderer.chunks[participant].recording; });
-            printPhase(std::format("participant {} reset start offset", participant),
+            printPhase(std::format("forward participant {} reset start offset", participant),
                        [participant](const Sample& sample)
                        { return sample.renderer.chunks[participant].resetStartOffset; });
         }
     }
-    printPhase("primary command recording",
+    printPhase("forward primary command recording",
                [](const Sample& sample) { return sample.renderer.primaryCommandRecording; });
-    printPhase("secondary command execution",
+    printPhase("forward secondary command execution",
                [](const Sample& sample) { return sample.renderer.secondaryCommandExecution; });
     printPhase("queue submission",
                [](const Sample& sample) { return sample.renderer.queueSubmission; });
@@ -357,15 +358,15 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::println("  Queue-submission share of measured active work: {:.2f}%",
                  percentageOfActive(submission));
     std::println("  Fence, acquisition, and presentation durations are reported separately.");
-    if (rendererInfo.commandRecordingMode == CommandRecordingMode::eSecondaryCommandBuffer)
+    if (rendererInfo.forwardRecordingMode == ForwardRecordingMode::eSecondaryCommandBuffer)
     {
         // Worker-owned work is the region the coordinator observes, which is
         // the quantity the registered model divides.
         const std::chrono::nanoseconds attributedWorkerWork = secondaryRecordingRegion;
         const std::chrono::nanoseconds serialOutsideWorker = activeWork - attributedWorkerWork;
-        std::println("  Secondary-execution share of measured active work: {:.2f}%",
+        std::println("  Forward secondary-execution share of measured active work: {:.2f}%",
                      percentageOfActive(secondaryExecution));
-        std::println("  Secondary-recording region share of measured active work: {:.2f}%",
+        std::println("  Forward secondary-recording region share of measured active work: {:.2f}%",
                      percentageOfActive(attributedWorkerWork));
         std::println("  Current serial share outside that region: {:.2f}%",
                      percentageOfActive(serialOutsideWorker));
@@ -406,22 +407,25 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
         }
         else
         {
-            std::println("  Worker-pool-reset share of measured active work: {:.2f}%",
+            std::println("  Forward participant-pool-reset share of measured active work: {:.2f}%",
                          percentageOfActive(workerCommandPoolReset));
             std::println(
                 "  Split phases attribute ownership; they do not measure placement benefit.");
             std::println(
-                "  Registered p subtracts the one-draw fixed reset estimate from worker work.");
-            std::println("  For two workers: serial + fixed reset + variable worker work / 2.");
+                "  Registered p subtracts the one-draw fixed reset estimate from forward work.");
+            std::println(
+                "  For two forward participants: serial + fixed reset + variable work / 2.");
         }
     }
     else
     {
         std::println(
-            "  The direct-primary control has no worker-divisible secondary-recording phase.");
-        std::println("  Its worker pool has no command-buffer allocations or recorded work.");
+            "  The forward direct-primary control has no participant-divisible secondary-recording "
+            "phase.");
+        std::println(
+            "  Its forward secondary pool has no command-buffer allocations or recorded work.");
     }
-    std::println("  Draw bindings are cached independently inside each recorded command buffer.");
+    std::println("  Forward draw bindings are cached independently inside each command buffer.");
 }
 
 /** @endcond */
@@ -456,16 +460,16 @@ namespace
     return std::chrono::duration<double, std::micro>{duration}.count();
 }
 
-[[nodiscard]] std::string_view recordingModeName(CommandRecordingMode mode)
+[[nodiscard]] std::string_view forwardRecordingModeName(ForwardRecordingMode mode)
 {
     switch (mode)
     {
-    case CommandRecordingMode::eSecondaryCommandBuffer:
+    case ForwardRecordingMode::eSecondaryCommandBuffer:
         return "secondary command buffer";
-    case CommandRecordingMode::eDirectPrimary:
+    case ForwardRecordingMode::eDirectPrimary:
         return "direct primary command buffer";
     }
-    throw std::logic_error("Benchmark encountered an unknown command recording mode");
+    throw std::logic_error("Benchmark encountered an unknown forward recording mode");
 }
 
 [[nodiscard]] PhaseStatistics summarize(std::vector<std::chrono::nanoseconds> durations)

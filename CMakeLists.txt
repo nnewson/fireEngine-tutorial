@@ -292,35 +292,35 @@ add_test(NAME fireEngineTutorialFramesOptionsReverseOrder
     COMMAND fireEngineTutorial --recreate-every-frame --frames 3
 )
 add_test(NAME fireEngineTutorialSmokeOptionsForwardOrder
-    COMMAND fireEngineTutorial --smoke basic --recording-threads 2
+    COMMAND fireEngineTutorial --smoke basic --forward-recording-participants 2
 )
 add_test(NAME fireEngineTutorialSmokeOptionsReverseOrder
-    COMMAND fireEngineTutorial --recording-threads 2 --smoke basic
+    COMMAND fireEngineTutorial --forward-recording-participants 2 --smoke basic
 )
 add_test(NAME fireEngineTutorialBenchmarkCorrectness
     COMMAND fireEngineTutorial --benchmark 1
 )
-add_test(NAME fireEngineTutorialDirectPrimaryBenchmarkCorrectness
-    COMMAND fireEngineTutorial --benchmark 1 --direct-primary
+add_test(NAME fireEngineTutorialForwardDirectPrimaryBenchmarkCorrectness
+    COMMAND fireEngineTutorial --benchmark 1 --forward-direct-primary
 )
-add_test(NAME fireEngineTutorialSplitRecordingBenchmarkCorrectness
-    COMMAND fireEngineTutorial --benchmark 2 --recording-threads 2
+add_test(NAME fireEngineTutorialForwardSplitRecordingBenchmarkCorrectness
+    COMMAND fireEngineTutorial --benchmark 2 --forward-recording-participants 2
 )
 # One draw cannot form two non-empty ranges, so this proves the fallback keeps
 # the single-participant path working when a split is requested.
-add_test(NAME fireEngineTutorialSplitRecordingFallbackCorrectness
-    COMMAND fireEngineTutorial --benchmark 1 --recording-threads 2
+add_test(NAME fireEngineTutorialForwardSplitRecordingFallbackCorrectness
+    COMMAND fireEngineTutorial --benchmark 1 --forward-recording-participants 2
 )
-add_test(NAME fireEngineTutorialSplitRecordingMixedResourceSmoke
-    COMMAND fireEngineTutorial --smoke prepare-twice --recording-threads 2
+add_test(NAME fireEngineTutorialForwardSplitRecordingMixedResourceSmoke
+    COMMAND fireEngineTutorial --smoke prepare-twice --forward-recording-participants 2
 )
 # Without an override the workload policy selects the participant count. Cover
 # both branches at the call site: the compile-time assertions only protect the
 # calculation, not that the renderer consults it.
-add_test(NAME fireEngineTutorialAutomaticRecordingCorrectness
+add_test(NAME fireEngineTutorialAutomaticForwardRecordingCorrectness
     COMMAND fireEngineTutorial --benchmark 2
 )
-add_test(NAME fireEngineTutorialAutomaticSplitCorrectness
+add_test(NAME fireEngineTutorialAutomaticForwardSplitCorrectness
     COMMAND fireEngineTutorial --benchmark 10000
 )
 
@@ -432,12 +432,12 @@ add_test(NAME fireEngineTutorialUnknownOptionRejected
         -DARGUMENT_1=--unknown-option
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
 )
-add_test(NAME fireEngineTutorialDirectPrimaryWithoutBenchmarkRejected
+add_test(NAME fireEngineTutorialForwardDirectPrimaryWithoutBenchmarkRejected
     COMMAND ${CMAKE_COMMAND}
         -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
-        "-DEXPECTED_ERROR=--direct-primary requires --benchmark"
+        "-DEXPECTED_ERROR=--forward-direct-primary requires --benchmark"
         -DARGUMENT_COUNT=1
-        -DARGUMENT_1=--direct-primary
+        -DARGUMENT_1=--forward-direct-primary
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
 )
 add_test(NAME fireEngineTutorialRecreationWithoutFramesRejected
@@ -448,25 +448,46 @@ add_test(NAME fireEngineTutorialRecreationWithoutFramesRejected
         -DARGUMENT_1=--recreate-every-frame
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
 )
-add_test(NAME fireEngineTutorialRecordingThreadsWithoutModeRejected
+add_test(NAME fireEngineTutorialForwardRecordingParticipantsWithoutModeRejected
     COMMAND ${CMAKE_COMMAND}
         -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
-        "-DEXPECTED_ERROR=--recording-threads requires --benchmark or --smoke"
+        "-DEXPECTED_ERROR=--forward-recording-participants requires --benchmark or --smoke"
         -DARGUMENT_COUNT=2
-        -DARGUMENT_1=--recording-threads
+        -DARGUMENT_1=--forward-recording-participants
         -DARGUMENT_2=1
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
 )
-add_test(NAME fireEngineTutorialDirectPrimarySplitRejected
+add_test(NAME fireEngineTutorialForwardDirectPrimarySplitRejected
     COMMAND ${CMAKE_COMMAND}
         -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
-        "-DEXPECTED_ERROR=--direct-primary records no secondary command buffer"
+        "-DEXPECTED_ERROR=--forward-direct-primary records no forward secondary command buffer"
         -DARGUMENT_COUNT=5
-        -DARGUMENT_1=--recording-threads
+        -DARGUMENT_1=--forward-recording-participants
         -DARGUMENT_2=2
-        -DARGUMENT_3=--direct-primary
+        -DARGUMENT_3=--forward-direct-primary
         -DARGUMENT_4=--benchmark
         -DARGUMENT_5=1
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialLegacyDirectPrimaryRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--direct-primary was renamed to --forward-direct-primary"
+        -DARGUMENT_COUNT=3
+        -DARGUMENT_1=--benchmark
+        -DARGUMENT_2=1
+        -DARGUMENT_3=--direct-primary
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
+)
+add_test(NAME fireEngineTutorialLegacyRecordingThreadsRejected
+    COMMAND ${CMAKE_COMMAND}
+        -DEXECUTABLE=$<TARGET_FILE:fireEngineTutorial>
+        "-DEXPECTED_ERROR=--recording-threads was renamed to --forward-recording-participants"
+        -DARGUMENT_COUNT=4
+        -DARGUMENT_1=--benchmark
+        -DARGUMENT_2=1
+        -DARGUMENT_3=--recording-threads
+        -DARGUMENT_4=1
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/expect_command_failure.cmake
 )
 add_test(NAME fireEngineTutorialIncompleteCaptureRejected
@@ -575,10 +596,12 @@ set_tests_properties(
     fireEngineTutorialRepeatedOptionRejected
     fireEngineTutorialMissingOptionValueRejected
     fireEngineTutorialUnknownOptionRejected
-    fireEngineTutorialDirectPrimaryWithoutBenchmarkRejected
+    fireEngineTutorialForwardDirectPrimaryWithoutBenchmarkRejected
     fireEngineTutorialRecreationWithoutFramesRejected
-    fireEngineTutorialRecordingThreadsWithoutModeRejected
-    fireEngineTutorialDirectPrimarySplitRejected
+    fireEngineTutorialForwardRecordingParticipantsWithoutModeRejected
+    fireEngineTutorialForwardDirectPrimarySplitRejected
+    fireEngineTutorialLegacyDirectPrimaryRejected
+    fireEngineTutorialLegacyRecordingThreadsRejected
     fireEngineTutorialIncompleteCaptureRejected
     fireEngineTutorialRepeatedCaptureRejected
     fireEngineTutorialZeroCaptureFrameRejected
@@ -609,16 +632,16 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND fireEngineTutorial --smoke resize
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
-    add_test(NAME fireEngineTutorialDirectPrimarySyncValidation
-        COMMAND fireEngineTutorial --benchmark 1 --direct-primary
+    add_test(NAME fireEngineTutorialForwardDirectPrimarySyncValidation
+        COMMAND fireEngineTutorial --benchmark 1 --forward-direct-primary
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
-    add_test(NAME fireEngineTutorialSplitRecordingSyncValidation
-        COMMAND fireEngineTutorial --benchmark 2 --recording-threads 2
+    add_test(NAME fireEngineTutorialForwardSplitRecordingSyncValidation
+        COMMAND fireEngineTutorial --benchmark 2 --forward-recording-participants 2
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
-    add_test(NAME fireEngineTutorialSplitRecordingMixedResourceSyncValidation
-        COMMAND fireEngineTutorial --smoke prepare-twice --recording-threads 2
+    add_test(NAME fireEngineTutorialForwardSplitRecordingMixedResourceSyncValidation
+        COMMAND fireEngineTutorial --smoke prepare-twice --forward-recording-participants 2
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
     fire_engine_add_capture_test(
@@ -641,9 +664,9 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
         fireEngineTutorialPrepareTwiceSyncValidation
         fireEngineTutorialRecreationSyncValidation
-        fireEngineTutorialDirectPrimarySyncValidation
-        fireEngineTutorialSplitRecordingSyncValidation
-        fireEngineTutorialSplitRecordingMixedResourceSyncValidation
+        fireEngineTutorialForwardDirectPrimarySyncValidation
+        fireEngineTutorialForwardSplitRecordingSyncValidation
+        fireEngineTutorialForwardSplitRecordingMixedResourceSyncValidation
     )
     set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
         ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
@@ -660,12 +683,12 @@ set_tests_properties(
     fireEngineTutorialSmokeOptionsForwardOrder
     fireEngineTutorialSmokeOptionsReverseOrder
     fireEngineTutorialBenchmarkCorrectness
-    fireEngineTutorialDirectPrimaryBenchmarkCorrectness
-    fireEngineTutorialSplitRecordingBenchmarkCorrectness
-    fireEngineTutorialSplitRecordingFallbackCorrectness
-    fireEngineTutorialSplitRecordingMixedResourceSmoke
-    fireEngineTutorialAutomaticRecordingCorrectness
-    fireEngineTutorialAutomaticSplitCorrectness
+    fireEngineTutorialForwardDirectPrimaryBenchmarkCorrectness
+    fireEngineTutorialForwardSplitRecordingBenchmarkCorrectness
+    fireEngineTutorialForwardSplitRecordingFallbackCorrectness
+    fireEngineTutorialForwardSplitRecordingMixedResourceSmoke
+    fireEngineTutorialAutomaticForwardRecordingCorrectness
+    fireEngineTutorialAutomaticForwardSplitCorrectness
     ${FIRE_ENGINE_SYNC_VALIDATION_TESTS}
     PROPERTIES
         FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
@@ -685,20 +708,24 @@ set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
 # scenarios force a split below the production threshold on purpose, so the
 # two-participant path keeps its validation coverage wherever the policy would
 # select one.
-set_tests_properties(fireEngineTutorialSplitRecordingBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 forced, 2 effective(.|\n)*participant 1 recording"
+# The report contains no vertical-bar separators. Use a negated character class
+# to span its lines: CTest's conventional `(.|\n)*` becomes pathologically slow
+# when the leading fragment is present but the required trailing fragment is
+# deliberately removed by the assertion's positive control.
+set_tests_properties(fireEngineTutorialForwardSplitRecordingBenchmarkCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Forward secondary recording participants: 2 forced, 2 effective[^|]*forward participant 1 recording"
 )
-set_tests_properties(fireEngineTutorialSplitRecordingFallbackCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Secondary recording participants: 2 forced, 1 effective"
+set_tests_properties(fireEngineTutorialForwardSplitRecordingFallbackCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Forward secondary recording participants: 2 forced, 1 effective"
 )
-set_tests_properties(fireEngineTutorialAutomaticRecordingCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Secondary recording participants: automatic[^\n]*, 1 effective"
+set_tests_properties(fireEngineTutorialAutomaticForwardRecordingCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Forward secondary recording participants: automatic[^\n]*, 1 effective"
 )
-set_tests_properties(fireEngineTutorialAutomaticSplitCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Secondary recording participants: automatic[^\n]*, 2 effective"
+set_tests_properties(fireEngineTutorialAutomaticForwardSplitCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Forward secondary recording participants: automatic[^\n]*, 2 effective"
 )
-set_tests_properties(fireEngineTutorialDirectPrimaryBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Recording path: direct primary command buffer(.|\n)*Its worker pool has no command-buffer allocations or recorded work."
+set_tests_properties(fireEngineTutorialForwardDirectPrimaryBenchmarkCorrectness PROPERTIES
+    PASS_REGULAR_EXPRESSION "Forward recording path: direct primary command buffer[^|]*Its forward secondary pool has no command-buffer allocations or recorded work."
 )
 # Run one scenario away from the executable and copied assets to prove that the
 # compiled absolute asset and shader paths do not depend on the working folder.

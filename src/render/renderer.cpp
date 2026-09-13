@@ -58,7 +58,7 @@ namespace
  * runs locates. It is an empirical policy rather than an interface, so it stays
  * internal and reaches reports only as a value on RendererInfo.
  */
-constexpr std::size_t kMinimumDrawsPerRecordingParticipant = 5000;
+constexpr std::size_t kMinimumDrawsPerForwardRecordingParticipant = 5000;
 
 /* --- File-local classes --- */
 
@@ -124,7 +124,8 @@ validatedCaptureRequest(std::optional<FrameCaptureRequest> request);
  * @param drawCount Resolved packets in the frozen forward recording input.
  * @return Participant count, at least one and never above the supported maximum.
  */
-[[nodiscard]] constexpr std::size_t automaticParticipantCount(std::size_t drawCount) noexcept;
+[[nodiscard]] constexpr std::size_t
+automaticForwardParticipantCount(std::size_t drawCount) noexcept;
 
 /**
  * @brief Records fixed state shared by every draw in one command buffer.
@@ -164,7 +165,7 @@ void recordForwardSecondaryChunk(const detail::ForwardSecondaryChunkJob& job,
  * @param timings Optional public output receiving durations and the critical path.
  */
 void mergeChunkTimings(
-    const std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads>& chunkTimings,
+    const std::array<detail::ChunkRecordingTimings, kMaxForwardRecordingParticipants>& chunkTimings,
     std::size_t participants, const detail::CompletionWait* completionWait,
     RendererCpuTimings* timings);
 
@@ -207,7 +208,7 @@ public:
      * @param glfw Initialized platform lifetime owner.
      * @param window Window used for surface and swapchain creation.
      * @param applicationName Name reported to Vulkan.
-     * @param configuration Fixed command-recording choices for this renderer.
+     * @param configuration Fixed forward-recording and capture choices.
      */
     Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
          RendererConfiguration configuration);
@@ -340,10 +341,10 @@ private:
     [[nodiscard]] bool workMayBePending() const noexcept;
 
     /**
-     * @brief Selects the buffer a worker context allocates for the active recording path.
+     * @brief Selects the buffer a forward secondary context allocates for this mode.
      * @return Secondary for the production path, or none for the direct-primary control.
      */
-    [[nodiscard]] detail::RecordingBufferKind workerBufferKind() const noexcept;
+    [[nodiscard]] detail::RecordingBufferKind forwardSecondaryBufferKind() const noexcept;
 
     /**
      * @brief Orders color writes before the transition to presentation.
@@ -384,9 +385,9 @@ private:
     // owners. Presentation lifetime retains the separate Swapchain precondition.
 
     // Foundational long-lived state.
-    CommandRecordingMode commandRecordingMode_; ///< Fixed production or attribution path.
+    ForwardRecordingMode forwardRecordingMode_; ///< Fixed production or attribution path.
     /// Diagnostic override, or unset when the workload selects the participant count.
-    std::optional<std::size_t> forcedSecondaryRecordingThreadCount_;
+    std::optional<std::size_t> forcedForwardRecordingParticipantCount_;
     std::optional<FrameCaptureRequest> captureRequest_; ///< Owned one-shot diagnostic request.
     detail::Device device_;                     ///< Vulkan instance, surface, device, and queues.
     detail::MemoryAllocator allocator_;         ///< VMA owner created from the logical device.
@@ -464,8 +465,8 @@ RendererInfo Renderer::info() const
 
 Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& applicationName,
                      RendererConfiguration configuration)
-    : commandRecordingMode_{configuration.commandRecordingMode},
-      forcedSecondaryRecordingThreadCount_{configuration.forcedSecondaryRecordingThreadCount},
+    : forwardRecordingMode_{configuration.forwardRecordingMode},
+      forcedForwardRecordingParticipantCount_{configuration.forcedForwardRecordingParticipantCount},
       // Validate the Vulkan-free request before constructing the device and
       // capture-enabled swapchain.
       captureRequest_{validatedCaptureRequest(std::move(configuration.captureRequest))},
@@ -482,22 +483,22 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
                   .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
                   .coordinator =
                       detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-                  .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
-                                  detail::RecordingContext{device_, workerBufferKind()}}},
+                  .secondaries = {detail::RecordingContext{device_, forwardSecondaryBufferKind()},
+                                  detail::RecordingContext{device_, forwardSecondaryBufferKind()}}},
               detail::FrameResources{
                   .slot = detail::FrameSlot{device_},
                   .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
                   .coordinator =
                       detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-                  .secondaries = {detail::RecordingContext{device_, workerBufferKind()},
-                                  detail::RecordingContext{device_, workerBufferKind()}}}}
+                  .secondaries = {detail::RecordingContext{device_, forwardSecondaryBufferKind()},
+                                  detail::RecordingContext{device_, forwardSecondaryBufferKind()}}}}
 {
-    if (forcedSecondaryRecordingThreadCount_.has_value() &&
-        (*forcedSecondaryRecordingThreadCount_ == 0 ||
-         *forcedSecondaryRecordingThreadCount_ > kMaxSecondaryRecordingThreads))
+    if (forcedForwardRecordingParticipantCount_.has_value() &&
+        (*forcedForwardRecordingParticipantCount_ == 0 ||
+         *forcedForwardRecordingParticipantCount_ > kMaxForwardRecordingParticipants))
     {
-        throw std::invalid_argument("Secondary recording thread count is outside the supported "
-                                    "range");
+        throw std::invalid_argument(
+            "Forward recording participant count is outside the supported range");
     }
     if (!*device_.graphicsQueue() || !*device_.presentQueue())
     {
@@ -784,9 +785,9 @@ bool Renderer::Impl::workMayBePending() const noexcept
     return false;
 }
 
-detail::RecordingBufferKind Renderer::Impl::workerBufferKind() const noexcept
+detail::RecordingBufferKind Renderer::Impl::forwardSecondaryBufferKind() const noexcept
 {
-    return commandRecordingMode_ == CommandRecordingMode::eSecondaryCommandBuffer
+    return forwardRecordingMode_ == ForwardRecordingMode::eSecondaryCommandBuffer
                ? detail::RecordingBufferKind::eSecondary
                : detail::RecordingBufferKind::eNone;
 }
@@ -832,9 +833,9 @@ RendererInfo Renderer::Impl::info() const
         .imageFormat = vk::to_string(presentation_->swapchain().imageFormat()),
         .depthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
-        .commandRecordingMode = commandRecordingMode_,
-        .forcedSecondaryRecordingThreadCount = forcedSecondaryRecordingThreadCount_,
-        .minimumDrawsPerRecordingParticipant = kMinimumDrawsPerRecordingParticipant,
+        .forwardRecordingMode = forwardRecordingMode_,
+        .forcedForwardRecordingParticipantCount = forcedForwardRecordingParticipantCount_,
+        .minimumDrawsPerForwardRecordingParticipant = kMinimumDrawsPerForwardRecordingParticipant,
     };
 }
 
@@ -843,7 +844,7 @@ void Renderer::Impl::recordCommands(std::size_t frameSlotIndex, std::uint32_t im
                                     const CaptureAttempt* captureAttempt,
                                     RendererCpuTimings* timings)
 {
-    if (commandRecordingMode_ == CommandRecordingMode::eDirectPrimary)
+    if (forwardRecordingMode_ == ForwardRecordingMode::eDirectPrimary)
     {
         // The direct control still owns a secondary pool and still resets it, so
         // its empty-pool cost stays measurable and comparable. That reset is the
@@ -886,12 +887,12 @@ void Renderer::Impl::recordSecondaryCommands(std::size_t frameSlotIndex, std::ui
     // override replaces that choice so a forced split can be measured below the
     // threshold and compared with an explicitly single-participant control.
     // Either way the ranges must stay non-empty.
-    const std::size_t requested =
-        forcedSecondaryRecordingThreadCount_.value_or(automaticParticipantCount(draws.size()));
+    const std::size_t requested = forcedForwardRecordingParticipantCount_.value_or(
+        automaticForwardParticipantCount(draws.size()));
     const std::size_t participants = requested > 1 && draws.size() >= requested ? requested : 1;
     const std::size_t firstChunkSize = participants > 1 ? (draws.size() + 1) / 2 : draws.size();
 
-    std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads> chunkTimings{};
+    std::array<detail::ChunkRecordingTimings, kMaxForwardRecordingParticipants> chunkTimings{};
     const auto chunkBlock = [&chunkTimings, timings](std::size_t index)
     { return timings == nullptr ? nullptr : &chunkTimings[index]; };
     const detail::ForwardSecondaryChunkJob coordinatorJob{
@@ -1303,25 +1304,28 @@ validatedCaptureRequest(std::optional<FrameCaptureRequest> request)
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).height == -600.0f);
 static_assert(sceneViewport(vk::Extent2D{.width = 800, .height = 600}).y == 600.0f);
 
-constexpr std::size_t automaticParticipantCount(std::size_t drawCount) noexcept
+constexpr std::size_t automaticForwardParticipantCount(std::size_t drawCount) noexcept
 {
-    const std::size_t supported = drawCount / kMinimumDrawsPerRecordingParticipant;
+    const std::size_t supported = drawCount / kMinimumDrawsPerForwardRecordingParticipant;
     if (supported < 2)
     {
         return 1;
     }
-    return supported > kMaxSecondaryRecordingThreads ? kMaxSecondaryRecordingThreads : supported;
+    return supported > kMaxForwardRecordingParticipants ? kMaxForwardRecordingParticipants
+                                                        : supported;
 }
 
-static_assert(automaticParticipantCount(0) == 1);
-static_assert(automaticParticipantCount(1) == 1);
-static_assert(automaticParticipantCount(1000) == 1);
+static_assert(automaticForwardParticipantCount(0) == 1);
+static_assert(automaticForwardParticipantCount(1) == 1);
+static_assert(automaticForwardParticipantCount(1000) == 1);
 // One participant below the measured boundary, two at it.
-static_assert(automaticParticipantCount(kMinimumDrawsPerRecordingParticipant * 2 - 1) == 1);
-static_assert(automaticParticipantCount(kMinimumDrawsPerRecordingParticipant * 2) == 2);
+static_assert(automaticForwardParticipantCount(kMinimumDrawsPerForwardRecordingParticipant * 2 -
+                                               1) == 1);
+static_assert(automaticForwardParticipantCount(kMinimumDrawsPerForwardRecordingParticipant * 2) ==
+              2);
 // Never above the supported maximum, however large the workload.
-static_assert(automaticParticipantCount(kMinimumDrawsPerRecordingParticipant * 100) ==
-              kMaxSecondaryRecordingThreads);
+static_assert(automaticForwardParticipantCount(kMinimumDrawsPerForwardRecordingParticipant * 100) ==
+              kMaxForwardRecordingParticipants);
 
 detail::DrawBindingState bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
                                            const detail::ForwardRecordingState& state)
@@ -1430,7 +1434,7 @@ void recordForwardSecondaryChunk(const detail::ForwardSecondaryChunkJob& job,
 }
 
 void mergeChunkTimings(
-    const std::array<detail::ChunkRecordingTimings, kMaxSecondaryRecordingThreads>& chunkTimings,
+    const std::array<detail::ChunkRecordingTimings, kMaxForwardRecordingParticipants>& chunkTimings,
     std::size_t participants, const detail::CompletionWait* completionWait,
     RendererCpuTimings* timings)
 {
