@@ -199,11 +199,11 @@ TEST_CASE("Mat4 orthographic projection maps every asymmetric frustum corner")
         std::pair{-kFar, 1.0f},
     };
 
-    for (const auto [viewX, expectedX] : kHorizontalCorners)
+    for (const auto& [viewX, expectedX] : kHorizontalCorners)
     {
-        for (const auto [viewY, expectedY] : kVerticalCorners)
+        for (const auto& [viewY, expectedY] : kVerticalCorners)
         {
-            for (const auto [viewZ, expectedZ] : kDepthCorners)
+            for (const auto& [viewZ, expectedZ] : kDepthCorners)
             {
                 const Vec4 corner =
                     projection * Vec4{.x = viewX, .y = viewY, .z = viewZ, .w = 1.0f};
