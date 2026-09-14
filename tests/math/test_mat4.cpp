@@ -6,9 +6,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -172,4 +174,93 @@ TEST_CASE("Mat4 camera transforms use zero-to-one depth and right-handed view sp
                       std::invalid_argument);
     REQUIRE(Mat4::lookAt(Vec3{}, Vec3{}, Vec3{.y = 1.0f}) ==
             std::unexpected{NormalizeError::eZeroLength});
+}
+
+TEST_CASE("Mat4 orthographic projection maps every asymmetric frustum corner")
+{
+    constexpr float kLeft = -3.0f;
+    constexpr float kRight = 5.0f;
+    constexpr float kBottom = -2.0f;
+    constexpr float kTop = 6.0f;
+    constexpr float kNear = 1.5f;
+    constexpr float kFar = 11.5f;
+    const Mat4 projection = Mat4::orthographic(kLeft, kRight, kBottom, kTop, kNear, kFar);
+
+    constexpr std::array kHorizontalCorners{
+        std::pair{kLeft, -1.0f},
+        std::pair{kRight, 1.0f},
+    };
+    constexpr std::array kVerticalCorners{
+        std::pair{kBottom, -1.0f},
+        std::pair{kTop, 1.0f},
+    };
+    constexpr std::array kDepthCorners{
+        std::pair{-kNear, 0.0f},
+        std::pair{-kFar, 1.0f},
+    };
+
+    for (const auto [viewX, expectedX] : kHorizontalCorners)
+    {
+        for (const auto [viewY, expectedY] : kVerticalCorners)
+        {
+            for (const auto [viewZ, expectedZ] : kDepthCorners)
+            {
+                const Vec4 corner =
+                    projection * Vec4{.x = viewX, .y = viewY, .z = viewZ, .w = 1.0f};
+                REQUIRE(corner.x == Approx(expectedX).margin(0.00001f));
+                REQUIRE(corner.y == Approx(expectedY).margin(0.00001f));
+                REQUIRE(corner.z == Approx(expectedZ).margin(0.00001f));
+                REQUIRE(corner.w == Approx(1.0f));
+            }
+        }
+    }
+
+    constexpr Vec4 kViewCenter{
+        .x = (kLeft + kRight) * 0.5f,
+        .y = (kBottom + kTop) * 0.5f,
+        .z = -(kNear + kFar) * 0.5f,
+        .w = 1.0f,
+    };
+    const Vec4 center = projection * kViewCenter;
+    REQUIRE(center.x == Approx(0.0f).margin(0.00001f));
+    REQUIRE(center.y == Approx(0.0f).margin(0.00001f));
+    REQUIRE(center.z == Approx(0.5f).margin(0.00001f));
+    REQUIRE(center.w == Approx(1.0f));
+}
+
+TEST_CASE("Mat4 orthographic projection rejects invalid parameters")
+{
+    constexpr std::array kValidParameters{-3.0f, 5.0f, -2.0f, 6.0f, 1.5f, 11.5f};
+    for (std::size_t index = 0; index < kValidParameters.size(); ++index)
+    {
+        auto parameters = kValidParameters;
+        parameters[index] = std::numeric_limits<float>::infinity();
+        REQUIRE_THROWS_AS(Mat4::orthographic(parameters[0], parameters[1], parameters[2],
+                                             parameters[3], parameters[4], parameters[5]),
+                          std::invalid_argument);
+    }
+
+    auto nonFiniteParameters = kValidParameters;
+    nonFiniteParameters[0] = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE_THROWS_AS(Mat4::orthographic(nonFiniteParameters[0], nonFiniteParameters[1],
+                                         nonFiniteParameters[2], nonFiniteParameters[3],
+                                         nonFiniteParameters[4], nonFiniteParameters[5]),
+                      std::invalid_argument);
+
+    REQUIRE_THROWS_AS(Mat4::orthographic(1.0f, 1.0f, -2.0f, 6.0f, 1.5f, 11.5f),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(Mat4::orthographic(2.0f, 1.0f, -2.0f, 6.0f, 1.5f, 11.5f),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(Mat4::orthographic(-3.0f, 5.0f, 1.0f, 1.0f, 1.5f, 11.5f),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(Mat4::orthographic(-3.0f, 5.0f, 2.0f, 1.0f, 1.5f, 11.5f),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(Mat4::orthographic(-3.0f, 5.0f, -2.0f, 6.0f, 0.0f, 11.5f),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(Mat4::orthographic(-3.0f, 5.0f, -2.0f, 6.0f, -1.0f, 11.5f),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(Mat4::orthographic(-3.0f, 5.0f, -2.0f, 6.0f, 1.5f, 1.5f),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(Mat4::orthographic(-3.0f, 5.0f, -2.0f, 6.0f, 2.0f, 1.5f),
+                      std::invalid_argument);
 }
