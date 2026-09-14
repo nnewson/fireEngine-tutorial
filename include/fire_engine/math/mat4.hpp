@@ -133,6 +133,41 @@ public:
     }
 
     /**
+     * @brief Builds a right-handed orthographic projection with zero-to-one depth.
+     * @param left View-space coordinate mapped to normalized X minus one.
+     * @param right View-space coordinate mapped to normalized X plus one.
+     * @param bottom View-space coordinate mapped to normalized Y minus one.
+     * @param top View-space coordinate mapped to normalized Y plus one.
+     * @param nearPlane Positive distance mapped from view-space Z to normalized depth zero.
+     * @param farPlane Greater distance mapped from view-space Z to normalized depth one.
+     * @return Projection preserving W and mapping the supplied cuboid to normalized space.
+     * @throws std::invalid_argument if a projection parameter is outside its valid range.
+     *
+     * Visible right-handed view-space Z values are negative. Framebuffer Y inversion remains a
+     * viewport convention, matching perspective().
+     */
+    [[nodiscard]] static Mat4 orthographic(float left, float right, float bottom, float top,
+                                           float nearPlane, float farPlane)
+    {
+        if (!std::isfinite(left) || !std::isfinite(right) || !std::isfinite(bottom) ||
+            !std::isfinite(top) || !std::isfinite(nearPlane) || !std::isfinite(farPlane) ||
+            left >= right || bottom >= top || nearPlane <= 0.0f || farPlane <= nearPlane)
+        {
+            throw std::invalid_argument("Orthographic projection parameters are invalid");
+        }
+
+        Mat4 result;
+        result[0, 0] = 2.0f / (right - left);
+        result[0, 3] = -(right + left) / (right - left);
+        result[1, 1] = 2.0f / (top - bottom);
+        result[1, 3] = -(top + bottom) / (top - bottom);
+        result[2, 2] = 1.0f / (nearPlane - farPlane);
+        result[2, 3] = nearPlane / (nearPlane - farPlane);
+        result[3, 3] = 1.0f;
+        return result;
+    }
+
+    /**
      * @brief Builds a right-handed view matrix looking from eye toward target.
      * @param eye Camera position in world space.
      * @param target World-space point at the center of the view.
