@@ -64,6 +64,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/compiled_resources.cpp
     src/render/depth_buffer.cpp
     src/render/device.cpp
+    src/render/directional_shadow_view.cpp
     src/render/draw_binding_state.cpp
     src/render/forward_frame_uniform_buffer.cpp
     src/render/forward_pipeline.cpp
@@ -244,6 +245,7 @@ add_executable(fireEngineTutorialTests
     tests/math/test_mat4.cpp
     tests/render/test_camera.cpp
     tests/render/test_capture_format_mapping.cpp
+    tests/render/test_directional_shadow_view.cpp
     tests/render/test_draw_binding_state.cpp
     tests/render/test_forward_recording_input.cpp
     tests/render/test_forward_secondary_recording_worker.cpp
