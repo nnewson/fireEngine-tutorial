@@ -10,7 +10,7 @@
 #include <string>
 
 #include <fire_engine/platform/framebuffer_extent.hpp>
-#include <fire_engine/render/camera.hpp>
+#include <fire_engine/render/frame_description.hpp>
 
 namespace fire_engine
 {
@@ -205,14 +205,15 @@ public:
     /**
      * @brief Freezes frame input, records it, submits it, and presents one image.
      * @param drawList Read-only draw view valid until this call returns.
-     * @param camera Vulkan-free camera values sampled for this frame.
+     * @param frameDescription Vulkan-free camera and shadow values sampled for this frame.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Whether an image was presented and whether the swapchain remains suitable.
      * @throws std::logic_error if prepare() has not run or a draw reference was not prepared.
-     * @throws std::invalid_argument if the camera cannot form a valid perspective view.
+     * @throws std::invalid_argument if the forward camera cannot form a valid perspective view.
      * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */
-    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList, const Camera& camera,
+    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+                                         const FrameDescription& frameDescription,
                                          RendererCpuTimings* timings = nullptr);
 
     /**

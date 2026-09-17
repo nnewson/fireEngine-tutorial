@@ -89,16 +89,25 @@ add_library(fireEngineTutorialEngine STATIC
 target_include_directories(fireEngineTutorialEngine PUBLIC include)
 target_include_directories(fireEngineTutorialEngine PRIVATE ${Stb_INCLUDE_DIR})
 
+# Application-only helpers are shared with device-free tests without becoming
+# part of the reusable engine or compiling the same implementation twice.
+add_library(fireEngineTutorialAppSupport STATIC
+    src/app/tutorial_frame_descriptions.cpp
+)
+target_include_directories(fireEngineTutorialAppSupport PUBLIC src/app)
+target_link_libraries(fireEngineTutorialAppSupport PUBLIC fireEngineTutorialEngine)
+
 # The application owns only its event loop and high-level scene construction.
 add_executable(fireEngineTutorial
     src/app/benchmark.cpp
     src/app/main.cpp
 )
-target_link_libraries(fireEngineTutorial PRIVATE fireEngineTutorialEngine)
+target_link_libraries(fireEngineTutorial PRIVATE fireEngineTutorialAppSupport)
 
 # State the language requirement on every first-party target so each remains
 # explicit if it is later moved into a larger parent CMake project.
 target_compile_features(fireEngineTutorialEngine PUBLIC cxx_std_23)
+target_compile_features(fireEngineTutorialAppSupport PUBLIC cxx_std_23)
 target_compile_features(fireEngineTutorial PRIVATE cxx_std_23)
 
 # Pass the project version to the Vulkan application metadata so the version
@@ -228,6 +237,7 @@ function(fire_engine_enable_warnings target)
 endfunction()
 
 fire_engine_enable_warnings(fireEngineTutorialEngine)
+fire_engine_enable_warnings(fireEngineTutorialAppSupport)
 fire_engine_enable_warnings(fireEngineTutorial)
 
 # Catch2 covers the Vulkan-free layers. The bounded application run remains a
@@ -237,6 +247,7 @@ enable_testing()
 add_executable(fireEngineTutorialTests
     tests/animation/test_animation_playback.cpp
     tests/animation/test_animation_validation.cpp
+    tests/app/test_tutorial_frame_descriptions.cpp
     tests/content/test_scene_content_validation.cpp
     tests/gltf/test_gltf_loader.cpp
     tests/graphics/test_asset_validation.cpp
@@ -260,7 +271,7 @@ target_compile_definitions(fireEngineTutorialTests PRIVATE
 target_link_libraries(fireEngineTutorialTests
     PRIVATE
         Catch2::Catch2WithMain
-        fireEngineTutorialEngine
+        fireEngineTutorialAppSupport
 )
 fire_engine_enable_warnings(fireEngineTutorialTests)
 

@@ -4,6 +4,7 @@
  */
 
 #include "benchmark.hpp"
+#include "tutorial_frame_descriptions.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +14,6 @@
 #include <exception>
 #include <filesystem>
 #include <limits>
-#include <numbers>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -50,16 +50,6 @@ constexpr std::string_view kCommandLineUsage =
     "[--recreate-every-frame] | --smoke scenario "
     "[--forward-recording-participants count]] "
     "[--capture path --capture-frame positive-ordinal] (options may appear in any order)";
-
-/** @brief Fixed application-owned camera used by every tutorial scenario. */
-constexpr fire_engine::Camera kTutorialCamera{
-    .position = {.x = 0.0f, .y = 0.0f, .z = 4.0f},
-    .target = {},
-    .up = {.x = 0.0f, .y = 1.0f, .z = 0.0f},
-    .verticalFieldOfViewRadians = std::numbers::pi_v<float> / 3.0f,
-    .nearPlane = 0.1f,
-    .farPlane = 100.0f,
-};
 
 /* --- File-local types --- */
 
@@ -216,6 +206,8 @@ try
 {
     const RunOptions options = parseOptions(argumentCount, arguments);
     const std::string applicationName = "fireEngine Tutorial";
+    const fire_engine::FrameDescription& frameDescription =
+        fire_engine::tutorial::animatedCubeFrameDescription();
 
     fire_engine::Glfw glfw;
     fire_engine::Window window{800, 600, applicationName};
@@ -326,7 +318,7 @@ try
 
         fire_engine::RendererCpuTimings rendererTimings;
         const fire_engine::RenderResult result = renderer.drawFrame(
-            drawList, kTutorialCamera, benchmark.has_value() ? &rendererTimings : nullptr);
+            drawList, frameDescription, benchmark.has_value() ? &rendererTimings : nullptr);
         if (benchmark.has_value())
         {
             benchmark->record(result, transformUpdate, drawListBuild, rendererTimings);
