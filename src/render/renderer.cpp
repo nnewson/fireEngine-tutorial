@@ -104,11 +104,12 @@ public:
     /**
      * @brief Records, submits, and presents the current scene once.
      * @param drawList Frozen draw items and transforms valid until this call returns.
-     * @param camera Application-owned perspective values sampled for this frame.
+     * @param frameDescription Application-owned camera and shadow values sampled for this frame.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Presentation outcome for the acquired swapchain image.
      */
-    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList, const Camera& camera,
+    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+                                         const FrameDescription& frameDescription,
                                          RendererCpuTimings* timings);
 
     /**
@@ -230,10 +231,11 @@ void Renderer::prepare(const RenderAssets& assets, const SceneDrawList& drawList
     implementation_->prepare(assets, drawList);
 }
 
-RenderResult Renderer::drawFrame(const SceneDrawList& drawList, const Camera& camera,
+RenderResult Renderer::drawFrame(const SceneDrawList& drawList,
+                                 const FrameDescription& frameDescription,
                                  RendererCpuTimings* timings)
 {
-    return implementation_->drawFrame(drawList, camera, timings);
+    return implementation_->drawFrame(drawList, frameDescription, timings);
 }
 
 bool Renderer::recreatePresentation(FramebufferExtent framebufferExtent)
@@ -371,7 +373,8 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& dr
     compiledGeneration_ = renderPreparation_.generation();
 }
 
-RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Camera& camera,
+RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
+                                       const FrameDescription& frameDescription,
                                        RendererCpuTimings* timings)
 {
     if (timings != nullptr)
@@ -405,8 +408,8 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList, const Came
             .pipelineLayout = *presentation_->forwardPipeline().pipelineLayout(),
             .frameUniformBuffer = frame.forwardUniforms.handle(),
             .frameUniforms = {.viewProjection = cameraViewProjection(
-                                  camera, static_cast<float>(extent.width) /
-                                              static_cast<float>(extent.height))},
+                                  frameDescription.camera, static_cast<float>(extent.width) /
+                                                               static_cast<float>(extent.height))},
             .viewport = sceneViewport(extent),
             .scissor = {.offset = {.x = 0, .y = 0}, .extent = extent},
             .colorAttachmentFormat = presentation_->swapchain().imageFormat(),
