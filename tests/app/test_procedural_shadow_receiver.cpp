@@ -13,6 +13,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -107,6 +108,7 @@ TEST_CASE("Procedural shadow receiver appends without replacing existing content
     });
     const fire_engine::MaterialId existingMaterial = content.assets.addMaterial({
         .baseColor = {.r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
+        .baseColorTexture = std::nullopt,
     });
     const fire_engine::RenderObjectId existingObject = content.assets.addRenderObject({
         .mesh = existingMesh,
