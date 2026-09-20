@@ -185,6 +185,7 @@ ResourceCompiler::compile(const RenderAssets& assets, const RenderPreparationPla
                     .imageView = *texture.image().view(),
                     .baseColor = material.baseColor,
                 },
+            .castsShadow = object.castsShadow,
         };
     }
 

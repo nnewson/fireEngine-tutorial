@@ -66,6 +66,16 @@ Texture makeTexture(fire_engine::ImageId image)
         .wrapV = TextureWrap::eRepeat,
     };
 }
+
+RenderAssets makeTriangleAssets(bool castsShadow)
+{
+    RenderAssets assets;
+    const auto mesh = assets.addMesh(makeTriangle());
+    const auto material = assets.addMaterial(Material{});
+    static_cast<void>(assets.addRenderObject(
+        RenderObject{.mesh = mesh, .material = material, .castsShadow = castsShadow}));
+    return assets;
+}
 } // namespace
 
 TEST_CASE("Color4 exposes color-domain component names")
@@ -76,6 +86,46 @@ TEST_CASE("Color4 exposes color-domain component names")
     REQUIRE(color.g == 0.2f);
     REQUIRE(color.b == 0.3f);
     REQUIRE(color.a == 0.4f);
+}
+
+TEST_CASE("Render preparation preserves shadow participation across same-shaped replacement")
+{
+    const RenderObject defaultObject{};
+    REQUIRE(defaultObject.castsShadow);
+
+    RenderAssets assets = makeTriangleAssets(true);
+    const std::size_t originalRevision = assets.revision();
+    Scene scene;
+    SceneDrawListArena drawListArena;
+    scene.addRoot("triangle").component(RenderObjectId{.value = 0});
+
+    RenderPreparation preparation;
+    const auto firstDrawList = scene.buildDrawItems(drawListArena);
+    const std::size_t dependencyHash = firstDrawList.dependencyHash;
+    const RenderPreparationPlan& castingPlan =
+        preparation.build(assets, firstDrawList, PipelineDescription{});
+    REQUIRE(preparation.generation() == 1);
+    REQUIRE(castingPlan.renderObjects.size() == 1);
+    REQUIRE(castingPlan.renderObjects.front().castsShadow);
+
+    RenderAssets replacement = makeTriangleAssets(false);
+    REQUIRE(replacement.revision() == originalRevision);
+    assets = std::move(replacement);
+
+    // src/graphics/render_assets.cpp deliberately makes RenderAssets::operator=(RenderAssets&&)
+    // increment the destination's existing revision rather than adopt the same-shaped source
+    // revision. This protects cache invalidation when identity, cardinality, IDs, and draw
+    // dependencies remain unchanged.
+    REQUIRE(assets.revision() == originalRevision + 1);
+    const auto replacementDrawList = scene.buildDrawItems(drawListArena);
+    REQUIRE(replacementDrawList.dependencyHash == dependencyHash);
+    const RenderPreparationPlan& replacementPlan =
+        preparation.build(assets, replacementDrawList, PipelineDescription{});
+
+    REQUIRE(preparation.generation() == 2);
+    REQUIRE(replacementPlan.renderObjects.size() == 1);
+    REQUIRE(replacementPlan.renderObjects.front().id == RenderObjectId{.value = 0});
+    REQUIRE_FALSE(replacementPlan.renderObjects.front().castsShadow);
 }
 
 TEST_CASE("Render preparation shares mesh and material resources")
