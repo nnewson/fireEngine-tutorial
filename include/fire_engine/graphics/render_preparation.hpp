@@ -22,6 +22,7 @@ struct PreparedRenderObject
     RenderObjectId id;            ///< Dense object ID retained for renderer lookup.
     MeshId mesh;                  ///< Validated source mesh.
     MaterialId material;          ///< Validated source material.
+    bool castsShadow;             ///< Directional-shadow participation retained for compilation.
     VertexLayoutKey vertexLayout; ///< Mesh/pipeline compatibility proved by preparation.
 };
 

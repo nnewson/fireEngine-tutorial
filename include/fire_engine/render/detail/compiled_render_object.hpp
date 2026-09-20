@@ -34,6 +34,7 @@ struct CompiledRenderObject
 {
     CompiledGeometry geometry;               ///< Pass-independent indexed geometry.
     CompiledForwardMaterial forwardMaterial; ///< Forward-only sampled material state.
+    bool castsShadow; ///< Directional-shadow participation; does not affect forward visibility.
 };
 /** @endcond */
 } // namespace fire_engine::detail

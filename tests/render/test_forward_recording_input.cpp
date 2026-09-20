@@ -28,7 +28,8 @@ template <typename Handle, typename NativeHandle>
 }
 
 [[nodiscard]] fire_engine::detail::CompiledRenderObject
-compiledRenderObject(std::uintptr_t firstHandle, fire_engine::Color4 baseColor)
+compiledRenderObject(std::uintptr_t firstHandle, fire_engine::Color4 baseColor,
+                     bool castsShadow = true)
 {
     return {
         .geometry =
@@ -44,6 +45,7 @@ compiledRenderObject(std::uintptr_t firstHandle, fire_engine::Color4 baseColor)
                 .imageView = fakeHandle<vk::ImageView, VkImageView>(firstHandle + 3),
                 .baseColor = baseColor,
             },
+        .castsShadow = castsShadow,
     };
 }
 
@@ -132,6 +134,34 @@ TEST_CASE("Forward recording input resolves immutable packets and reuses its are
         const auto rebuilt = compiler.compile(drawList, resources.view(), forwardRecordingState());
         REQUIRE(rebuilt.draws().data() == firstStorage);
     }
+}
+
+TEST_CASE("Forward recording input retains objects that do not cast shadows")
+{
+    using fire_engine::DrawItem;
+    using fire_engine::RenderObjectId;
+    using fire_engine::SceneDrawList;
+    using fire_engine::detail::CompiledResourceGraph;
+    using fire_engine::detail::CompiledResources;
+    using fire_engine::detail::ForwardRecordingInputCompiler;
+
+    CompiledResources resources;
+    auto graph = std::make_unique<CompiledResourceGraph>();
+    graph->objects.resize(1);
+    graph->objects[0] = compiledRenderObject(1, {}, false);
+    resources.replace(std::move(graph));
+
+    const RenderObjectId object{.value = 0};
+    const auto compiledObject = resources.view().find(object);
+    REQUIRE(compiledObject.has_value());
+    REQUIRE_FALSE(compiledObject->castsShadow);
+
+    const std::array drawItems{DrawItem{.renderObject = object}};
+    ForwardRecordingInputCompiler compiler;
+    const auto input = compiler.compile(SceneDrawList{.drawItems = drawItems}, resources.view(),
+                                        forwardRecordingState());
+    REQUIRE(input.draws().size() == 1);
+    REQUIRE(input.draws().front().vertexBuffer == compiledObject->geometry.vertexBuffer);
 }
 
 TEST_CASE("Forward recording input rejects unresolved and pipeline-incompatible draws")

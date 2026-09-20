@@ -86,6 +86,7 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
             .id = RenderObjectId{.value = index},
             .mesh = renderObject.mesh,
             .material = renderObject.material,
+            .castsShadow = renderObject.castsShadow,
             .vertexLayout = mesh.vertexLayout,
         });
     }
