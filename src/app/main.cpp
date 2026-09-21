@@ -4,6 +4,7 @@
  */
 
 #include "benchmark.hpp"
+#include "procedural_shadow_receiver.hpp"
 #include "tutorial_frame_descriptions.hpp"
 
 #include <algorithm>
@@ -61,6 +62,7 @@ enum class SmokeScenario : std::uint8_t
     ePrepareTwice, ///< Change dependencies and replace compiled GPU resources.
     eUntextured,   ///< Draw the imported mesh through the persistent white fallback texture.
     eResize,       ///< Recreate presentation-dependent state after every presented frame.
+    eShadow,       ///< Add the procedural receiver and use the shadow-demonstration camera.
 };
 
 /** @brief Mutually exclusive top-level application modes selected by the command line. */
@@ -75,6 +77,7 @@ enum class RunMode : std::uint8_t
 /** @brief Command-line controls used by automated integration runs. */
 struct RunOptions
 {
+    RunMode mode = RunMode::eInteractive;    ///< Mutually exclusive top-level application mode.
     std::optional<std::uint64_t> frameLimit; ///< Presented frames requested before exit.
     std::optional<std::uint64_t>
         reprepareAfterFrame; ///< Presented-frame count that triggers repeated preparation.
@@ -98,7 +101,7 @@ struct SmokeDefinition
 };
 
 /** @brief Named integration-scenario metadata consumed by the command-line parser. */
-constexpr std::array<SmokeDefinition, 4> kSmokeDefinitions{{
+constexpr std::array<SmokeDefinition, 5> kSmokeDefinitions{{
     {
         .name = "basic",
         .scenario = SmokeScenario::eBasic,
@@ -129,6 +132,14 @@ constexpr std::array<SmokeDefinition, 4> kSmokeDefinitions{{
         .frameLimit = 3,
         .reprepareAfterFrame = std::nullopt,
         .recreateEveryFrame = true,
+    },
+    {
+        .name = "shadow",
+        .scenario = SmokeScenario::eShadow,
+        // Five frames populate both submission slots and then reuse one.
+        .frameLimit = 5,
+        .reprepareAfterFrame = std::nullopt,
+        .recreateEveryFrame = false,
     },
 }};
 
@@ -206,8 +217,11 @@ try
 {
     const RunOptions options = parseOptions(argumentCount, arguments);
     const std::string applicationName = "fireEngine Tutorial";
+    const bool shadowDemonstration =
+        options.mode == RunMode::eInteractive || options.smokeScenario == SmokeScenario::eShadow;
     const fire_engine::FrameDescription& frameDescription =
-        fire_engine::tutorial::animatedCubeFrameDescription();
+        shadowDemonstration ? fire_engine::tutorial::shadowDemonstrationFrameDescription()
+                            : fire_engine::tutorial::animatedCubeFrameDescription();
 
     fire_engine::Glfw glfw;
     fire_engine::Window window{800, 600, applicationName};
@@ -226,7 +240,10 @@ try
     }
     fire_engine::SceneContent content = fire_engine::GltfLoader{}.load(
         std::filesystem::path{FIRE_ENGINE_ASSET_DIRECTORY} / "AnimatedCube" / "AnimatedCube.gltf");
-
+    if (shadowDemonstration)
+    {
+        static_cast<void>(fire_engine::tutorial::addProceduralShadowReceiver(content));
+    }
     std::optional<fire_engine::tutorial::BenchmarkRun> benchmark;
     if (options.benchmarkInstanceCount.has_value())
     {
@@ -238,7 +255,25 @@ try
     }
     fire_engine::SceneDrawListArena drawListArena;
     content.scene.updateWorldTransforms();
-    renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
+    std::size_t initialForwardDrawCount = 0;
+    std::size_t initialShadowCasterCount = 0;
+    {
+        const fire_engine::SceneDrawList initialDrawList =
+            content.scene.buildDrawItems(drawListArena);
+        renderer.prepare(content.assets, initialDrawList);
+        if (shadowDemonstration)
+        {
+            initialForwardDrawCount = initialDrawList.drawItems.size();
+            initialShadowCasterCount =
+                std::ranges::count_if(initialDrawList.drawItems,
+                                      [&content](const auto& drawItem)
+                                      {
+                                          return content.assets.renderObjects()
+                                              .at(drawItem.renderObject.value)
+                                              .castsShadow;
+                                      });
+        }
+    }
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
     std::println("Selected Vulkan 1.4 device: {}", rendererInfo.deviceName);
@@ -252,8 +287,16 @@ try
                  rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,
                  rendererInfo.imageFormat, rendererInfo.presentMode, rendererInfo.depthFormat,
                  rendererInfo.presentationSemaphoreCount);
-    std::println("{} content prepared for drawing.",
-                 benchmark.has_value() ? "Synthetic benchmark" : "AnimatedCube");
+    const std::string_view preparedContent =
+        benchmark.has_value() ? "Synthetic benchmark"
+                              : (shadowDemonstration ? "Shadow demonstration" : "AnimatedCube");
+    std::println("{} content prepared for drawing.", preparedContent);
+    if (shadowDemonstration)
+    {
+        std::println("Shadow demonstration content: {} forward draws, {} object marked as a "
+                     "shadow caster.",
+                     initialForwardDrawCount, initialShadowCasterCount);
+    }
 
     std::uint64_t renderedFrameCount = 0;
     bool repeatedPreparationComplete = false;
@@ -389,7 +432,6 @@ namespace
 try
 {
     RunOptions options;
-    RunMode mode = RunMode::eInteractive;
     bool forwardDirectPrimarySeen = false;
     bool recreateEveryFrameSeen = false;
     bool forwardRecordingParticipantsSeen = false;
@@ -398,18 +440,18 @@ try
     std::optional<std::filesystem::path> capturePath;
     std::optional<std::uint64_t> captureFrame;
 
-    const auto selectMode = [&mode](RunMode selectedMode, std::string_view optionName)
+    const auto selectMode = [&options](RunMode selectedMode, std::string_view optionName)
     {
-        if (mode == selectedMode)
+        if (options.mode == selectedMode)
         {
             throw std::invalid_argument{"Repeated option: " + std::string{optionName}};
         }
-        if (mode != RunMode::eInteractive)
+        if (options.mode != RunMode::eInteractive)
         {
             throw std::invalid_argument(
                 "Only one of --benchmark, --frames, and --smoke may be supplied");
         }
-        mode = selectedMode;
+        options.mode = selectedMode;
     };
     const auto requireValue =
         [argumentCount, arguments](int& argumentIndex, std::string_view optionName)
@@ -523,15 +565,16 @@ try
         }
     }
 
-    if (options.recordForwardDirectly && mode != RunMode::eBenchmark)
+    if (options.recordForwardDirectly && options.mode != RunMode::eBenchmark)
     {
         throw std::invalid_argument("--forward-direct-primary requires --benchmark");
     }
-    if (recreateEveryFrameSeen && mode != RunMode::eFrames)
+    if (recreateEveryFrameSeen && options.mode != RunMode::eFrames)
     {
         throw std::invalid_argument("--recreate-every-frame requires --frames");
     }
-    if (forwardRecordingParticipantsSeen && mode != RunMode::eBenchmark && mode != RunMode::eSmoke)
+    if (forwardRecordingParticipantsSeen && options.mode != RunMode::eBenchmark &&
+        options.mode != RunMode::eSmoke)
     {
         throw std::invalid_argument(
             "--forward-recording-participants requires --benchmark or --smoke");
@@ -551,11 +594,11 @@ try
     }
     if (capturePath.has_value())
     {
-        if (mode == RunMode::eBenchmark)
+        if (options.mode == RunMode::eBenchmark)
         {
             throw std::invalid_argument("--capture cannot be combined with --benchmark");
         }
-        if (mode != RunMode::eFrames && mode != RunMode::eSmoke)
+        if (options.mode != RunMode::eFrames && options.mode != RunMode::eSmoke)
         {
             throw std::invalid_argument("--capture requires --frames or --smoke");
         }

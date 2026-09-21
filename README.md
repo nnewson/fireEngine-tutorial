@@ -27,9 +27,10 @@ Debug builds enable Vulkan validation when the standard validation layer is
 installed. Validation is disabled for every other build configuration.
 
 The interactive application loads the committed Khronos AnimatedCube glTF,
-uploads its mesh and base-color texture, and plays its imported rotation
-animation until the window closes. The copied build-tree asset path is used for
-both direct runs and CTest, so execution never depends on the working directory.
+adds a procedural ground-plane receiver, uploads both meshes and the cube's
+base-color texture, and plays the imported rotation animation until the window
+closes. The copied build-tree asset path is used for both direct runs and CTest,
+so execution never depends on the working directory.
 
 A positive frame limit remains available for quick validation:
 
@@ -50,9 +51,9 @@ performance benchmark.
 CTest runs the Vulkan-free Catch2 suite plus bounded device scenarios covering
 normal AnimatedCube animation, replacement after changed preparation inputs,
 an untextured fallback draw, repeated swapchain recreation, frame capture, and
-benchmark recording controls. The four smoke paths can be selected directly
-with `--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`, or
-`--smoke resize`.
+benchmark recording controls. The five smoke paths can be selected directly
+with `--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`,
+`--smoke resize`, or `--smoke shadow`.
 
 Options belonging to the same mode may be supplied in any order.
 
