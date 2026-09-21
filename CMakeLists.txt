@@ -284,10 +284,14 @@ catch_discover_tests(fireEngineTutorialTests
 )
 
 # These bounded scenarios retain the real application integration path. They
-# cover imported animation, changed preparation dependencies, the untextured
-# fallback descriptor, and presentation-resource replacement on a Vulkan device.
+# cover imported animation, the shadow demonstration, changed preparation
+# dependencies, the untextured fallback descriptor, and presentation-resource
+# replacement on a Vulkan device.
 add_test(NAME fireEngineTutorialAnimatedCubeSmoke
     COMMAND fireEngineTutorial --smoke basic
+)
+add_test(NAME fireEngineTutorialShadowSmoke
+    COMMAND fireEngineTutorial --smoke shadow
 )
 add_test(NAME fireEngineTutorialPrepareTwiceSmoke
     COMMAND fireEngineTutorial --smoke prepare-twice
@@ -635,6 +639,7 @@ set_tests_properties(
 # its device scenarios out of Release test lists instead of registering silent
 # duplicates with an environment variable that cannot enable the absent layer.
 set(FIRE_ENGINE_SYNC_VALIDATION_TESTS)
+set(FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS fireEngineTutorialShadowSmoke)
 set(FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS)
 if(CMAKE_CONFIGURATION_TYPES)
     list(APPEND FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS CONFIGURATIONS Debug)
@@ -647,6 +652,13 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_test(NAME fireEngineTutorialRecreationSyncValidation
         COMMAND fireEngineTutorial --smoke resize
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    add_test(NAME fireEngineTutorialShadowSyncValidation
+        COMMAND fireEngineTutorial --smoke shadow
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
+    list(APPEND FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS
+        fireEngineTutorialShadowSyncValidation
     )
     add_test(NAME fireEngineTutorialForwardDirectPrimarySyncValidation
         COMMAND fireEngineTutorial --benchmark 1 --forward-direct-primary
@@ -680,6 +692,7 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
         fireEngineTutorialPrepareTwiceSyncValidation
         fireEngineTutorialRecreationSyncValidation
+        fireEngineTutorialShadowSyncValidation
         fireEngineTutorialForwardDirectPrimarySyncValidation
         fireEngineTutorialForwardSplitRecordingSyncValidation
         fireEngineTutorialForwardSplitRecordingMixedResourceSyncValidation
@@ -691,6 +704,7 @@ endif()
 
 set_tests_properties(
     fireEngineTutorialAnimatedCubeSmoke
+    fireEngineTutorialShadowSmoke
     fireEngineTutorialPrepareTwiceSmoke
     fireEngineTutorialUntexturedSmoke
     fireEngineTutorialRecreationSmoke
@@ -711,6 +725,12 @@ set_tests_properties(
         LABELS vulkan-device
         RESOURCE_LOCK fireEngineTutorialVulkan
         TIMEOUT 30
+)
+
+# The exact geometry and participation policy are device-free contracts. These
+# scenarios prove that the demonstration selection reaches the real frame path.
+set_tests_properties(${FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS} PROPERTIES
+    PASS_REGULAR_EXPRESSION "Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.]"
 )
 
 set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
