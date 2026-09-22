@@ -11,14 +11,19 @@ namespace
 {
 /* --- Constants --- */
 
+/** @brief Registered shadow-depth formats in descending preference order. */
 constexpr std::array kPreferredFormats = {
     vk::Format::eD32Sfloat,
     vk::Format::eD16Unorm,
 };
 
-// Keep this policy distinct from DepthBuffer's attachment-only selection. A
-// device may support D32 as an attachment but only D16 for sampled depth, so
-// combining the selectors could silently select an unusable shadow format.
+/**
+ * @brief Optimal-tiling capabilities required by every shadow-map format.
+ *
+ * Keep this policy distinct from DepthBuffer's attachment-only selection. A
+ * device may support D32 as an attachment but only D16 for sampled depth, so
+ * combining the selectors could silently select an unusable shadow format.
+ */
 constexpr vk::FormatFeatureFlags kRequiredFeatures =
     vk::FormatFeatureFlagBits::eDepthStencilAttachment | vk::FormatFeatureFlagBits::eSampledImage;
 
