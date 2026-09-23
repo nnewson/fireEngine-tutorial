@@ -1,3 +1,4 @@
+#include <fire_engine/render/detail/shadow_map.hpp>
 #include <fire_engine/render/detail/shadow_map_policy.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -108,4 +109,12 @@ TEST_CASE("Shadow comparison sampler pins filtering, comparison, and border poli
     REQUIRE(sampler.maxLod == 0.0F);
     REQUIRE(sampler.borderColor == vk::BorderColor::eFloatOpaqueWhite);
     REQUIRE(sampler.unnormalizedCoordinates == vk::False);
+}
+
+TEST_CASE("Shadow-map allocation policy pins extent and image usage")
+{
+    REQUIRE(policy::kShadowMapExtent.width == 1024);
+    REQUIRE(policy::kShadowMapExtent.height == 1024);
+    REQUIRE(policy::kShadowMapImageUsage ==
+            (vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled));
 }

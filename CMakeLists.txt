@@ -79,6 +79,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/recording_context.cpp
     src/render/renderer.cpp
     src/render/resource_compiler.cpp
+    src/render/shadow_map.cpp
     src/render/shadow_map_policy.cpp
     src/render/spirv_loader.cpp
     src/render/swapchain.cpp
@@ -732,7 +733,7 @@ set_tests_properties(
 # The exact geometry and participation policy are device-free contracts. These
 # scenarios prove that the demonstration selection reaches the real frame path.
 set_tests_properties(${FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS} PROPERTIES
-    PASS_REGULAR_EXPRESSION "Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.]"
+    PASS_REGULAR_EXPRESSION "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.]"
 )
 
 set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES

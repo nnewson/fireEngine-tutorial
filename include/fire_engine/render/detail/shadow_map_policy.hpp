@@ -7,6 +7,10 @@
 namespace fire_engine::detail
 {
 /** @cond INTERNAL */
+/* --- Forward declarations --- */
+
+class Device;
+
 /* --- POD structs --- */
 
 /** @brief Optimal-tiling capabilities reported for one shadow-map format candidate. */
@@ -26,6 +30,14 @@ struct ShadowMapFormatSupport final
  */
 [[nodiscard]] vk::Format
 chooseShadowMapFormat(std::span<const ShadowMapFormatSupport> reportedSupport);
+
+/**
+ * @brief Queries registered optimal-tiling candidates and applies the tested policy.
+ * @param device Physical device whose shadow-depth capabilities are queried.
+ * @return Preferred format supporting sampled depth-attachment use.
+ * @throws std::runtime_error if neither registered candidate supports both required uses.
+ */
+[[nodiscard]] vk::Format queryShadowMapFormat(const Device& device);
 
 /**
  * @brief Builds the fixed comparison-sampler policy used for directional shadows.

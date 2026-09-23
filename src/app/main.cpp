@@ -282,11 +282,14 @@ try
     std::println("Present queue family: {}", rendererInfo.presentQueueFamily);
     std::println("Logical device, queues, VMA allocator, and {} frame slots created.",
                  rendererInfo.frameSlotCount);
-    std::println("Swapchain created: {} images at {}x{} ({}, {}, depth {}), {} presentation "
-                 "semaphores.",
+    std::println("Swapchain created: {} images at {}x{} ({}, {}), {} presentation semaphores.",
                  rendererInfo.swapchainImageCount, rendererInfo.width, rendererInfo.height,
-                 rendererInfo.imageFormat, rendererInfo.presentMode, rendererInfo.depthFormat,
+                 rendererInfo.imageFormat, rendererInfo.presentMode,
                  rendererInfo.presentationSemaphoreCount);
+    std::println("Forward depth format: {}.", rendererInfo.forwardDepthFormat);
+    std::println("Shadow maps: {} at {}x{}, format {}, {} created.", rendererInfo.shadowMapCount,
+                 rendererInfo.shadowMapWidth, rendererInfo.shadowMapHeight,
+                 rendererInfo.shadowMapFormat, rendererInfo.shadowMapCreationCount);
     const std::string_view preparedContent =
         benchmark.has_value() ? "Synthetic benchmark"
                               : (shadowDemonstration ? "Shadow demonstration" : "AnimatedCube");
