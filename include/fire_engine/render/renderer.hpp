@@ -69,7 +69,12 @@ struct RendererInfo
     std::uint32_t width;                       ///< Swapchain width in physical pixels.
     std::uint32_t height;                      ///< Swapchain height in physical pixels.
     std::string imageFormat;                   ///< Human-readable Vulkan image format.
-    std::string depthFormat;                   ///< Human-readable depth attachment format.
+    std::string forwardDepthFormat;            ///< Human-readable forward depth format.
+    std::string shadowMapFormat;               ///< Human-readable sampled depth format.
+    std::uint32_t shadowMapWidth;              ///< Width of every shadow map in pixels.
+    std::uint32_t shadowMapHeight;             ///< Height of every shadow map in pixels.
+    std::size_t shadowMapCount;                ///< Number of live frame-slot shadow maps.
+    std::size_t shadowMapCreationCount;        ///< Successful maps created by this renderer.
     std::string presentMode;                   ///< Human-readable Vulkan presentation mode.
     ForwardRecordingMode forwardRecordingMode; ///< Forward recording structure in use.
     /// Diagnostic override in force, or unset when the workload selects the participant count.

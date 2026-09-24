@@ -22,6 +22,7 @@
 #include <fire_engine/render/detail/readback_buffer.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
 #include <fire_engine/render/detail/resource_compiler.hpp>
+#include <fire_engine/render/detail/shadow_map_policy.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene_draw_list.hpp>
 
@@ -192,6 +193,12 @@ private:
     detail::ResourceCompiler resourceCompiler_; ///< Dedicated setup-time upload context.
     std::unique_ptr<detail::ReadbackBuffer> readbackBuffer_; ///< Lazy one-shot capture storage.
 
+    // Renderer-lifetime shadow policy and shared sampling state. The tracker
+    // precedes every owner whose successful construction it observes.
+    detail::ShadowMapCreationTracker shadowMapCreationTracker_; ///< Monotonic local count.
+    vk::Format shadowMapFormat_; ///< Sampled depth format selected once for every slot.
+    vk::raii::Sampler shadowComparisonSampler_; ///< Comparison state shared by all slots.
+
     // Presentation-dependent state replaced as one ownership group.
     std::unique_ptr<detail::PresentationState> presentation_; ///< Swapchain-compatible resources.
 
@@ -269,14 +276,19 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
       device_{glfw, window, applicationName},
       allocator_{device_},
       resourceCompiler_{device_, allocator_},
+      shadowMapFormat_{detail::queryShadowMapFormat(device_)},
+      shadowComparisonSampler_{device_.logicalDevice(),
+                               detail::shadowComparisonSamplerCreateInfo()},
       presentation_{std::make_unique<detail::PresentationState>(
           device_, allocator_, window.framebufferExtent(), captureRequest_.has_value())},
-      // Frame resources are presentation-independent. Their synchronization
-      // objects and recording contexts borrow the device, while their uniform
-      // storage borrows the allocator; both owners are declared earlier.
+      // Frame resources are presentation-independent. Synchronization,
+      // recording contexts, and shadow views borrow the device; uniform and
+      // shadow-image allocations borrow the allocator. Both owners precede them.
       frames_{detail::FrameResources{
                   .slot = detail::FrameSlot{device_},
                   .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
+                  .shadowMap = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
+                                                 shadowMapCreationTracker_},
                   .coordinator =
                       detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
                   .secondaries = {detail::RecordingContext{
@@ -288,6 +300,8 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
               detail::FrameResources{
                   .slot = detail::FrameSlot{device_},
                   .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
+                  .shadowMap = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
+                                                 shadowMapCreationTracker_},
                   .coordinator =
                       detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
                   .secondaries = {detail::RecordingContext{
@@ -643,7 +657,12 @@ RendererInfo Renderer::Impl::info() const
         .width = presentation_->swapchain().extent().width,
         .height = presentation_->swapchain().extent().height,
         .imageFormat = vk::to_string(presentation_->swapchain().imageFormat()),
-        .depthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
+        .forwardDepthFormat = vk::to_string(presentation_->depthBuffer(0).format()),
+        .shadowMapFormat = vk::to_string(shadowMapFormat_),
+        .shadowMapWidth = detail::kShadowMapExtent.width,
+        .shadowMapHeight = detail::kShadowMapExtent.height,
+        .shadowMapCount = frames_.size(),
+        .shadowMapCreationCount = shadowMapCreationTracker_.count(),
         .presentMode = vk::to_string(presentation_->swapchain().presentMode()),
         .forwardRecordingMode = forwardRecorder_.mode(),
         .forcedForwardRecordingParticipantCount = forwardRecorder_.forcedParticipantCount(),

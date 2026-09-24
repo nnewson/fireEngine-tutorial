@@ -6,6 +6,7 @@
 #include <fire_engine/render/detail/frame_slot.hpp>
 #include <fire_engine/render/detail/frame_slot_count.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
+#include <fire_engine/render/detail/shadow_map.hpp>
 #include <fire_engine/render/renderer.hpp>
 
 namespace fire_engine::detail
@@ -18,6 +19,7 @@ struct FrameResources final
 {
     FrameSlot slot;                            ///< Synchronization state for the slot.
     ForwardFrameUniformBuffer forwardUniforms; ///< Forward values for the slot.
+    ShadowMap shadowMap;                       ///< Presentation-independent sampled depth target.
     RecordingContext coordinator;              ///< Primary-command recording state for the slot.
     // Both contexts exist in every configuration so one-thread and two-thread
     // measurements share an ownership topology. An allocated pool that is never

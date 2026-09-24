@@ -1,7 +1,10 @@
 #include <fire_engine/render/detail/shadow_map_policy.hpp>
 
+#include <fire_engine/render/detail/device.hpp>
+
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <stdexcept>
 
 namespace fire_engine::detail
@@ -54,6 +57,21 @@ vk::Format chooseShadowMapFormat(std::span<const ShadowMapFormatSupport> reporte
         }
     }
     throw std::runtime_error("The selected device supports no sampled depth-attachment format");
+}
+
+vk::Format queryShadowMapFormat(const Device& device)
+{
+    std::array<ShadowMapFormatSupport, kPreferredFormats.size()> reportedSupport{};
+    for (std::size_t index = 0; index < kPreferredFormats.size(); ++index)
+    {
+        const vk::Format format = kPreferredFormats[index];
+        reportedSupport[index] = {
+            .format = format,
+            .optimalTilingFeatures =
+                device.physicalDevice().getFormatProperties(format).optimalTilingFeatures,
+        };
+    }
+    return chooseShadowMapFormat(reportedSupport);
 }
 /** @endcond */
 } // namespace fire_engine::detail
