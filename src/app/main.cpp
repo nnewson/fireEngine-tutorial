@@ -400,6 +400,9 @@ try
     // Together they make submitted and presentation resources safe to destroy.
     renderer.waitIdle();
 
+    const fire_engine::RendererInfo finalRendererInfo = renderer.info();
+    std::println("Shadow map creations after run: {}.", finalRendererInfo.shadowMapCreationCount);
+
     if (options.captureRequest.has_value() && !renderer.captureComplete())
     {
         throw std::runtime_error("The requested frame capture did not complete");

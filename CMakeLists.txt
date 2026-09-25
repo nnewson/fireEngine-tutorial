@@ -643,6 +643,7 @@ set_tests_properties(
 # duplicates with an environment variable that cannot enable the absent layer.
 set(FIRE_ENGINE_SYNC_VALIDATION_TESTS)
 set(FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS fireEngineTutorialShadowSmoke)
+set(FIRE_ENGINE_SHADOW_MAP_LIFETIME_TESTS fireEngineTutorialRecreationSmoke)
 set(FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS)
 if(CMAKE_CONFIGURATION_TYPES)
     list(APPEND FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS CONFIGURATIONS Debug)
@@ -662,6 +663,9 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     )
     list(APPEND FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS
         fireEngineTutorialShadowSyncValidation
+    )
+    list(APPEND FIRE_ENGINE_SHADOW_MAP_LIFETIME_TESTS
+        fireEngineTutorialRecreationSyncValidation
     )
     add_test(NAME fireEngineTutorialForwardDirectPrimarySyncValidation
         COMMAND fireEngineTutorial --benchmark 1 --forward-direct-primary
@@ -734,6 +738,13 @@ set_tests_properties(
 # scenarios prove that the demonstration selection reaches the real frame path.
 set_tests_properties(${FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS} PROPERTIES
     PASS_REGULAR_EXPRESSION "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.]"
+)
+
+# Startup resource values cannot prove that presentation replacement preserved
+# the same maps. Require a fresh observation after one ordinary and one
+# synchronization-validation recreation path have finished.
+set_tests_properties(${FIRE_ENGINE_SHADOW_MAP_LIFETIME_TESTS} PROPERTIES
+    PASS_REGULAR_EXPRESSION "Shadow map creations after run: 2[.]"
 )
 
 set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
