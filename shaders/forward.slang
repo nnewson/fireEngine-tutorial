@@ -1,7 +1,4 @@
-struct FrameUniforms
-{
-    float4x4 viewProjection;
-};
+#include "frame_uniforms.slang"
 
 [[vk::binding(0, 0)]]
 ConstantBuffer<FrameUniforms, Std140DataLayout> frame;

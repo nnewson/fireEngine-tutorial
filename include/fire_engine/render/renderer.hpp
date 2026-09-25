@@ -98,6 +98,7 @@ struct ForwardParticipantCpuTimings
 struct CommonFrameCpuTimings
 {
     std::chrono::nanoseconds frameFenceWait{};        ///< Reusable-frame completion wait.
+    std::chrono::nanoseconds frameUniformUpdate{};    ///< Shared slot-local shader-value write.
     std::chrono::nanoseconds imageAcquisitionWait{};  ///< Presentable-image acquisition.
     std::chrono::nanoseconds presentationFenceWait{}; ///< Per-image retirement wait.
     std::chrono::nanoseconds queueSubmission{};       ///< Fence reset and graphics submission.
@@ -108,7 +109,6 @@ struct CommonFrameCpuTimings
 struct ForwardPassCpuTimings
 {
     std::chrono::nanoseconds recordingInputBuild{};         ///< Draw validation and packet freeze.
-    std::chrono::nanoseconds frameUniformUpdate{};          ///< Slot-local per-frame value write.
     std::chrono::nanoseconds coordinatorCommandPoolReset{}; ///< Primary-context pool reset.
     std::chrono::nanoseconds workerCommandPoolReset{};      ///< Participant-context pool-reset sum.
     std::chrono::nanoseconds secondaryCommandRecording{};   ///< Sum of participant recording.
