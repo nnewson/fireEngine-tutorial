@@ -261,8 +261,8 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     printPhase("draw-list build", &Sample::drawListBuild);
     printPhase("forward recording-input build",
                [](const Sample& sample) { return sample.renderer.forward.recordingInputBuild; });
-    printPhase("forward frame-uniform update",
-               [](const Sample& sample) { return sample.renderer.forward.frameUniformUpdate; });
+    printPhase("frame-uniform update",
+               [](const Sample& sample) { return sample.renderer.common.frameUniformUpdate; });
     printPhase("forward coordinator command-pool reset", [](const Sample& sample)
                { return sample.renderer.forward.coordinatorCommandPoolReset; });
     // With more than one participant these are summed participant CPU time, not
@@ -342,7 +342,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
         // in time and exclude dispatch and join, so adding them would both
         // double-count parallel work and hide the cost threading introduces.
         activeWork += sampleSnapshot + sample.renderer.forward.coordinatorCommandPoolReset +
-                      sample.renderer.forward.frameUniformUpdate +
+                      sample.renderer.common.frameUniformUpdate +
                       sample.renderer.forward.secondaryRecordingRegion +
                       sample.renderer.forward.primaryCommandRecording +
                       sample.renderer.forward.secondaryCommandExecution +

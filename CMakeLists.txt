@@ -66,12 +66,12 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/device.cpp
     src/render/directional_shadow_view.cpp
     src/render/draw_binding_state.cpp
-    src/render/forward_frame_uniform_buffer.cpp
     src/render/forward_pipeline.cpp
     src/render/forward_recorder.cpp
     src/render/forward_recording_input.cpp
     src/render/forward_secondary_recording_worker.cpp
     src/render/frame_slot.cpp
+    src/render/frame_uniform_buffer.cpp
     src/render/image.cpp
     src/render/instance_support.cpp
     src/render/presentation_state.cpp
@@ -180,10 +180,12 @@ target_link_libraries(fireEngineTutorialEngine
 # Slang only collapses an entry point to "main" when it emits exactly one, so
 # this flag is what keeps the names stable if the shader is ever split up.
 #
-# DEPENDS lists the shader source and the compiler itself, so upgrading slangc
-# through vcpkg forces a recompile. It does not track Slang `import`ed or
-# `#include`d modules; add `-depfile` and DEPFILE once the shader spans more
-# than this one file.
+# DEPENDS lists the shader source, its one shared declaration, and the compiler
+# itself, so editing the interface or upgrading slangc through vcpkg forces a
+# recompile. Add `-depfile` and DEPFILE if transitive shader dependencies are
+# introduced later.
+set(FIRE_ENGINE_FRAME_UNIFORMS_SHADER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/frame_uniforms.slang")
 set(FIRE_ENGINE_FORWARD_SHADER_SOURCE
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/forward.slang")
 set(FIRE_ENGINE_FORWARD_SHADER_BINARY
@@ -201,7 +203,10 @@ add_custom_command(
         -restrictive-capability-check
         -warnings-as-errors all
         -o "${FIRE_ENGINE_FORWARD_SHADER_BINARY}"
-    DEPENDS "${FIRE_ENGINE_FORWARD_SHADER_SOURCE}" slang::slangc
+    DEPENDS
+        "${FIRE_ENGINE_FORWARD_SHADER_SOURCE}"
+        "${FIRE_ENGINE_FRAME_UNIFORMS_SHADER_SOURCE}"
+        slang::slangc
     COMMENT "Compiling forward Slang shader to SPIR-V"
     VERBATIM
 )
@@ -264,6 +269,7 @@ add_executable(fireEngineTutorialTests
     tests/render/test_draw_binding_state.cpp
     tests/render/test_forward_recording_input.cpp
     tests/render/test_forward_secondary_recording_worker.cpp
+    tests/render/test_frame_uniforms.cpp
     tests/render/test_shadow_map_policy.cpp
     tests/render/test_spirv_loader.cpp
     tests/render/test_swapchain_selection.cpp
@@ -751,7 +757,7 @@ set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Ownership: cycled frame slots with per-slot recording contexts
   Frames in flight: 2
   Presentation: [^\n]*
-  Workload: instances=1, nodes=2, draws=1"
+  Workload: instances=1, nodes=2, draws=1[^|]*frame-uniform update"
 )
 # Assert the effective participant count, not the requested one: a split that
 # silently fell back to a single participant would otherwise pass. These

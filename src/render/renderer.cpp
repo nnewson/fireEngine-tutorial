@@ -286,7 +286,7 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
       // shadow-image allocations borrow the allocator. Both owners precede them.
       frames_{detail::FrameResources{
                   .slot = detail::FrameSlot{device_},
-                  .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
+                  .uniforms = detail::FrameUniformBuffer{allocator_},
                   .shadowMap = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
                                                  shadowMapCreationTracker_},
                   .coordinator =
@@ -299,7 +299,7 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
                                                    configuration.forwardRecordingMode)}}},
               detail::FrameResources{
                   .slot = detail::FrameSlot{device_},
-                  .forwardUniforms = detail::ForwardFrameUniformBuffer{allocator_},
+                  .uniforms = detail::FrameUniformBuffer{allocator_},
                   .shadowMap = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
                                                  shadowMapCreationTracker_},
                   .coordinator =
@@ -420,10 +420,12 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         const detail::ForwardRecordingState forwardRecordingState{
             .pipeline = *presentation_->forwardPipeline().pipeline(),
             .pipelineLayout = *presentation_->forwardPipeline().pipelineLayout(),
-            .frameUniformBuffer = frame.forwardUniforms.handle(),
+            .frameUniformBuffer = frame.uniforms.handle(),
             .frameUniforms = {.viewProjection = cameraViewProjection(
                                   frameDescription.camera, static_cast<float>(extent.width) /
-                                                               static_cast<float>(extent.height))},
+                                                               static_cast<float>(extent.height)),
+                              .lightViewProjection = directionalShadowViewProjection(
+                                  frameDescription.directionalShadow)},
             .viewport = sceneViewport(extent),
             .scissor = {.offset = {.x = 0, .y = 0}, .extent = extent},
             .colorAttachmentFormat = presentation_->swapchain().imageFormat(),
@@ -446,8 +448,8 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         throw vk::SystemError{vk::make_error_code(fenceResult), "Waiting for the frame fence"};
     }
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->forward.frameUniformUpdate};
-        frame.forwardUniforms.update(forwardRecordingInput.state().frameUniforms);
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.frameUniformUpdate};
+        frame.uniforms.update(forwardRecordingInput.state().frameUniforms);
     }
 
     std::uint32_t imageIndex = 0;
