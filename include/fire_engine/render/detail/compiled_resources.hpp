@@ -66,7 +66,7 @@ public:
     /**
      * @brief Commits one complete compiler-produced ownership graph.
      * @param replacement Complete candidate whose borrowers refer only to its owners.
-     * @pre No CompiledResourcesView or forward recording input still borrows the current graph.
+     * @pre No CompiledResourcesView or frame recording input still borrows the current graph.
      */
     void replace(std::unique_ptr<CompiledResourceGraph> replacement) noexcept;
 

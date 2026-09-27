@@ -7,7 +7,7 @@
 #include <span>
 #include <thread>
 
-#include <fire_engine/render/detail/forward_recording_input.hpp>
+#include <fire_engine/render/detail/frame_recording_input.hpp>
 
 namespace fire_engine::detail
 {

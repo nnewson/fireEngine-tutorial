@@ -6,8 +6,8 @@
 
 #include <vulkan/vulkan.hpp>
 
-#include <fire_engine/render/detail/forward_recording_input.hpp>
 #include <fire_engine/render/detail/forward_secondary_recording_worker.hpp>
+#include <fire_engine/render/detail/frame_recording_input.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
 #include <fire_engine/render/renderer.hpp>
 

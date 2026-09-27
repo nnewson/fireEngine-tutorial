@@ -68,8 +68,8 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/draw_binding_state.cpp
     src/render/forward_pipeline.cpp
     src/render/forward_recorder.cpp
-    src/render/forward_recording_input.cpp
     src/render/forward_secondary_recording_worker.cpp
+    src/render/frame_recording_input.cpp
     src/render/frame_slot.cpp
     src/render/frame_uniform_buffer.cpp
     src/render/image.cpp
@@ -297,8 +297,8 @@ add_executable(fireEngineTutorialTests
     tests/render/test_capture_format_mapping.cpp
     tests/render/test_directional_shadow_view.cpp
     tests/render/test_draw_binding_state.cpp
-    tests/render/test_forward_recording_input.cpp
     tests/render/test_forward_secondary_recording_worker.cpp
+    tests/render/test_frame_recording_input.cpp
     tests/render/test_frame_uniforms.cpp
     tests/render/test_shadow_draw_constants.cpp
     tests/render/test_shadow_map_policy.cpp
@@ -788,7 +788,7 @@ set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Ownership: cycled frame slots with per-slot recording contexts
   Frames in flight: 2
   Presentation: [^\n]*
-  Workload: instances=1, nodes=2, draws=1[^|]*frame-uniform update"
+  Workload: instances=1, nodes=2, draws=1[^|]*frame recording-input build[^|]*frame-uniform update"
 )
 # Assert the effective participant count, not the requested one: a split that
 # silently fell back to a single participant would otherwise pass. These
