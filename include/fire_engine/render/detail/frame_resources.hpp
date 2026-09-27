@@ -14,18 +14,31 @@ namespace fire_engine::detail
 /** @cond INTERNAL */
 /* --- POD structs --- */
 
-/** @brief Presentation-independent synchronization, uniform, and recording state for one slot. */
-struct FrameResources final
+/** @brief Presentation-independent depth target and primary recording state for one shadow pass. */
+struct ShadowFrameResources final
 {
-    FrameSlot slot;               ///< Synchronization state for the slot.
-    FrameUniformBuffer uniforms;  ///< Shared shader values for the slot.
-    ShadowMap shadowMap;          ///< Presentation-independent sampled depth target.
-    RecordingContext coordinator; ///< Primary-command recording state for the slot.
+    ShadowMap map;            ///< Sampled depth target retired with the containing frame slot.
+    RecordingContext primary; ///< Primary context reserved for the serial shadow pass.
+};
+
+/** @brief Primary and participant recording state owned by one forward pass. */
+struct ForwardFrameResources final
+{
+    RecordingContext primary; ///< Primary-command recording state for the pass.
     // Both contexts exist in every configuration so one-thread and two-thread
     // measurements share an ownership topology. An allocated pool that is never
     // reset or recorded into contributes no measured work.
     std::array<RecordingContext, kMaxForwardRecordingParticipants>
-        secondaries; ///< One recording context per participant.
+        participants; ///< One secondary recording context per participant.
+};
+
+/** @brief Presentation-independent shared and pass-local state for one frame slot. */
+struct FrameResources final
+{
+    FrameSlot slot;                ///< Synchronization state retiring the complete frame.
+    FrameUniformBuffer uniforms;   ///< Shader values shared by both passes.
+    ShadowFrameResources shadow;   ///< Depth target and dormant primary shadow context.
+    ForwardFrameResources forward; ///< Existing forward primary and participant contexts.
 };
 /** @endcond */
 } // namespace fire_engine::detail
