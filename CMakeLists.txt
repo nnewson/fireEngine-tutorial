@@ -74,6 +74,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/frame_uniform_buffer.cpp
     src/render/image.cpp
     src/render/instance_support.cpp
+    src/render/pipeline_vertex_input.cpp
     src/render/presentation_state.cpp
     src/render/readback_buffer.cpp
     src/render/recording_context.cpp
@@ -81,6 +82,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/resource_compiler.cpp
     src/render/shadow_map.cpp
     src/render/shadow_map_policy.cpp
+    src/render/shadow_pipeline.cpp
     src/render/spirv_loader.cpp
     src/render/swapchain.cpp
     src/render/swapchain_selection.cpp
@@ -190,6 +192,10 @@ set(FIRE_ENGINE_FORWARD_SHADER_SOURCE
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/forward.slang")
 set(FIRE_ENGINE_FORWARD_SHADER_BINARY
     "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}/forward.spv")
+set(FIRE_ENGINE_SHADOW_SHADER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.slang")
+set(FIRE_ENGINE_SHADOW_SHADER_BINARY
+    "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}/shadow.spv")
 
 add_custom_command(
     OUTPUT "${FIRE_ENGINE_FORWARD_SHADER_BINARY}"
@@ -211,7 +217,31 @@ add_custom_command(
     VERBATIM
 )
 
-add_custom_target(fireEngineShaders ALL DEPENDS "${FIRE_ENGINE_FORWARD_SHADER_BINARY}")
+add_custom_command(
+    OUTPUT "${FIRE_ENGINE_SHADOW_SHADER_BINARY}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIRE_ENGINE_SHADER_OUTPUT_DIRECTORY}"
+    COMMAND slang::slangc
+        "${FIRE_ENGINE_SHADOW_SHADER_SOURCE}"
+        -target spirv
+        -profile spirv_1_6
+        -matrix-layout-column-major
+        -fvk-use-entrypoint-name
+        -restrictive-capability-check
+        -warnings-as-errors all
+        -o "${FIRE_ENGINE_SHADOW_SHADER_BINARY}"
+    DEPENDS
+        "${FIRE_ENGINE_SHADOW_SHADER_SOURCE}"
+        "${FIRE_ENGINE_FRAME_UNIFORMS_SHADER_SOURCE}"
+        slang::slangc
+    COMMENT "Compiling shadow Slang shader to SPIR-V"
+    VERBATIM
+)
+
+add_custom_target(fireEngineShaders ALL
+    DEPENDS
+        "${FIRE_ENGINE_FORWARD_SHADER_BINARY}"
+        "${FIRE_ENGINE_SHADOW_SHADER_BINARY}"
+)
 add_dependencies(fireEngineTutorial fireEngineShaders)
 
 # Keep the example's external glTF buffer and images beside the executable.
@@ -270,6 +300,7 @@ add_executable(fireEngineTutorialTests
     tests/render/test_forward_recording_input.cpp
     tests/render/test_forward_secondary_recording_worker.cpp
     tests/render/test_frame_uniforms.cpp
+    tests/render/test_shadow_draw_constants.cpp
     tests/render/test_shadow_map_policy.cpp
     tests/render/test_spirv_loader.cpp
     tests/render/test_swapchain_selection.cpp

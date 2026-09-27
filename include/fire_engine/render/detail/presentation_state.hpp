@@ -7,6 +7,7 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
+#include <fire_engine/graphics/pipeline_description.hpp>
 #include <fire_engine/platform/framebuffer_extent.hpp>
 #include <fire_engine/render/detail/depth_buffer.hpp>
 #include <fire_engine/render/detail/forward_pipeline.hpp>
@@ -33,13 +34,14 @@ public:
      * @brief Creates one complete set of mutually compatible presentation resources.
      * @param device Device and queues used for rendering and presentation.
      * @param allocator VMA owner used for the depth attachment.
+     * @param pipelineDescription Shared mesh-layout requirement for both render passes.
      * @param framebufferExtent Drawable size used to select the swapchain extent.
      * @param captureEnabled Whether presentable images must support readback.
      * @param oldSwapchain Previous swapchain offered for implementation reuse.
      */
     PresentationState(const Device& device, const MemoryAllocator& allocator,
-                      FramebufferExtent framebufferExtent, bool captureEnabled,
-                      vk::SwapchainKHR oldSwapchain = nullptr);
+                      PipelineDescription pipelineDescription, FramebufferExtent framebufferExtent,
+                      bool captureEnabled, vk::SwapchainKHR oldSwapchain = nullptr);
 
     /** @brief Returns the owned swapchain. @return Presentation images and semaphores. */
     [[nodiscard]] const Swapchain& swapchain() const noexcept;

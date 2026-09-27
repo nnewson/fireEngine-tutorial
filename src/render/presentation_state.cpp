@@ -1,6 +1,5 @@
 #include <fire_engine/render/detail/presentation_state.hpp>
 
-#include <fire_engine/graphics/pipeline_description.hpp>
 #include <fire_engine/render/detail/allocator.hpp>
 #include <fire_engine/render/detail/capture_format_mapping.hpp>
 #include <fire_engine/render/detail/device.hpp>
@@ -10,27 +9,18 @@
 
 namespace fire_engine::detail
 {
-namespace
-{
-/** @cond INTERNAL */
-/* --- File-local constants --- */
-
-/** @brief Vulkan-free mesh layout required by the tutorial forward pipeline. */
-constexpr PipelineDescription kForwardPipelineDescription{};
-/** @endcond */
-} // namespace
-
 /** @cond INTERNAL */
 /* --- Internal member functions --- */
 
 PresentationState::PresentationState(const Device& device, const MemoryAllocator& allocator,
+                                     PipelineDescription pipelineDescription,
                                      FramebufferExtent framebufferExtent, bool captureEnabled,
                                      vk::SwapchainKHR oldSwapchain)
     : logicalDevice_{&device.logicalDevice()},
       swapchain_{device, framebufferExtent, captureEnabled, oldSwapchain},
       depthBuffers_{DepthBuffer{device, allocator, swapchain_.extent()},
                     DepthBuffer{device, allocator, swapchain_.extent()}},
-      forwardPipeline_{device, kForwardPipelineDescription, swapchain_.imageFormat(),
+      forwardPipeline_{device, pipelineDescription, swapchain_.imageFormat(),
                        depthBuffers_.front().format()},
       presentSubmitted_(swapchain_.imageCount(), 0)
 {
