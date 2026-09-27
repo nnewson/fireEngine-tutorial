@@ -3,6 +3,7 @@
 #include <fire_engine/graphics/vertex.hpp>
 #include <fire_engine/render/detail/device.hpp>
 #include <fire_engine/render/detail/draw_constants.hpp>
+#include <fire_engine/render/detail/pipeline_vertex_input.hpp>
 #include <fire_engine/render/detail/spirv_loader.hpp>
 
 #include <array>
@@ -62,13 +63,6 @@ constexpr std::array kDescriptorBindings = {
     kBaseColorTextureBinding,
 };
 
-/** @brief Interleaved vertex-buffer layout shared with resource compilation. */
-constexpr vk::VertexInputBindingDescription kVertexBinding{
-    .binding = 0,
-    .stride = static_cast<std::uint32_t>(sizeof(Vertex)),
-    .inputRate = vk::VertexInputRate::eVertex,
-};
-
 /** @brief Interleaved attributes consumed by the vertex shader. */
 constexpr std::array kVertexAttributes = {
     vk::VertexInputAttributeDescription{
@@ -107,17 +101,8 @@ constexpr vk::PipelineColorBlendAttachmentState kColorBlendAttachment{
 static_assert(std::is_standard_layout_v<Vertex>,
               "Vertex must remain standard-layout for Vulkan attribute offsets");
 
-// The binding stride and the attribute offsets above describe the same struct to
-// Vulkan twice. Padding introduced by a future member would silently desynchronize
-// them, so pin the expected size: three floats of position, four of color, and
-// two texture-coordinate floats.
-static_assert(sizeof(Vertex) == 9 * sizeof(float),
-              "Vertex must stay tightly packed to match kVertexBinding.stride");
-
 /* --- File-local function declarations --- */
 
-[[nodiscard]] const vk::VertexInputBindingDescription&
-compileVertexBinding(VertexLayoutKey vertexLayout);
 [[nodiscard]] std::span<const vk::VertexInputAttributeDescription>
 compileVertexAttributes(VertexLayoutKey vertexLayout);
 [[nodiscard]] vk::raii::DescriptorSetLayout
@@ -171,22 +156,6 @@ namespace
 {
 /** @cond INTERNAL */
 /* --- File-local functions --- */
-
-/**
- * @brief Maps one Vulkan-free vertex-layout key to its buffer binding.
- * @param vertexLayout Layout selected by the pipeline description.
- * @return Binding consumed during graphics-pipeline creation.
- */
-[[nodiscard]] const vk::VertexInputBindingDescription&
-compileVertexBinding(VertexLayoutKey vertexLayout)
-{
-    switch (vertexLayout)
-    {
-    case VertexLayoutKey::ePositionColorTextureCoordinate:
-        return kVertexBinding;
-    }
-    throw std::invalid_argument("Pipeline description contains an unsupported vertex layout");
-}
 
 /**
  * @brief Maps one Vulkan-free vertex-layout key to its shader attributes.

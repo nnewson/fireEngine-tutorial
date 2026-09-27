@@ -23,6 +23,7 @@
 #include <fire_engine/render/detail/recording_context.hpp>
 #include <fire_engine/render/detail/resource_compiler.hpp>
 #include <fire_engine/render/detail/shadow_map_policy.hpp>
+#include <fire_engine/render/detail/shadow_pipeline.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene_draw_list.hpp>
 
@@ -46,6 +47,9 @@ namespace
 {
 /** @cond INTERNAL */
 using detail::CpuPhaseTimer;
+
+/** @brief One mesh-layout requirement shared by preparation and both pipelines. */
+constexpr PipelineDescription kPipelineDescription{};
 
 /** @brief Immutable image-copy metadata captured with one selected attempt. */
 struct CaptureAttempt final
@@ -198,6 +202,7 @@ private:
     detail::ShadowMapCreationTracker shadowMapCreationTracker_; ///< Monotonic local count.
     vk::Format shadowMapFormat_; ///< Sampled depth format selected once for every slot.
     vk::raii::Sampler shadowComparisonSampler_; ///< Comparison state shared by all slots.
+    detail::ShadowPipeline shadowPipeline_;     ///< Renderer-lifetime depth-only pipeline.
 
     // Presentation-dependent state replaced as one ownership group.
     std::unique_ptr<detail::PresentationState> presentation_; ///< Swapchain-compatible resources.
@@ -279,8 +284,10 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
       shadowMapFormat_{detail::queryShadowMapFormat(device_)},
       shadowComparisonSampler_{device_.logicalDevice(),
                                detail::shadowComparisonSamplerCreateInfo()},
+      shadowPipeline_{device_, kPipelineDescription, shadowMapFormat_},
       presentation_{std::make_unique<detail::PresentationState>(
-          device_, allocator_, window.framebufferExtent(), captureRequest_.has_value())},
+          device_, allocator_, kPipelineDescription, window.framebufferExtent(),
+          captureRequest_.has_value())},
       // Frame resources are presentation-independent. Synchronization,
       // recording contexts, and shadow views borrow the device; uniform and
       // shadow-image allocations borrow the allocator. Both owners precede them.
@@ -367,7 +374,7 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& dr
     // Planning validates every CPU relationship before the first Vulkan
     // allocation, keeping malformed input failures deterministic and cheap.
     const RenderPreparationPlan& plan =
-        renderPreparation_.build(assets, drawList, presentation_->forwardPipeline().description());
+        renderPreparation_.build(assets, drawList, kPipelineDescription);
     if (compiledGeneration_.has_value() && *compiledGeneration_ == renderPreparation_.generation())
     {
         return;
@@ -430,7 +437,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
             .scissor = {.offset = {.x = 0, .y = 0}, .extent = extent},
             .colorAttachmentFormat = presentation_->swapchain().imageFormat(),
             .depthAttachmentFormat = presentation_->depthBuffer(frameSlotIndex).format(),
-            .vertexLayout = presentation_->forwardPipeline().description().vertexLayout,
+            .vertexLayout = kPipelineDescription.vertexLayout,
         };
         return forwardRecordingInputCompiler_.compile(drawList, compiledResources_.view(),
                                                       forwardRecordingState);
@@ -634,7 +641,8 @@ bool Renderer::Impl::recreatePresentation(FramebufferExtent framebufferExtent)
     waitIdle();
     const vk::SwapchainKHR oldSwapchain = *presentation_->swapchain().handle();
     auto replacement = std::make_unique<detail::PresentationState>(
-        device_, allocator_, framebufferExtent, captureRequest_.has_value(), oldSwapchain);
+        device_, allocator_, kPipelineDescription, framebufferExtent, captureRequest_.has_value(),
+        oldSwapchain);
     presentation_ = std::move(replacement);
     ++presentationRecreationCount_;
     return true;
