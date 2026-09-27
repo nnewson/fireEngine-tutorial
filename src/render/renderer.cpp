@@ -291,32 +291,51 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
       // Frame resources are presentation-independent. Synchronization,
       // recording contexts, and shadow views borrow the device; uniform and
       // shadow-image allocations borrow the allocator. Both owners precede them.
-      frames_{detail::FrameResources{
-                  .slot = detail::FrameSlot{device_},
-                  .uniforms = detail::FrameUniformBuffer{allocator_},
-                  .shadowMap = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
-                                                 shadowMapCreationTracker_},
-                  .coordinator =
-                      detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-                  .secondaries = {detail::RecordingContext{
-                                      device_, detail::ForwardRecorder::secondaryBufferKind(
-                                                   configuration.forwardRecordingMode)},
-                                  detail::RecordingContext{
-                                      device_, detail::ForwardRecorder::secondaryBufferKind(
-                                                   configuration.forwardRecordingMode)}}},
-              detail::FrameResources{
-                  .slot = detail::FrameSlot{device_},
-                  .uniforms = detail::FrameUniformBuffer{allocator_},
-                  .shadowMap = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
-                                                 shadowMapCreationTracker_},
-                  .coordinator =
-                      detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
-                  .secondaries = {detail::RecordingContext{
-                                      device_, detail::ForwardRecorder::secondaryBufferKind(
-                                                   configuration.forwardRecordingMode)},
-                                  detail::RecordingContext{
-                                      device_, detail::ForwardRecorder::secondaryBufferKind(
-                                                   configuration.forwardRecordingMode)}}}},
+      frames_{
+          detail::FrameResources{
+              .slot = detail::FrameSlot{device_},
+              .uniforms = detail::FrameUniformBuffer{allocator_},
+              .shadow =
+                  {
+                      .map = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
+                                               shadowMapCreationTracker_},
+                      .primary =
+                          detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+                  },
+              .forward =
+                  {
+                      .primary =
+                          detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+                      .participants = {detail::RecordingContext{
+                                           device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                        configuration.forwardRecordingMode)},
+                                       detail::RecordingContext{
+                                           device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                        configuration.forwardRecordingMode)}},
+                  },
+          },
+          detail::FrameResources{
+              .slot = detail::FrameSlot{device_},
+              .uniforms = detail::FrameUniformBuffer{allocator_},
+              .shadow =
+                  {
+                      .map = detail::ShadowMap{device_, allocator_, shadowMapFormat_,
+                                               shadowMapCreationTracker_},
+                      .primary =
+                          detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+                  },
+              .forward =
+                  {
+                      .primary =
+                          detail::RecordingContext{device_, detail::RecordingBufferKind::ePrimary},
+                      .participants = {detail::RecordingContext{
+                                           device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                        configuration.forwardRecordingMode)},
+                                       detail::RecordingContext{
+                                           device_, detail::ForwardRecorder::secondaryBufferKind(
+                                                        configuration.forwardRecordingMode)}},
+                  },
+          }},
       forwardRecorder_{configuration.forwardRecordingMode,
                        configuration.forcedForwardRecordingParticipantCount}
 {
@@ -493,9 +512,9 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr
                                                : &timings->forward.coordinatorCommandPoolReset};
-        frame.coordinator.resetCommands();
+        frame.forward.primary.resetCommands();
     }
-    const vk::raii::CommandBuffer& primaryCommandBuffer = frame.coordinator.commandBuffer();
+    const vk::raii::CommandBuffer& primaryCommandBuffer = frame.forward.primary.commandBuffer();
     detail::ForwardPassTarget forwardTarget{};
     {
         // This begins before helper dispatch after the extraction. All command
@@ -513,7 +532,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
             .extent = presentation_->swapchain().extent(),
         };
     }
-    forwardRecorder_.record(frame.coordinator, std::span{frame.secondaries},
+    forwardRecorder_.record(frame.forward.primary, std::span{frame.forward.participants},
                             frameRecordingInput.forward(), forwardTarget,
                             timings == nullptr ? nullptr : &timings->forward);
     {
@@ -533,7 +552,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
             .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         };
         const vk::CommandBufferSubmitInfo commandInfo{
-            .commandBuffer = *frame.coordinator.commandBuffer(),
+            .commandBuffer = *frame.forward.primary.commandBuffer(),
         };
         const vk::SemaphoreSubmitInfo signalInfo{
             .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
