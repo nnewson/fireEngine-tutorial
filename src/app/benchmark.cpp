@@ -259,8 +259,8 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
 
     printPhase("transform update", &Sample::transformUpdate);
     printPhase("draw-list build", &Sample::drawListBuild);
-    printPhase("forward recording-input build",
-               [](const Sample& sample) { return sample.renderer.forward.recordingInputBuild; });
+    printPhase("frame recording-input build",
+               [](const Sample& sample) { return sample.renderer.common.recordingInputBuild; });
     printPhase("frame-uniform update",
                [](const Sample& sample) { return sample.renderer.common.frameUniformUpdate; });
     printPhase("forward coordinator command-pool reset", [](const Sample& sample)
@@ -329,7 +329,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     {
         const std::chrono::nanoseconds sampleSnapshot = sample.transformUpdate +
                                                         sample.drawListBuild +
-                                                        sample.renderer.forward.recordingInputBuild;
+                                                        sample.renderer.common.recordingInputBuild;
         snapshot += sampleSnapshot;
         workerCommandPoolReset += sample.renderer.forward.workerCommandPoolReset;
         secondaryRecording += sample.renderer.forward.secondaryCommandRecording;

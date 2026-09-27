@@ -97,6 +97,7 @@ struct ForwardParticipantCpuTimings
 /** @brief Host timings for frame-lifecycle work shared by every render pass. */
 struct CommonFrameCpuTimings
 {
+    std::chrono::nanoseconds recordingInputBuild{};   ///< Shared draw validation and packet freeze.
     std::chrono::nanoseconds frameFenceWait{};        ///< Reusable-frame completion wait.
     std::chrono::nanoseconds frameUniformUpdate{};    ///< Shared slot-local shader-value write.
     std::chrono::nanoseconds imageAcquisitionWait{};  ///< Presentable-image acquisition.
@@ -108,7 +109,6 @@ struct CommonFrameCpuTimings
 /** @brief Host timings owned by forward-pass preparation and command recording. */
 struct ForwardPassCpuTimings
 {
-    std::chrono::nanoseconds recordingInputBuild{};         ///< Draw validation and packet freeze.
     std::chrono::nanoseconds coordinatorCommandPoolReset{}; ///< Primary-context pool reset.
     std::chrono::nanoseconds workerCommandPoolReset{};      ///< Participant-context pool-reset sum.
     std::chrono::nanoseconds secondaryCommandRecording{};   ///< Sum of participant recording.

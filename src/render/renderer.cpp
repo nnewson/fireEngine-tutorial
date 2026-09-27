@@ -14,7 +14,7 @@
 #include <fire_engine/render/detail/depth_buffer.hpp>
 #include <fire_engine/render/detail/device.hpp>
 #include <fire_engine/render/detail/forward_recorder.hpp>
-#include <fire_engine/render/detail/forward_recording_input.hpp>
+#include <fire_engine/render/detail/frame_recording_input.hpp>
 #include <fire_engine/render/detail/frame_resources.hpp>
 #include <fire_engine/render/detail/frame_slot.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
@@ -218,8 +218,8 @@ private:
     RenderPreparation renderPreparation_;           ///< Vulkan-free validation and plan cache.
     detail::CompiledResources compiledResources_;   ///< GPU state selected by the current plan.
     std::optional<std::size_t> compiledGeneration_; ///< Plan generation uploaded to the GPU.
-    detail::ForwardRecordingInputCompiler
-        forwardRecordingInputCompiler_; ///< Reusable forward packet-freeze arena.
+    detail::FrameRecordingInputCompiler
+        frameRecordingInputCompiler_; ///< Reusable pass-specific packet-freeze arenas.
 
     // Declared last so reverse member destruction stops its helper before the
     // recording contexts whose pools it writes into.
@@ -419,28 +419,37 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
     detail::FrameSlot& frameSlot = frame.slot;
     // Freeze external IDs and transforms before acquisition. A compiler
     // failure therefore cannot abandon a signaled acquisition semaphore.
-    const detail::ForwardRecordingInput forwardRecordingInput =
-        [&]() -> detail::ForwardRecordingInput
+    const detail::FrameRecordingInput frameRecordingInput = [&]() -> detail::FrameRecordingInput
     {
-        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->forward.recordingInputBuild};
+        CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.recordingInputBuild};
         const vk::Extent2D extent = presentation_->swapchain().extent();
+        const detail::FrameUniforms frameUniforms{
+            .viewProjection = cameraViewProjection(frameDescription.camera,
+                                                   static_cast<float>(extent.width) /
+                                                       static_cast<float>(extent.height)),
+            .lightViewProjection =
+                directionalShadowViewProjection(frameDescription.directionalShadow),
+        };
+        const detail::ShadowRecordingState shadowRecordingState{
+            .pipeline = *shadowPipeline_.pipeline(),
+            .pipelineLayout = *shadowPipeline_.pipelineLayout(),
+            .frameUniformBuffer = frame.uniforms.handle(),
+            .depthAttachmentFormat = shadowMapFormat_,
+            .vertexLayout = kPipelineDescription.vertexLayout,
+        };
         const detail::ForwardRecordingState forwardRecordingState{
             .pipeline = *presentation_->forwardPipeline().pipeline(),
             .pipelineLayout = *presentation_->forwardPipeline().pipelineLayout(),
             .frameUniformBuffer = frame.uniforms.handle(),
-            .frameUniforms = {.viewProjection = cameraViewProjection(
-                                  frameDescription.camera, static_cast<float>(extent.width) /
-                                                               static_cast<float>(extent.height)),
-                              .lightViewProjection = directionalShadowViewProjection(
-                                  frameDescription.directionalShadow)},
             .viewport = sceneViewport(extent),
             .scissor = {.offset = {.x = 0, .y = 0}, .extent = extent},
             .colorAttachmentFormat = presentation_->swapchain().imageFormat(),
             .depthAttachmentFormat = presentation_->depthBuffer(frameSlotIndex).format(),
             .vertexLayout = kPipelineDescription.vertexLayout,
         };
-        return forwardRecordingInputCompiler_.compile(drawList, compiledResources_.view(),
-                                                      forwardRecordingState);
+        return frameRecordingInputCompiler_.compile(drawList, compiledResources_.view(),
+                                                    frameUniforms, shadowRecordingState,
+                                                    forwardRecordingState);
     }();
 
     const vk::raii::Device& logicalDevice = device_.logicalDevice();
@@ -456,7 +465,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.frameUniformUpdate};
-        frame.uniforms.update(forwardRecordingInput.state().frameUniforms);
+        frame.uniforms.update(frameRecordingInput.frameUniforms());
     }
 
     std::uint32_t imageIndex = 0;
@@ -504,8 +513,9 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
             .extent = presentation_->swapchain().extent(),
         };
     }
-    forwardRecorder_.record(frame.coordinator, std::span{frame.secondaries}, forwardRecordingInput,
-                            forwardTarget, timings == nullptr ? nullptr : &timings->forward);
+    forwardRecorder_.record(frame.coordinator, std::span{frame.secondaries},
+                            frameRecordingInput.forward(), forwardTarget,
+                            timings == nullptr ? nullptr : &timings->forward);
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr
                                                : &timings->forward.primaryCommandRecording};
