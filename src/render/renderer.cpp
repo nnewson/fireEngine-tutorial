@@ -24,6 +24,7 @@
 #include <fire_engine/render/detail/resource_compiler.hpp>
 #include <fire_engine/render/detail/shadow_map_policy.hpp>
 #include <fire_engine/render/detail/shadow_pipeline.hpp>
+#include <fire_engine/render/detail/shadow_recorder.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene_draw_list.hpp>
 
@@ -219,7 +220,8 @@ private:
     detail::CompiledResources compiledResources_;   ///< GPU state selected by the current plan.
     std::optional<std::size_t> compiledGeneration_; ///< Plan generation uploaded to the GPU.
     detail::FrameRecordingInputCompiler
-        frameRecordingInputCompiler_; ///< Reusable pass-specific packet-freeze arenas.
+        frameRecordingInputCompiler_;       ///< Reusable pass-specific packet-freeze arenas.
+    detail::ShadowRecorder shadowRecorder_; ///< Serial depth-only recording boundary.
 
     // Declared last so reverse member destruction stops its helper before the
     // recording contexts whose pools it writes into.
@@ -509,6 +511,14 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.presentationFenceWait};
         presentation_->preparePresentFence(imageIndex);
     }
+    const detail::ShadowPassTarget shadowTarget{
+        .depthImage = frame.shadow.map.image(),
+        .depthView = *frame.shadow.map.view(),
+        .depthFormat = frame.shadow.map.format(),
+        .extent = detail::kShadowMapExtent,
+    };
+    shadowRecorder_.record(frame.shadow.primary, frameRecordingInput.shadow(), shadowTarget,
+                           timings == nullptr ? nullptr : &timings->shadow);
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr
                                                : &timings->forward.coordinatorCommandPoolReset};
@@ -551,8 +561,11 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
             .semaphore = *frameSlot.imageAvailable(),
             .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         };
-        const vk::CommandBufferSubmitInfo commandInfo{
-            .commandBuffer = *frame.forward.primary.commandBuffer(),
+        // Publication at the end of the shadow primary precedes the forward
+        // primary in the same submission. One slot fence retires both buffers.
+        const std::array commandInfos{
+            vk::CommandBufferSubmitInfo{.commandBuffer = *frame.shadow.primary.commandBuffer()},
+            vk::CommandBufferSubmitInfo{.commandBuffer = *frame.forward.primary.commandBuffer()},
         };
         const vk::SemaphoreSubmitInfo signalInfo{
             .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
@@ -561,8 +574,8 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         const vk::SubmitInfo2 submitInfo{
             .waitSemaphoreInfoCount = 1,
             .pWaitSemaphoreInfos = &waitInfo,
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &commandInfo,
+            .commandBufferInfoCount = static_cast<std::uint32_t>(commandInfos.size()),
+            .pCommandBufferInfos = commandInfos.data(),
             // Capture retires this complete submission on the host before
             // presentation. Do not signal a binary semaphore that the capture
             // presentation will not consume; it would remain signaled when

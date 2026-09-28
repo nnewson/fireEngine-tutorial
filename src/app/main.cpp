@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <optional>
 #include <print>
@@ -302,6 +303,7 @@ try
     }
 
     std::uint64_t renderedFrameCount = 0;
+    const bool checkShadowPackets = options.smokeScenario == SmokeScenario::eShadow;
     bool repeatedPreparationComplete = false;
     auto previousFrameTime = std::chrono::steady_clock::now();
     const auto runIncomplete = [&]()
@@ -364,13 +366,22 @@ try
 
         fire_engine::RendererCpuTimings rendererTimings;
         const fire_engine::RenderResult result = renderer.drawFrame(
-            drawList, frameDescription, benchmark.has_value() ? &rendererTimings : nullptr);
+            drawList, frameDescription,
+            benchmark.has_value() || checkShadowPackets ? &rendererTimings : nullptr);
         if (benchmark.has_value())
         {
             benchmark->record(result, transformUpdate, drawListBuild, rendererTimings);
         }
         if (result != fire_engine::RenderResult::eNotPresented)
         {
+            if (checkShadowPackets &&
+                (rendererTimings.shadow.drawCount != 1 || rendererTimings.forward.drawCount != 2))
+            {
+                throw std::runtime_error(std::format(
+                    "Shadow demonstration recorded {} shadow draws and {} forward draws; "
+                    "expected 1 and 2 on every presented frame",
+                    rendererTimings.shadow.drawCount, rendererTimings.forward.drawCount));
+            }
             ++renderedFrameCount;
         }
         if (!repeatedPreparationComplete && options.reprepareAfterFrame == renderedFrameCount)
@@ -419,6 +430,14 @@ try
     else if (options.frameLimit.has_value() && renderedFrameCount != *options.frameLimit)
     {
         throw std::runtime_error("The smoke test ended before presenting every requested frame");
+    }
+    if (checkShadowPackets)
+    {
+        // Every presented frame was checked in the loop. Emit one unambiguous
+        // summary only after the complete bounded scenario has succeeded.
+        std::println("Shadow demonstration recording: 1 shadow draw, 2 forward draws on each of "
+                     "{} presented frames.",
+                     renderedFrameCount);
     }
     std::println("Presented {} frame{}.", renderedFrameCount, renderedFrameCount == 1 ? "" : "s");
     return 0;

@@ -18,7 +18,7 @@ namespace fire_engine::detail
 struct ShadowFrameResources final
 {
     ShadowMap map;            ///< Sampled depth target retired with the containing frame slot.
-    RecordingContext primary; ///< Primary context reserved for the serial shadow pass.
+    RecordingContext primary; ///< Primary context recording the serial shadow pass.
 };
 
 /** @brief Primary and participant recording state owned by one forward pass. */
@@ -37,7 +37,7 @@ struct FrameResources final
 {
     FrameSlot slot;                ///< Synchronization state retiring the complete frame.
     FrameUniformBuffer uniforms;   ///< Shader values shared by both passes.
-    ShadowFrameResources shadow;   ///< Depth target and dormant primary shadow context.
+    ShadowFrameResources shadow;   ///< Depth target and primary shadow context.
     ForwardFrameResources forward; ///< Existing forward primary and participant contexts.
 };
 /** @endcond */

@@ -15,7 +15,7 @@ inline constexpr vk::ImageSubresourceRange kColorSubresourceRange{
     .layerCount = 1,
 };
 
-/** @brief The sole depth mip and array layer used by the presentation attachment. */
+/** @brief The sole depth mip and array layer used by forward and shadow attachments. */
 inline constexpr vk::ImageSubresourceRange kDepthSubresourceRange{
     .aspectMask = vk::ImageAspectFlagBits::eDepth,
     .baseMipLevel = 0,
