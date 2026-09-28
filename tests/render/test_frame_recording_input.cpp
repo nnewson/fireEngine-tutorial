@@ -89,6 +89,8 @@ compiledRenderObject(std::uintptr_t firstHandle, fire_engine::Color4 baseColor,
         .pipeline = fakeHandle<vk::Pipeline, VkPipeline>(20),
         .pipelineLayout = fakeHandle<vk::PipelineLayout, VkPipelineLayout>(21),
         .frameUniformBuffer = fakeHandle<vk::Buffer, VkBuffer>(12),
+        .shadowMapView = fakeHandle<vk::ImageView, VkImageView>(30),
+        .shadowComparisonSampler = fakeHandle<vk::Sampler, VkSampler>(31),
         .viewport = {.x = 0.0f,
                      .y = 600.0f,
                      .width = 800.0f,
@@ -197,12 +199,18 @@ TEST_CASE("Frame recording input resolves both pass sequences and reuses its are
             REQUIRE(input.forward().draws()[index].indexCount == object.geometry.indexCount);
             REQUIRE(input.forward().draws()[index].sampler == object.forwardMaterial.sampler);
             REQUIRE(input.forward().draws()[index].imageView == object.forwardMaterial.imageView);
+            REQUIRE(input.forward().state().shadowMapView != object.forwardMaterial.imageView);
+            REQUIRE(input.forward().state().shadowComparisonSampler !=
+                    object.forwardMaterial.sampler);
             REQUIRE(input.forward().draws()[index].constants.baseColor ==
                     object.forwardMaterial.baseColor);
             REQUIRE(input.forward().draws()[index].constants.model == drawItems[index].world);
         }
         REQUIRE(input.shadow().state().pipeline == shadowRecordingState().pipeline);
         REQUIRE(input.forward().state().pipeline == forwardRecordingState().pipeline);
+        REQUIRE(input.forward().state().shadowMapView == forwardRecordingState().shadowMapView);
+        REQUIRE(input.forward().state().shadowComparisonSampler ==
+                forwardRecordingState().shadowComparisonSampler);
         REQUIRE(input.shadow().state().frameUniformBuffer ==
                 input.forward().state().frameUniformBuffer);
         REQUIRE(input.frameUniforms().viewProjection == fire_engine::Mat4::identity());
@@ -212,10 +220,18 @@ TEST_CASE("Frame recording input resolves both pass sequences and reuses its are
         firstForwardStorage = input.forward().draws().data();
     }
     {
+        // The previous transaction has expired. Reusing packet storage must
+        // still freeze the newly selected slot's view and sampling state.
+        auto nextForwardState = forwardRecordingState();
+        nextForwardState.shadowMapView = fakeHandle<vk::ImageView, VkImageView>(40);
+        nextForwardState.shadowComparisonSampler = fakeHandle<vk::Sampler, VkSampler>(41);
         const auto rebuilt = compiler.compile(drawList, resources.view(), frameUniforms(),
-                                              shadowRecordingState(), forwardRecordingState());
+                                              shadowRecordingState(), nextForwardState);
         REQUIRE(rebuilt.shadow().draws().data() == firstShadowStorage);
         REQUIRE(rebuilt.forward().draws().data() == firstForwardStorage);
+        REQUIRE(rebuilt.forward().state().shadowMapView == nextForwardState.shadowMapView);
+        REQUIRE(rebuilt.forward().state().shadowComparisonSampler ==
+                nextForwardState.shadowComparisonSampler);
     }
 }
 

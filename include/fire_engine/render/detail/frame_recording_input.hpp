@@ -43,14 +43,16 @@ struct ShadowRecordingDraw
 /** @brief Fixed plain-handle state required by one forward recording context. */
 struct ForwardRecordingState
 {
-    vk::Pipeline pipeline;             ///< Graphics pipeline compatible with the attachments.
-    vk::PipelineLayout pipelineLayout; ///< Layout used by descriptors and push constants.
-    vk::Buffer frameUniformBuffer;     ///< Shared slot-local frame-uniform storage.
-    vk::Viewport viewport;             ///< Complete dynamic viewport, including the Y flip.
-    vk::Rect2D scissor;                ///< Complete dynamic scissor for this presentation extent.
-    vk::Format colorAttachmentFormat;  ///< Secondary rendering-inheritance color format.
-    vk::Format depthAttachmentFormat;  ///< Secondary rendering-inheritance depth format.
-    VertexLayoutKey vertexLayout;      ///< Layout compiled into pipeline vertex input state.
+    vk::Pipeline pipeline;               ///< Graphics pipeline compatible with the attachments.
+    vk::PipelineLayout pipelineLayout;   ///< Layout used by descriptors and push constants.
+    vk::Buffer frameUniformBuffer;       ///< Shared slot-local frame-uniform storage.
+    vk::ImageView shadowMapView;         ///< Sampled depth-only view from this frame slot.
+    vk::Sampler shadowComparisonSampler; ///< Renderer-lifetime depth comparison sampler.
+    vk::Viewport viewport;               ///< Complete dynamic viewport, including the Y flip.
+    vk::Rect2D scissor;                  ///< Complete dynamic scissor for this presentation extent.
+    vk::Format colorAttachmentFormat;    ///< Secondary rendering-inheritance color format.
+    vk::Format depthAttachmentFormat;    ///< Secondary rendering-inheritance depth format.
+    VertexLayoutKey vertexLayout;        ///< Layout compiled into pipeline vertex input state.
 };
 
 /** @brief One fully resolved forward draw copied into the frame-input arena. */

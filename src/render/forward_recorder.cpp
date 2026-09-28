@@ -163,14 +163,29 @@ DrawBindingState bindGeometryState(const vk::raii::CommandBuffer& commandBuffer,
         .offset = 0,
         .range = sizeof(FrameUniforms),
     };
-    const vk::WriteDescriptorSet uniformWrite{
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = vk::DescriptorType::eUniformBuffer,
-        .pBufferInfo = &uniformInfo,
+    const vk::DescriptorImageInfo shadowInfo{
+        .sampler = state.shadowComparisonSampler,
+        .imageView = state.shadowMapView,
+        .imageLayout = vk::ImageLayout::eDepthReadOnlyOptimal,
+    };
+    // Fixed bindings belong to each draw command buffer, including every
+    // secondary. Later material writes touch only binding one.
+    const std::array fixedWrites{
+        vk::WriteDescriptorSet{
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eUniformBuffer,
+            .pBufferInfo = &uniformInfo,
+        },
+        vk::WriteDescriptorSet{
+            .dstBinding = 2,
+            .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .pImageInfo = &shadowInfo,
+        },
     };
     commandBuffer.pushDescriptorSet(vk::PipelineBindPoint::eGraphics, state.pipelineLayout, 0,
-                                    uniformWrite);
+                                    fixedWrites);
     return {};
 }
 

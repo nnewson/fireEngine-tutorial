@@ -57,10 +57,19 @@ constexpr vk::DescriptorSetLayoutBinding kBaseColorTextureBinding{
     .stageFlags = vk::ShaderStageFlagBits::eFragment,
 };
 
-/** @brief Complete push-descriptor interface shared with the Slang shader. */
+/** @brief Slot-local shadow map and comparison sampler written in the fixed preamble. */
+constexpr vk::DescriptorSetLayoutBinding kShadowMapBinding{
+    .binding = 2,
+    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+    .descriptorCount = 1,
+    .stageFlags = vk::ShaderStageFlagBits::eFragment,
+};
+
+/** @brief Complete push-descriptor interface available to the forward shader. */
 constexpr std::array kDescriptorBindings = {
     kFrameUniformBinding,
     kBaseColorTextureBinding,
+    kShadowMapBinding,
 };
 
 /** @brief Interleaved attributes consumed by the vertex shader. */
@@ -176,7 +185,7 @@ compileVertexAttributes(VertexLayoutKey vertexLayout)
 /**
  * @brief Creates set zero as a Vulkan push-descriptor layout.
  * @param device Logical device with the Vulkan 1.4 pushDescriptor feature enabled.
- * @return Layout containing the frame uniform and base-color texture bindings.
+ * @return Layout containing the frame uniform, base-color texture, and shadow-map bindings.
  * @throws vk::SystemError if Vulkan cannot create the descriptor-set layout.
  */
 [[nodiscard]] vk::raii::DescriptorSetLayout

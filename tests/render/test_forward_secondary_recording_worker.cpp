@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <stdexcept>
 #include <type_traits>
 
@@ -14,6 +15,31 @@ using fire_engine::detail::ForwardSecondaryChunkJob;
 using fire_engine::detail::ForwardSecondaryRecordingWorker;
 
 std::atomic<int> gCompletedChunks{0};
+
+// Written by the helper and read only after awaitCompletion(): its acquire
+// observes the helper's publication, just as it does for participant timings.
+vk::ImageView gObservedShadowMapView;
+vk::Sampler gObservedShadowComparisonSampler;
+
+template <typename Handle, typename NativeHandle>
+[[nodiscard]] Handle fakeHandle(std::uintptr_t value)
+{
+    if constexpr (std::is_pointer_v<NativeHandle>)
+    {
+        return Handle{reinterpret_cast<NativeHandle>(value)}; // NOLINT(performance-no-int-to-ptr)
+    }
+    else
+    {
+        return Handle{static_cast<NativeHandle>(value)};
+    }
+}
+
+/** @brief Observes copied fixed sampling handles without making a Vulkan call. */
+void samplingStateRecorder(const ForwardSecondaryChunkJob& job, ChunkRecordingTimings*)
+{
+    gObservedShadowMapView = job.state.shadowMapView;
+    gObservedShadowComparisonSampler = job.state.shadowComparisonSampler;
+}
 
 /** @brief Records nothing but proves the helper invoked the recorder. */
 void countingRecorder(const ForwardSecondaryChunkJob&, ChunkRecordingTimings* timings)
@@ -51,6 +77,29 @@ TEST_CASE("Forward secondary recording worker runs a dispatched chunk and report
     REQUIRE(gCompletedChunks.load(std::memory_order_relaxed) == 1);
     REQUIRE(timings.recorded);
     REQUIRE_NOTHROW(worker.rethrowIfFailed());
+}
+
+TEST_CASE("Forward secondary recording worker preserves copied shadow sampling handles")
+{
+    gObservedShadowMapView = nullptr;
+    gObservedShadowComparisonSampler = nullptr;
+    ForwardSecondaryRecordingWorker worker;
+
+    const auto shadowMapView = fakeHandle<vk::ImageView, VkImageView>(30);
+    const auto shadowComparisonSampler = fakeHandle<vk::Sampler, VkSampler>(31);
+    ForwardSecondaryChunkJob job;
+    job.state.shadowMapView = shadowMapView;
+    job.state.shadowComparisonSampler = shadowComparisonSampler;
+    worker.dispatch(&samplingStateRecorder, job, nullptr);
+    // dispatch() copies the complete job before publication. Changing the
+    // caller's values must not change the handles seen by the helper.
+    job.state.shadowMapView = nullptr;
+    job.state.shadowComparisonSampler = nullptr;
+    worker.awaitCompletion();
+    REQUIRE_NOTHROW(worker.rethrowIfFailed());
+
+    REQUIRE(gObservedShadowMapView == shadowMapView);
+    REQUIRE(gObservedShadowComparisonSampler == shadowComparisonSampler);
 }
 
 TEST_CASE("Forward secondary recording worker reports ordered completion-wait boundaries")
