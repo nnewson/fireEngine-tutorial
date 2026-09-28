@@ -83,6 +83,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/shadow_map.cpp
     src/render/shadow_map_policy.cpp
     src/render/shadow_pipeline.cpp
+    src/render/shadow_recorder.cpp
     src/render/spirv_loader.cpp
     src/render/swapchain.cpp
     src/render/swapchain_selection.cpp
@@ -772,9 +773,10 @@ set_tests_properties(
 )
 
 # The exact geometry and participation policy are device-free contracts. These
-# scenarios prove that the demonstration selection reaches the real frame path.
+# scenarios also check packet counts on every presented frame, then print one
+# summary. The input compiler's ordered identity test remains the filter's proof.
 set_tests_properties(${FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS} PROPERTIES
-    PASS_REGULAR_EXPRESSION "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.]"
+    PASS_REGULAR_EXPRESSION "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.][^|]*Shadow map creations after run: 2[.][^|]*Shadow demonstration recording: 1 shadow draw, 2 forward draws on each of 5 presented frames[.]"
 )
 
 # Startup resource values cannot prove that presentation replacement preserved
@@ -788,7 +790,7 @@ set_tests_properties(fireEngineTutorialBenchmarkCorrectness PROPERTIES
     PASS_REGULAR_EXPRESSION "Ownership: cycled frame slots with per-slot recording contexts
   Frames in flight: 2
   Presentation: [^\n]*
-  Workload: instances=1, nodes=2, draws=1[^|]*frame recording-input build[^|]*frame-uniform update"
+  Workload: instances=1, nodes=2, draws=1[^|]*Recorded packets per frame: shadow=1, forward=1[^|]*frame recording-input build[^|]*frame-uniform update[^|]*shadow command-pool reset[^|]*shadow primary command recording"
 )
 # Assert the effective participant count, not the requested one: a split that
 # silently fell back to a single participant would otherwise pass. These
@@ -812,7 +814,7 @@ set_tests_properties(fireEngineTutorialAutomaticForwardSplitCorrectness PROPERTI
     PASS_REGULAR_EXPRESSION "Forward secondary recording participants: automatic[^\n]*, 2 effective"
 )
 set_tests_properties(fireEngineTutorialForwardDirectPrimaryBenchmarkCorrectness PROPERTIES
-    PASS_REGULAR_EXPRESSION "Forward recording path: direct primary command buffer[^|]*Its forward secondary pool has no command-buffer allocations or recorded work."
+    PASS_REGULAR_EXPRESSION "Forward recording path: direct primary command buffer[^|]*Recorded packets per frame: shadow=1, forward=1[^|]*shadow command-pool reset[^|]*shadow primary command recording[^|]*Its forward secondary pool has no command-buffer allocations or recorded work."
 )
 # Run one scenario away from the executable and copied assets to prove that the
 # compiled absolute asset and shader paths do not depend on the working folder.

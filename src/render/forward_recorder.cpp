@@ -475,6 +475,10 @@ void ForwardRecorder::record(const RecordingContext& primary,
         DrawBindingState bindingState = bindGeometryState(primaryCommandBuffer, input.state());
         recordDraws(primaryCommandBuffer, input.state(), input.draws(), std::move(bindingState));
         primaryCommandBuffer.endRendering();
+        if (timings != nullptr)
+        {
+            timings->drawCount = input.draws().size();
+        }
         return;
     }
 
@@ -542,6 +546,10 @@ void ForwardRecorder::record(const RecordingContext& primary,
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->primaryCommandRecording};
         primaryCommandBuffer.endRendering();
+    }
+    if (timings != nullptr)
+    {
+        timings->drawCount = input.draws().size();
     }
 }
 

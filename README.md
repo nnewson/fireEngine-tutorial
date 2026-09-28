@@ -96,9 +96,13 @@ form:
 
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
-draw-list construction, forward recording-input compilation, forward
-frame-uniform updates, forward coordinator and participant command-pool resets,
-forward primary and secondary recording, submission, and presentation waits.
+draw-list construction, shared frame-input compilation and uniform updates,
+shadow pool reset and primary recording, forward coordinator and participant
+pool resets, forward primary and secondary recording, submission, and
+presentation waits. Every synthetic instance casts, so each measured frame
+records the reported draw count in both passes. These two-pass active-work
+figures have a larger workload and denominator than the historical one-pass
+baselines. The direct-primary control changes only forward recording.
 The per-slot report attributes participant-owned reset and recording work; it
 does not claim a placement speedup before participants exist. Two Vulkan
 submission slots are cycled independently of the driver-selected swapchain

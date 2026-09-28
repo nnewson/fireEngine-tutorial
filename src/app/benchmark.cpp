@@ -215,6 +215,12 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
         {
             throw std::logic_error("Measured frames disagree on the recording participant count");
         }
+        if (sample.renderer.shadow.drawCount != drawCount_ ||
+            sample.renderer.forward.drawCount != drawCount_)
+        {
+            throw std::logic_error("Measured frames did not record the complete synthetic "
+                                   "workload in both passes");
+        }
     }
 
     std::println("\nPhase-level CPU benchmark");
@@ -239,6 +245,10 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                  rendererInfo.imageFormat, rendererInfo.presentMode);
     std::println("  Workload: instances={}, nodes={}, draws={}", instanceCount_, nodeCount_,
                  drawCount_);
+    std::println("  Recorded packets per frame: shadow={}, forward={}",
+                 samples_.front().renderer.shadow.drawCount,
+                 samples_.front().renderer.forward.drawCount);
+    std::println("  Workload includes both passes; earlier one-pass baselines are historical.");
     std::println("  Frames: {} warm-up, {} measured, {} discarded attempts", kWarmupFrameCount,
                  kMeasuredFrameCount, discardedAttempts_);
     std::println("  Fixed animation step: {:.6f} seconds", kAnimationStepSeconds);
@@ -263,6 +273,10 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                [](const Sample& sample) { return sample.renderer.common.recordingInputBuild; });
     printPhase("frame-uniform update",
                [](const Sample& sample) { return sample.renderer.common.frameUniformUpdate; });
+    printPhase("shadow command-pool reset",
+               [](const Sample& sample) { return sample.renderer.shadow.commandPoolReset; });
+    printPhase("shadow primary command recording",
+               [](const Sample& sample) { return sample.renderer.shadow.primaryCommandRecording; });
     printPhase("forward coordinator command-pool reset", [](const Sample& sample)
                { return sample.renderer.forward.coordinatorCommandPoolReset; });
     // With more than one participant these are summed participant CPU time, not
@@ -325,6 +339,7 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
     std::chrono::nanoseconds secondaryExecution{};
     std::chrono::nanoseconds submission{};
     std::chrono::nanoseconds activeWork{};
+    std::chrono::nanoseconds shadowWork{};
     for (const Sample& sample : samples_)
     {
         const std::chrono::nanoseconds sampleSnapshot = sample.transformUpdate +
@@ -337,11 +352,16 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
         primaryRecording += sample.renderer.forward.primaryCommandRecording;
         secondaryExecution += sample.renderer.forward.secondaryCommandExecution;
         submission += sample.renderer.common.queueSubmission;
+        const std::chrono::nanoseconds sampleShadowWork =
+            sample.renderer.shadow.commandPoolReset +
+            sample.renderer.shadow.primaryCommandRecording;
+        shadowWork += sampleShadowWork;
         // The secondary-recording region, not the participant sums, is what
         // enters active work. With more than one participant the sums overlap
         // in time and exclude dispatch and join, so adding them would both
         // double-count parallel work and hide the cost threading introduces.
-        activeWork += sampleSnapshot + sample.renderer.forward.coordinatorCommandPoolReset +
+        activeWork += sampleSnapshot + sampleShadowWork +
+                      sample.renderer.forward.coordinatorCommandPoolReset +
                       sample.renderer.common.frameUniformUpdate +
                       sample.renderer.forward.secondaryRecordingRegion +
                       sample.renderer.forward.primaryCommandRecording +
@@ -360,6 +380,8 @@ void BenchmarkRun::printReport(const RendererInfo& rendererInfo) const
                  percentageOfActive(snapshot));
     std::println("  Queue-submission share of measured active work: {:.2f}%",
                  percentageOfActive(submission));
+    std::println("  Shadow-pass share of measured active work: {:.2f}%",
+                 percentageOfActive(shadowWork));
     std::println("  Fence, acquisition, and presentation durations are reported separately.");
     if (rendererInfo.forwardRecordingMode == ForwardRecordingMode::eSecondaryCommandBuffer)
     {

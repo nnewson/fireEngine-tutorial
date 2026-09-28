@@ -106,6 +106,14 @@ struct CommonFrameCpuTimings
     std::chrono::nanoseconds presentation{};          ///< Host presentation call.
 };
 
+/** @brief Host timings and packet count for one serial depth-only pass. */
+struct ShadowPassCpuTimings
+{
+    std::chrono::nanoseconds commandPoolReset{};        ///< Shadow primary-context pool reset.
+    std::chrono::nanoseconds primaryCommandRecording{}; ///< Complete shadow primary recording.
+    std::size_t drawCount = 0;                          ///< Caster packets recorded in the primary.
+};
+
 /** @brief Host timings owned by forward-pass preparation and command recording. */
 struct ForwardPassCpuTimings
 {
@@ -140,12 +148,14 @@ struct ForwardPassCpuTimings
         chunks{};                                         ///< Per-participant detail.
     std::chrono::nanoseconds primaryCommandRecording{};   ///< Serial pass and transition recording.
     std::chrono::nanoseconds secondaryCommandExecution{}; ///< Serial secondary execution call.
+    std::size_t drawCount = 0; ///< Packets recorded across the selected forward command structure.
 };
 
 /** @brief Host timings for renderer-owned CPU phases inside one drawFrame() attempt. */
 struct RendererCpuTimings
 {
     CommonFrameCpuTimings common{};  ///< Frame lifecycle shared by every render pass.
+    ShadowPassCpuTimings shadow{};   ///< Serial shadow-pass reset and command recording.
     ForwardPassCpuTimings forward{}; ///< Forward-pass preparation and command recording.
 };
 
