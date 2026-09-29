@@ -304,6 +304,9 @@ try
 
     std::uint64_t renderedFrameCount = 0;
     const bool checkShadowPackets = options.smokeScenario == SmokeScenario::eShadow;
+    const std::size_t expectedForwardParticipants =
+        options.forcedForwardRecordingParticipantCount.value_or(1);
+    std::size_t checkedForwardParticipants = 0;
     bool repeatedPreparationComplete = false;
     auto previousFrameTime = std::chrono::steady_clock::now();
     const auto runIncomplete = [&]()
@@ -374,13 +377,28 @@ try
         }
         if (result != fire_engine::RenderResult::eNotPresented)
         {
-            if (checkShadowPackets &&
-                (rendererTimings.shadow.drawCount != 1 || rendererTimings.forward.drawCount != 2))
+            if (checkShadowPackets)
             {
-                throw std::runtime_error(std::format(
-                    "Shadow demonstration recorded {} shadow draws and {} forward draws; "
-                    "expected 1 and 2 on every presented frame",
-                    rendererTimings.shadow.drawCount, rendererTimings.forward.drawCount));
+                if (rendererTimings.shadow.drawCount != 1 || rendererTimings.forward.drawCount != 2)
+                {
+                    throw std::runtime_error(std::format(
+                        "Shadow demonstration recorded {} shadow draws and {} forward draws; "
+                        "expected 1 and 2 on every presented frame",
+                        rendererTimings.shadow.drawCount, rendererTimings.forward.drawCount));
+                }
+                // The two-draw fixture stays below the automatic split threshold.
+                // Count recorded chunks, not the requested participant count, so
+                // a forced split that silently falls back cannot pass this check.
+                checkedForwardParticipants =
+                    std::ranges::count(rendererTimings.forward.chunks, true,
+                                       &fire_engine::ForwardParticipantCpuTimings::recorded);
+                if (checkedForwardParticipants != expectedForwardParticipants)
+                {
+                    throw std::runtime_error(
+                        std::format("Shadow demonstration recorded with {} forward participants; "
+                                    "expected {} on every presented frame",
+                                    checkedForwardParticipants, expectedForwardParticipants));
+                }
             }
             ++renderedFrameCount;
         }
@@ -435,8 +453,9 @@ try
     {
         // Every presented frame was checked in the loop. Emit one unambiguous
         // summary only after the complete bounded scenario has succeeded.
-        std::println("Shadow demonstration recording: 1 shadow draw, 2 forward draws on each of "
-                     "{} presented frames.",
+        std::println("Shadow demonstration recording: 1 shadow draw, 2 forward draws, "
+                     "{} effective forward participant{} on each of {} presented frames.",
+                     checkedForwardParticipants, checkedForwardParticipants == 1 ? "" : "s",
                      renderedFrameCount);
     }
     std::println("Presented {} frame{}.", renderedFrameCount, renderedFrameCount == 1 ? "" : "s");
