@@ -334,6 +334,11 @@ add_test(NAME fireEngineTutorialAnimatedCubeSmoke
 add_test(NAME fireEngineTutorialShadowSmoke
     COMMAND fireEngineTutorial --smoke shadow
 )
+# Each of the two draw command buffers must establish its own sampled shadow
+# descriptor, even though this fixture is below the automatic split threshold.
+add_test(NAME fireEngineTutorialShadowForwardSplitSmoke
+    COMMAND fireEngineTutorial --smoke shadow --forward-recording-participants 2
+)
 add_test(NAME fireEngineTutorialPrepareTwiceSmoke
     COMMAND fireEngineTutorial --smoke prepare-twice
 )
@@ -383,6 +388,15 @@ add_test(NAME fireEngineTutorialAutomaticForwardRecordingCorrectness
 )
 add_test(NAME fireEngineTutorialAutomaticForwardSplitCorrectness
     COMMAND fireEngineTutorial --benchmark 10000
+)
+
+# Use the same synchronization coverage for direct and wrapped application tests.
+# Shader descriptor accesses require the separately enabled static heuristic;
+# synchronization validation alone misses the shadow publication read hazard.
+# The heuristic can both over-report and miss accesses, so retain fault controls.
+set(FIRE_ENGINE_SYNC_VALIDATION_ENVIRONMENT
+    VK_LAYER_VALIDATE_SYNC=1
+    VK_KHRONOS_VALIDATION_SYNCVAL_SHADER_ACCESSES_HEURISTIC=true
 )
 
 # Keep capture registration and its Vulkan-device properties together. A new
@@ -440,7 +454,7 @@ function(fire_engine_add_capture_test)
     )
     if(ARG_SYNC)
         set_tests_properties(${ARG_NAME} PROPERTIES
-            ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
+            ENVIRONMENT "${FIRE_ENGINE_SYNC_VALIDATION_ENVIRONMENT}"
         )
     endif()
 endfunction()
@@ -681,6 +695,7 @@ set_tests_properties(
 # duplicates with an environment variable that cannot enable the absent layer.
 set(FIRE_ENGINE_SYNC_VALIDATION_TESTS)
 set(FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS fireEngineTutorialShadowSmoke)
+set(FIRE_ENGINE_SHADOW_FORWARD_SPLIT_TESTS fireEngineTutorialShadowForwardSplitSmoke)
 set(FIRE_ENGINE_SHADOW_MAP_LIFETIME_TESTS fireEngineTutorialRecreationSmoke)
 set(FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS)
 if(CMAKE_CONFIGURATION_TYPES)
@@ -699,8 +714,15 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND fireEngineTutorial --smoke shadow
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
     )
+    add_test(NAME fireEngineTutorialShadowForwardSplitSyncValidation
+        COMMAND fireEngineTutorial --smoke shadow --forward-recording-participants 2
+        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
+    )
     list(APPEND FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS
         fireEngineTutorialShadowSyncValidation
+    )
+    list(APPEND FIRE_ENGINE_SHADOW_FORWARD_SPLIT_TESTS
+        fireEngineTutorialShadowForwardSplitSyncValidation
     )
     list(APPEND FIRE_ENGINE_SHADOW_MAP_LIFETIME_TESTS
         fireEngineTutorialRecreationSyncValidation
@@ -739,17 +761,19 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         fireEngineTutorialRecreationSyncValidation
         fireEngineTutorialShadowSyncValidation
         fireEngineTutorialForwardDirectPrimarySyncValidation
+        fireEngineTutorialShadowForwardSplitSyncValidation
         fireEngineTutorialForwardSplitRecordingSyncValidation
         fireEngineTutorialForwardSplitRecordingMixedResourceSyncValidation
     )
     set_tests_properties(${FIRE_ENGINE_SYNC_VALIDATION_TESTS} PROPERTIES
-        ENVIRONMENT VK_LAYER_VALIDATE_SYNC=1
+        ENVIRONMENT "${FIRE_ENGINE_SYNC_VALIDATION_ENVIRONMENT}"
     )
 endif()
 
 set_tests_properties(
     fireEngineTutorialAnimatedCubeSmoke
     fireEngineTutorialShadowSmoke
+    fireEngineTutorialShadowForwardSplitSmoke
     fireEngineTutorialPrepareTwiceSmoke
     fireEngineTutorialUntexturedSmoke
     fireEngineTutorialRecreationSmoke
@@ -773,10 +797,18 @@ set_tests_properties(
 )
 
 # The exact geometry and participation policy are device-free contracts. These
-# scenarios also check packet counts on every presented frame, then print one
-# summary. The input compiler's ordered identity test remains the filter's proof.
+# scenarios check packet and effective participant counts on every presented
+# frame, then print one summary. The input compiler's ordered identity test
+# remains the filter's proof. Keep resource, packet, and participant requirements
+# in one expression rather than overwriting an earlier PASS_REGULAR_EXPRESSION.
+set(FIRE_ENGINE_SHADOW_DEMONSTRATION_REPORT
+    "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.][^|]*Shadow map creations after run: 2[.][^|]*Shadow demonstration recording: 1 shadow draw, 2 forward draws, "
+)
 set_tests_properties(${FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS} PROPERTIES
-    PASS_REGULAR_EXPRESSION "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.][^|]*Shadow map creations after run: 2[.][^|]*Shadow demonstration recording: 1 shadow draw, 2 forward draws on each of 5 presented frames[.]"
+    PASS_REGULAR_EXPRESSION "${FIRE_ENGINE_SHADOW_DEMONSTRATION_REPORT}1 effective forward participant on each of 5 presented frames[.]"
+)
+set_tests_properties(${FIRE_ENGINE_SHADOW_FORWARD_SPLIT_TESTS} PROPERTIES
+    PASS_REGULAR_EXPRESSION "${FIRE_ENGINE_SHADOW_DEMONSTRATION_REPORT}2 effective forward participants on each of 5 presented frames[.]"
 )
 
 # Startup resource values cannot prove that presentation replacement preserved
