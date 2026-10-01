@@ -92,7 +92,7 @@ namespace
     const float amount = (playbackTime - channel.timestamps[leftIndex]) /
                          (channel.timestamps[rightIndex] - channel.timestamps[leftIndex]);
     const auto sampled =
-        channel.values[leftIndex].normalizedLerp(channel.values[rightIndex], amount);
+        channel.values[leftIndex].sphericalLerp(channel.values[rightIndex], amount);
     if (!sampled.has_value())
     {
         throw std::logic_error("Animation playback could not normalize an interpolated rotation");

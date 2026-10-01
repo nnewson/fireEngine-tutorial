@@ -6,9 +6,9 @@ state that later work must be able to reproduce or deliberately supersede.
 ## `0.10-step-0-animated-cube.png`
 
 The AnimatedCube scene as it rendered immediately before shadow work began. It
-is the visual baseline for 0.10: a rendering change that alters this image is
-either the intended effect of a shadow feature or a regression, and nothing in
-between.
+is the historical visual baseline for 0.10. A changed image requires an
+explanation: an intended shadow effect, a deliberate and separately recorded
+correction such as the SLERP change below, or a regression to investigate.
 
 ### Provenance
 
@@ -29,6 +29,10 @@ between.
 | PNG encoder | stb defaults; `stbi_write_png_compression_level` is never assigned |
 
 ### Reproducing it
+
+Use the recorded source revision, which uses NLERP animation playback. The
+SLERP correction below changes the pose selected by frame three; running this
+command against that later binary is not a reproduction of the old pose.
 
 ```sh
 ./build-benchmark/fireEngineTutorial \
@@ -77,14 +81,15 @@ that failure is preserved rather than retrospectively called a pass.
 Continuous review reported a rapid cube self-shadow transition. The bounded
 pose diagnostic below finds stable grazing-angle breakup, not a reproduced
 temporal reversal. That investigation is concluded on the exercised paths;
-the visual limitation is not yet accepted. The header-selection repair now
-passes locally, with cross-platform CI pending. Quaternion interpolation will
-be corrected separately, and shadow quality then reviewed at matched
-orientations before final acquisition. No
+the visual limitation is not yet accepted. The header-selection repair is now
+merged. The SLERP draft and its local comparison captures are recorded below;
+shadow quality still needs review at matched orientations before final
+acquisition. No
 `0.10-directional-shadow.png` is added as an accepted reference yet. The
-original AnimatedCube reference remains unchanged and still reproduces exactly
-with current NLERP playback; the planned SLERP change requires an explicitly
-reviewed new checkpoint, not an overwritten historical hash.
+original AnimatedCube reference remains unchanged. It reproduced exactly with
+the helper-only NLERP build; switching playback to SLERP changes its hash.
+That requires an explicitly reviewed new checkpoint, not an overwritten
+historical hash. The shadow frame-five bytes happen to remain unchanged.
 
 ### Candidate provenance
 
@@ -362,9 +367,9 @@ changes independently attributable:
    repeated Release bytes, Debug synchronization validation, visual controls,
    and a fresh continuous-motion/contact inspection.
 
-The local evidence copies and header-repair draft are now recorded above.
-Animation and shadow-quality follow-ups remain unimplemented; the original
-`/tmp` paths must not be treated as archival storage.
+The local evidence copies and merged header repair are recorded above. The
+animation draft and its comparison baseline follow; shadow-quality review is
+still outstanding. The original `/tmp` paths are not archival storage.
 
 The original `0.10-step-0-animated-cube.png` and its provenance stay unchanged.
 If the reviewed SLERP basic capture differs, a separately named
@@ -376,6 +381,133 @@ Visibility-one and later wrong-slot controls must use the new poses, not
 silently compare against an old NLERP sequence. The 27-pixel load-order
 qualification below is specific to its historical pair, not permission for
 new differences after the animation correction.
+
+### SLERP comparison baseline (locally reviewed; CI pending)
+
+On 2026-10-01, the playback draft replaces the interpolation call with
+`Quaternion::sphericalLerp`. The asset, timestamps, loop/clamp rules, fixed
+0.8-second smoke step, cameras, light, shaders, and shadow parameters remain
+unchanged. The helper normalizes endpoints, selects the shortest arc, and
+uses normalized-linear interpolation only at a normalized dot product of at
+least 0.9995. Its tests bound quaternion component error to 1e-6 on both sides
+of that threshold. This corrects pacing within each key interval; it does not
+change shadow behavior at a fixed orientation.
+
+The helper-only checkpoint passed 133/133 tests and reproduced both historical
+capture hashes exactly. The playback draft passes 135/135 (107 device-free,
+28 device); both the helper and the playback NLERP substitution controls fail
+their angular assertions and pass after restoration. The old NLERP helper
+retains its original behavior. No animation timing or asset repair was folded
+into this change.
+
+#### Why the pacing error was visible
+
+AnimatedCube's intended rotations are 0, 180, and 360 degrees about Y at
+0, 1, and 2 seconds. These sparse, near-half-turn intervals expose NLERP's
+nonuniform angular speed. For an ideal half-turn with normalized interval
+time u, its rotation magnitude is `theta(u) = 2 * atan2(u, 1 - u)` radians.
+On this one-second interval the rate is `2 / ((1 - u)^2 + u^2)` radians per
+second, whereas SLERP advances at 180 degrees per second.
+
+| Interval time (s) | NLERP angle | SLERP angle | NLERP rate (degrees/s) |
+| --- | ---: | ---: | ---: |
+| 0.0 | 0.0 degrees | 0.0 degrees | 114.6 |
+| 0.4 | 67.4 degrees | 72.0 degrees | 220.4 |
+| 0.5 | 90.0 degrees | 90.0 degrees | 229.2 |
+| 0.8 | 151.9 degrees | 144.0 degrees | 168.5 |
+
+The speed doubles from an interval endpoint to its midpoint, explaining the
+visible acceleration and slowing twice per revolution. The 0.4 and 0.8 rows
+agree with the recorded NLERP quaternions below. This is an idealized
+half-turn calculation, not a frame-timing measurement; the asset's tiny
+float residuals are retained in the actual pose trace. NLERP is a useful
+approximation for closely spaced rotations, but not a constant-speed
+substitute for SLERP across these sparse keys.
+
+#### Capture provenance
+
+| Field | Value |
+| --- | --- |
+| Source | SLERP draft based on `0de68c6f3f75613c1f81974795e10165d3953c10` |
+| Host | Apple M2 Pro, arm64, macOS 26.6 build 25G72 |
+| Builds | Release and Debug, Xcode 27.0 build 27A266a, Apple clang 21.0.0 |
+| Driver | KosmicKrisp `vulkan-sdk-1.4.363 (git-269a955c89)` |
+| Effective Vulkan headers | Pinned vcpkg VulkanHeaders 1.4.357; merged header guard retained |
+| Dependencies | `VCPKG_COMMIT=04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4`, Slang `2026.7.1#1`, stb `2024-07-29#1` |
+| Images | 1600 x 1200 RGBA PNG, `B8G8R8A8Srgb`, FIFO, stb defaults unchanged |
+| Recreations | Zero at every captured attempt |
+
+Every row below was captured twice, in independent Release processes. Each
+pair is byte-identical. Basic frame three and shadow frame five also reproduce
+in Debug with both synchronization-validation settings enabled and no reported
+validation errors.
+
+| Capture | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Basic 3 | 1,494,240 | `1f02267cdbe0d9748f05b629e48d145d4c0aa172a8addaff071609859bedf708` |
+| Shadow 1 | 451,085 | `68c3a4c21004633e36f9fdfc02497b01381076beaad8953e4f8a53f0c8eff211` |
+| Shadow 2 | 487,209 | `41c862a79a8b66d4456c56a421cb041fa5be1983b9a4e2ec7ad16efef1d04b0b` |
+| Shadow 3 | 468,163 | `c1df75554035f6b00f01eb92d1aa0e386d4e4eaf6c6a878d4e6bb417085a2582` |
+| Shadow 4 | 458,694 | `e088357bb6577fc4ad3989b8bd0f0f42880ebf2742f88f867decd596ea6d4e11` |
+| Shadow 5 | 491,274 | `30f9e7eada0b5a715204eace2a24befe5f830e72be35038a47fa06478aeeb136` |
+
+```sh
+./build-benchmark/fireEngineTutorial \
+    --smoke basic --capture <basic.png> --capture-frame 3
+./build-benchmark/fireEngineTutorial \
+    --smoke shadow --capture <shadow-N.png> --capture-frame <N>
+# Repeat each command independently; N ranges from 1 through 5.
+```
+
+A local CPU diagnostic links the engine using each build's actual compile and
+link flags, loads the unchanged asset, and calls `advanceAnimations()` with
+0.8f repeatedly. Debug and Release report the same values below. The NLERP
+columns evaluate the old helper at those actual times; they are not inferred
+from nominal decimal phases. Quaternion x and z are zero throughout.
+
+| Ordinal | Actual clip time (s) | SLERP y | SLERP w | NLERP y | NLERP w |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.800000012 | -0.951056540 | 0.309017032 | -0.970142484 | 0.242535666 |
+| 2 | 1.60000002 | 0.587785304 | 0.809017003 | 0.554700255 | 0.832050264 |
+| 3 | 0.400000036 | -0.587785304 | 0.809017003 | -0.554700255 | 0.832050264 |
+| 4 | 1.20000005 | 0.951056480 | 0.309017032 | 0.970142484 | 0.242535636 |
+| 5 | 5.96046448e-8 | -9.36267526e-8 | 1 | -5.96046519e-8 | 1 |
+
+The imported keys are `(0,0,0,1)`, `(0,1,0,-4.37113883e-8)`, and
+`(0,-8.74227766e-8,0,-1)` at 0, 1, and 2 seconds. Both interval dot products
+are slightly negative, selecting the negative-Y arc. Playback tests inspect
+the actual imported keys and rotations before/at/after both boundaries and
+the loop seam, comparing rotations modulo quaternion sign. There is no key
+rounding or new hemisphere convention. An exact half-turn has two equally
+short arcs; both represented interval dot products lie just below that tie,
+at about -4e-8. Flipping the sign of just one interval's dot product
+during import could turn a full spin into a half-turn followed by its reverse.
+The asset-specific test guards that sensitive direction choice, not merely
+the generic shortest-path algorithm.
+
+Basic frame three changes from `a8fff0f2...` to `1f02267c...` with its changed
+rotation. Frame five is not exactly at time zero, and its quaternion does
+change, but that tiny difference leaves the shadow PNG byte-identical on this
+configuration. Equality here is measured, not assumed from the ordinal. The
+forward and shadow SPIR-V remain byte-identical in both builds:
+
+- forward: `5ffa6e5f0e1189e14b975fb5e6f1f19f379e550a957bb51832228a5e0f83f0df`;
+- shadow: `97d2e1cf0c3a07540bef543491fd0f028ba175e70fc6b4180170bb175755868e`.
+
+Visual inspection of these five stills shows distinct cube poses with moving
+shadow outlines and darkening of light-averted faces. Separately, the user ran
+`./build-benchmark/fireEngineTutorial` without arguments for continuous
+wall-clock playback and reported: "Rotation is steady and consistent - looks
+perfect." This completes the subjective pacing check, not acceptance of
+grazing-angle shadow quality. The user also independently verified 135/135
+tests and reproduced both canonical Release hashes. Cross-platform CI and
+the matched-orientation shadow review remain pending. No committed reference
+PNG is replaced or added here, and no new pixel tolerance is used.
+These are comparison inputs for the matched-orientation review, not evidence
+that SLERP repaired shadow rendering.
+
+Local logs, captures, the helper-only patch, and the diagnostic source/commands
+are under `build-evidence/slerp-20261001/` (ignored, not an off-machine backup).
 
 ### Deliberate visual controls
 
