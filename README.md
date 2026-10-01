@@ -32,6 +32,18 @@ base-color texture, and plays the imported rotation animation until the window
 closes. The copied build-tree asset path is used for both direct runs and CTest,
 so execution never depends on the working directory.
 
+A directional shadow map makes the cube cast onto the receive-only plane and
+shadow its own light-averted faces. This is deliberately simple base-color
+attenuation, not a normal-based lighting model: shadow visibility scales RGB
+between 0.35 and 1.0 without changing alpha. The fixed 1024 by 1024 depth map
+uses nearest comparison filtering, so hard edges and finite resolution are
+visible. Receiver regions outside the map remain lit.
+
+Use `--smoke shadow` for the bounded cube-and-plane scene. The `--frames` mode
+and other smoke scenarios retain the original AnimatedCube-only fixture.
+Capture provenance and the current visual-acceptance status are recorded in
+[the image notes](https://github.com/nnewson/fireEngine-tutorial/blob/main/docs/images/README.md).
+
 A positive frame limit remains available for quick validation:
 
 ```sh
