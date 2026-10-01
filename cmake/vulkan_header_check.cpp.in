@@ -1,0 +1,10 @@
+// Generated from the selected VulkanHeaders package. This translation unit is
+// compiled in each first-party target with that target's actual include rules.
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
+
+static_assert(VK_HEADER_VERSION_COMPLETE ==
+                  VK_MAKE_API_VERSION(0, @VulkanHeaders_VERSION_MAJOR@, @VulkanHeaders_VERSION_MINOR@,
+                                      @VulkanHeaders_VERSION_PATCH@),
+              "Vulkan headers do not match the selected VulkanHeaders package; "
+              "check for an installed SDK overriding the pinned include path");

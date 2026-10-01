@@ -35,6 +35,13 @@ find_package(VulkanHeaders 1.4 CONFIG REQUIRED)
 find_package(VulkanLoader 1.4 CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 
+# Compile this guard with every first-party consumer's actual flags. Finding
+# the pinned package does not itself prevent an installed SDK from winning
+# the compiler's header search. Derive the expectation from that package, not
+# a second version literal that could drift when the dependency pin changes.
+configure_file(cmake/vulkan_header_check.cpp.in
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/vulkan_header_check.cpp" @ONLY)
+
 # Strict warnings keep tutorial code honest. The option allows a consumer to
 # disable only the "warnings are errors" policy when experimenting locally.
 option(FIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS
@@ -93,6 +100,34 @@ add_library(fireEngineTutorialEngine STATIC
 
 target_include_directories(fireEngineTutorialEngine PUBLIC include)
 target_include_directories(fireEngineTutorialEngine PRIVATE ${Stb_INCLUDE_DIR})
+
+# PUBLIC deliberately compiles the declaration-only guard in the engine and
+# each transitive consumer, so the app or tests cannot silently use another
+# header version even when the engine's own include selection is correct.
+target_sources(fireEngineTutorialEngine PUBLIC
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/vulkan_header_check.cpp")
+
+# Apple clang can inject a global SDK directory as an ordinary -I path, ahead
+# of vcpkg's imported SYSTEM includes. Demote only implicit directories that
+# contain competing Vulkan headers to after-system lookup. Discover their
+# paths rather than assuming /usr/local or modifying the installed SDK.
+# Clang discards the driver's -I entry because -idirafter also classifies that
+# same directory as a system directory; it is not merely a second, later copy.
+# Keeping the selected package SYSTEM preserves the dependency warning policy:
+# NO_SYSTEM_FROM_IMPORTED would expose VMA/stb to first-party -Werror because
+# vcpkg's packages share their include root. The guard rejects version conflicts
+# outside this configure-time scan too; matching versions do not prove paths.
+if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
+    get_target_property(FIRE_ENGINE_VULKAN_INCLUDE_DIRECTORIES
+        Vulkan::Headers INTERFACE_INCLUDE_DIRECTORIES)
+    foreach(implicit_directory IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+        if(EXISTS "${implicit_directory}/vulkan/vulkan_core.h"
+            AND NOT implicit_directory IN_LIST FIRE_ENGINE_VULKAN_INCLUDE_DIRECTORIES)
+            target_compile_options(fireEngineTutorialEngine PUBLIC
+                "-idirafter${implicit_directory}")
+        endif()
+    endforeach()
+endif()
 
 # Application-only helpers are shared with device-free tests without becoming
 # part of the reusable engine or compiling the same implementation twice.
