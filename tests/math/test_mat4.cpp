@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cmath>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
@@ -22,6 +23,22 @@ using fire_engine::Transform;
 using fire_engine::Vec2;
 using fire_engine::Vec3;
 using fire_engine::Vec4;
+
+void requireSameRotation(Quaternion actual, Quaternion expected)
+{
+    if (actual.dot(expected) < 0.0f)
+    {
+        actual = -actual;
+    }
+    // Absolute component accuracy, not an angle recovered through ill-conditioned acos
+    // near identity. This also bounds the near-equal SLERP approximation.
+    constexpr float kComponentTolerance = 1.0e-6f;
+    REQUIRE(std::abs(actual.x - expected.x) <= kComponentTolerance);
+    REQUIRE(std::abs(actual.y - expected.y) <= kComponentTolerance);
+    REQUIRE(std::abs(actual.z - expected.z) <= kComponentTolerance);
+    REQUIRE(std::abs(actual.w - expected.w) <= kComponentTolerance);
+    REQUIRE(std::abs(actual.lengthSquared() - 1.0f) <= kComponentTolerance);
+}
 } // namespace
 
 TEST_CASE("Mat4 defaults to the zero matrix")
@@ -79,6 +96,120 @@ TEST_CASE("Quaternion normalization and interpolation retain valid rotations")
         .w = std::numeric_limits<float>::quiet_NaN(),
     };
     REQUIRE(nonFinite.normalized() == std::unexpected{NormalizeError::eNonFinite});
+}
+
+TEST_CASE("Quaternion spherical interpolation advances by equal angles")
+{
+    constexpr double kHalfArc = std::numbers::pi / 3.0; // Full rotation is 120 degrees.
+    const Quaternion end{.z = static_cast<float>(std::sin(kHalfArc)),
+                         .w = static_cast<float>(std::cos(kHalfArc))};
+    for (const Quaternion right : {end, -end})
+    {
+        for (const float amount : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f})
+        {
+            CAPTURE(amount, right.z, right.w);
+            const auto sampled = Quaternion::identity().sphericalLerp(right, amount);
+            REQUIRE(sampled.has_value());
+            // The quarter points (30 and 90 degrees), unlike the midpoint, reject NLERP.
+            requireSameRotation(*sampled, {.z = static_cast<float>(std::sin(kHalfArc * amount)),
+                                           .w = static_cast<float>(std::cos(kHalfArc * amount))});
+        }
+    }
+}
+
+TEST_CASE("Quaternion spherical interpolation normalizes endpoints and preserves tie direction")
+{
+    const Quaternion left{.x = 1.0f, .y = 2.0f, .z = 3.0f, .w = 4.0f};
+    const auto unitLeft = left.normalized();
+    REQUIRE(unitLeft.has_value());
+    for (const float scale : {1.0e-30f, 4.0f, 1.0e20f})
+    {
+        CAPTURE(scale);
+        const Quaternion scaled{
+            .x = left.x * scale, .y = left.y * scale, .z = left.z * scale, .w = left.w * scale};
+        for (const float amount : {0.0f, 0.25f, 0.5f, 1.0f})
+        {
+            const auto equivalent = scaled.sphericalLerp(-left, amount);
+            REQUIRE(equivalent.has_value());
+            requireSameRotation(*equivalent, *unitLeft);
+
+            const auto sampled =
+                Quaternion{.w = scale}.sphericalLerp({.z = scale, .w = 0.0f}, amount);
+            REQUIRE(sampled.has_value());
+            const double halfAngle = std::numbers::pi * 0.5 * amount;
+            requireSameRotation(*sampled, {.z = static_cast<float>(std::sin(halfAngle)),
+                                           .w = static_cast<float>(std::cos(halfAngle))});
+        }
+    }
+
+    for (const float direction : {-1.0f, 1.0f})
+    {
+        // An exact half turn has two equally short paths; do not silently pick the other.
+        const Quaternion halfTurn{.z = direction, .w = 0.0f};
+        REQUIRE(Quaternion::identity().dot(halfTurn) == 0.0f);
+        const auto sampled = Quaternion::identity().sphericalLerp(halfTurn, 0.25f);
+        REQUIRE(sampled.has_value());
+        requireSameRotation(*sampled, {.z = direction * std::sin(std::numbers::pi_v<float> / 8.0f),
+                                       .w = std::cos(std::numbers::pi_v<float> / 8.0f)});
+    }
+}
+
+TEST_CASE("Quaternion spherical interpolation remains accurate across its near-equal threshold")
+{
+    for (const float cosine : {0.9994f, 0.9996f, 0.999999f, 1.0f})
+    {
+        CAPTURE(cosine);
+        const Quaternion right{.y = std::sqrt(1.0f - cosine * cosine), .w = cosine};
+        const auto unitRight = right.normalized();
+        REQUIRE(unitRight.has_value());
+        // Assert the fixture really straddles the registered 0.9995 dot threshold.
+        REQUIRE((unitRight->w >= 0.9995f) == (cosine >= 0.9995f));
+        const double halfArc = std::atan2(static_cast<double>(unitRight->y), unitRight->w);
+        for (const float amount : {0.0f, 0.125f, 0.25f, 0.5f, 0.75f, 0.875f, 1.0f})
+        {
+            CAPTURE(amount);
+            const auto sampled = Quaternion::identity().sphericalLerp(right, amount);
+            REQUIRE(sampled.has_value());
+            requireSameRotation(*sampled, {.y = static_cast<float>(std::sin(halfArc * amount)),
+                                           .w = static_cast<float>(std::cos(halfArc * amount))});
+        }
+    }
+}
+
+TEST_CASE("Quaternion spherical interpolation rejects invalid inputs before endpoint shortcuts")
+{
+    const Quaternion identity;
+    const Quaternion zero{.w = 0.0f};
+    const std::array nonFiniteValues{std::numeric_limits<float>::quiet_NaN(),
+                                     std::numeric_limits<float>::infinity(),
+                                     -std::numeric_limits<float>::infinity()};
+    for (const float amount : {0.0f, 0.5f, 1.0f})
+    {
+        REQUIRE(zero.sphericalLerp(identity, amount) ==
+                std::unexpected{NormalizeError::eZeroLength});
+        REQUIRE(identity.sphericalLerp(zero, amount) ==
+                std::unexpected{NormalizeError::eZeroLength});
+        for (const float value : nonFiniteValues)
+        {
+            for (const auto member :
+                 {&Quaternion::x, &Quaternion::y, &Quaternion::z, &Quaternion::w})
+            {
+                Quaternion invalid;
+                invalid.*member = value;
+                REQUIRE(invalid.sphericalLerp(identity, amount) ==
+                        std::unexpected{NormalizeError::eNonFinite});
+                REQUIRE(identity.sphericalLerp(invalid, amount) ==
+                        std::unexpected{NormalizeError::eNonFinite});
+            }
+        }
+    }
+    for (const float amount : nonFiniteValues)
+    {
+        REQUIRE(identity.sphericalLerp(identity, amount) ==
+                std::unexpected{NormalizeError::eNonFinite});
+        REQUIRE(identity.sphericalLerp({.y = 1.0f, .w = 0.0f}, amount) ==
+                std::unexpected{NormalizeError::eNonFinite});
+    }
 }
 
 TEST_CASE("Normalization remains stable across finite float magnitudes")

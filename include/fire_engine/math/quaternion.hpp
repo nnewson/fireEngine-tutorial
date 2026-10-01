@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <expected>
 
@@ -78,6 +79,77 @@ struct Quaternion
             .y = y + (right.y - y) * amount,
             .z = z + (right.z - z) * amount,
             .w = w + (right.w - w) * amount,
+        }
+            .normalized();
+    }
+
+    /**
+     * @brief Interpolates normalized rotations along their shortest spherical arc.
+     *
+     * Angular speed is constant within an interval, except for a normalized-linear
+     * approximation for nearly equal rotations. A negative dot product negates the right
+     * endpoint; an exactly zero dot product preserves the supplied half-turn direction.
+     * Both endpoints are validated even when amount is zero or one.
+     * @param right Finite, nonzero rotation reached when amount is one.
+     * @param amount Interpolation fraction in the range zero to one.
+     * @pre A finite amount lies in the range zero to one; extrapolation is not supported.
+     * @return Unit quaternion, or a normalization error for an invalid endpoint or
+     * non-finite amount.
+     */
+    [[nodiscard]] std::expected<Quaternion, NormalizeError>
+    sphericalLerp(Quaternion right, float amount) const noexcept
+    {
+        if (!std::isfinite(amount))
+        {
+            return std::unexpected{NormalizeError::eNonFinite};
+        }
+
+        const auto left = normalized();
+        if (!left.has_value())
+        {
+            return std::unexpected{left.error()};
+        }
+        const auto normalizedRight = right.normalized();
+        if (!normalizedRight.has_value())
+        {
+            return std::unexpected{normalizedRight.error()};
+        }
+        right = *normalizedRight;
+
+        float cosine = left->dot(right);
+        if (cosine < 0.0f)
+        {
+            right = -right;
+            cosine = -cosine;
+        }
+        if (amount == 0.0f)
+        {
+            return *left;
+        }
+        if (amount == 1.0f)
+        {
+            return right;
+        }
+
+        // Rounded unit-vector dot products can exceed one. Near equality, avoid dividing
+        // by a vanishing sine. This threshold bounds the full rotation arc to about 3.6
+        // degrees; tests straddle it and bound the approximation's component error.
+        constexpr float kNearEqualDotThreshold = 0.9995f;
+        cosine = std::clamp(cosine, 0.0f, 1.0f);
+        if (cosine >= kNearEqualDotThreshold)
+        {
+            return left->normalizedLerp(right, amount);
+        }
+
+        const float angle = std::acos(cosine);
+        const float sine = std::sin(angle);
+        const float leftWeight = std::sin((1.0f - amount) * angle) / sine;
+        const float rightWeight = std::sin(amount * angle) / sine;
+        return Quaternion{
+            .x = leftWeight * left->x + rightWeight * right.x,
+            .y = leftWeight * left->y + rightWeight * right.y,
+            .z = leftWeight * left->z + rightWeight * right.z,
+            .w = leftWeight * left->w + rightWeight * right.w,
         }
             .normalized();
     }

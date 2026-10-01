@@ -19,6 +19,9 @@ struct Animation;
  * @throws std::invalid_argument if elapsedSeconds is negative or non-finite.
  * @throws std::logic_error if the previously validated animation bindings are broken.
  *
+ * Rotation channels use shortest-arc spherical interpolation with constant angular
+ * speed per key interval (apart from the helper's near-equal approximation), not
+ * normalized-linear interpolation. Different intervals may have different speeds.
  * This function changes CPU-side local transforms only. Call
  * Scene::updateWorldTransforms() afterwards to resolve the hierarchy before drawing.
  */
