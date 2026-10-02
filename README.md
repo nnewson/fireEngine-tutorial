@@ -37,11 +37,12 @@ shadow its own light-averted faces. This is deliberately simple base-color
 attenuation, not a normal-based lighting model: shadow visibility scales RGB
 between 0.35 and 1.0 without changing alpha. The fixed 1024 by 1024 depth map
 uses nearest comparison filtering, so hard edges and finite resolution are
-visible. Receiver regions outside the map remain lit.
+visible. Receiver regions outside the map remain lit. Brief grazing-angle
+self-shadow breakup is a documented limitation retained for 0.10.
 
 Use `--smoke shadow` for the bounded cube-and-plane scene. The `--frames` mode
 and other smoke scenarios retain the original AnimatedCube-only fixture.
-Capture provenance and the current visual-acceptance status are recorded in
+Accepted reference images, reproduction commands, and visual limits are in
 [the image notes](https://github.com/nnewson/fireEngine-tutorial/blob/main/docs/images/README.md).
 
 A positive frame limit remains available for quick validation:
