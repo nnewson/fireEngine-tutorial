@@ -5,6 +5,7 @@
 
 #include "benchmark.hpp"
 #include "procedural_shadow_receiver.hpp"
+#include "shadow_caster_replacement.hpp"
 #include "tutorial_frame_descriptions.hpp"
 
 #include <algorithm>
@@ -58,13 +59,14 @@ constexpr std::string_view kCommandLineUsage =
 /** @brief Device-level integration paths available to bounded CTest runs. */
 enum class SmokeScenario : std::uint8_t
 {
-    eNone,         ///< Interactive or explicitly frame-limited normal rendering.
-    eBasic,        ///< Load, animate, prepare, and draw the imported textured scene.
-    ePrepareTwice, ///< Change dependencies and replace compiled GPU resources.
-    eUntextured,   ///< Draw the imported mesh through the persistent white fallback texture.
-    eResize,       ///< Recreate presentation-dependent state after every presented frame.
-    eShadow,       ///< Add the procedural receiver and use the shadow-demonstration camera.
-    eShadowReuse,  ///< Revisit both frame slots repeatedly with the shadow demonstration.
+    eNone,               ///< Interactive or explicitly frame-limited normal rendering.
+    eBasic,              ///< Load, animate, prepare, and draw the imported textured scene.
+    ePrepareTwice,       ///< Change dependencies and replace compiled GPU resources.
+    eUntextured,         ///< Draw the imported mesh through the persistent white fallback texture.
+    eResize,             ///< Recreate presentation-dependent state after every presented frame.
+    eShadow,             ///< Add the procedural receiver and use the shadow-demonstration camera.
+    eShadowReuse,        ///< Revisit both frame slots repeatedly with the shadow demonstration.
+    eShadowPrepareTwice, ///< Replace caster dependencies without an image-upload wait.
 };
 
 /** @brief Mutually exclusive top-level application modes selected by the command line. */
@@ -102,8 +104,18 @@ struct SmokeDefinition
     bool recreateEveryFrame; ///< Whether to recreate after every presentation.
 };
 
+/** @brief Owned identities and observations for the upload-free preparation scenario. */
+struct ShadowPreparationProgress
+{
+    std::array<fire_engine::RenderObjectId, 2> originalObjects{}; ///< Original draw order.
+    std::size_t originalRevision = 0;    ///< Asset revision before changing the active caster.
+    std::uint64_t originalFrames = 0;    ///< Presented frames using the original compiled graph.
+    std::uint64_t replacementFrames = 0; ///< Presented frames using the replacement graph.
+    std::size_t preparationCount = 0;    ///< Successful replacement preparation calls.
+};
+
 /** @brief Named integration-scenario metadata consumed by the command-line parser. */
-constexpr std::array<SmokeDefinition, 6> kSmokeDefinitions{{
+constexpr std::array<SmokeDefinition, 7> kSmokeDefinitions{{
     {
         .name = "basic",
         .scenario = SmokeScenario::eBasic,
@@ -148,6 +160,14 @@ constexpr std::array<SmokeDefinition, 6> kSmokeDefinitions{{
         .scenario = SmokeScenario::eShadowReuse,
         .frameLimit = 32,
         .reprepareAfterFrame = std::nullopt,
+        .recreateEveryFrame = false,
+    },
+    {
+        .name = "shadow-prepare-twice",
+        .scenario = SmokeScenario::eShadowPrepareTwice,
+        // Populate both slots, then revisit each three times after replacement.
+        .frameLimit = 8,
+        .reprepareAfterFrame = 2,
         .recreateEveryFrame = false,
     },
 }};
@@ -273,6 +293,7 @@ try
     content.scene.updateWorldTransforms();
     std::size_t initialForwardDrawCount = 0;
     std::size_t initialShadowCasterCount = 0;
+    std::optional<ShadowPreparationProgress> shadowPreparation;
     {
         const fire_engine::SceneDrawList initialDrawList =
             content.scene.buildDrawItems(drawListArena);
@@ -288,6 +309,18 @@ try
                                               .at(drawItem.renderObject.value)
                                               .castsShadow;
                                       });
+        }
+        if (options.smokeScenario == SmokeScenario::eShadowPrepareTwice)
+        {
+            if (initialForwardDrawCount != 2 || initialShadowCasterCount != 1)
+            {
+                throw std::logic_error("Shadow preparation requires one caster and one receiver");
+            }
+            shadowPreparation.emplace();
+            // Copy IDs, not the arena-backed view: the next draw rebuilds it.
+            shadowPreparation->originalObjects = {initialDrawList.drawItems[0].renderObject,
+                                                  initialDrawList.drawItems[1].renderObject};
+            shadowPreparation->originalRevision = content.assets.revision();
         }
     }
 
@@ -368,61 +401,109 @@ try
             }
         }
 
-        std::chrono::steady_clock::time_point drawListStart;
-        if (benchmark.has_value())
+        fire_engine::RenderResult result;
         {
-            drawListStart = std::chrono::steady_clock::now();
-        }
-        const fire_engine::SceneDrawList drawList = content.scene.buildDrawItems(drawListArena);
-        std::chrono::nanoseconds drawListBuild{};
-        if (benchmark.has_value())
-        {
-            drawListBuild = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - drawListStart);
-        }
-
-        fire_engine::RendererCpuTimings rendererTimings;
-        const fire_engine::RenderResult result = renderer.drawFrame(
-            drawList, frameDescription,
-            benchmark.has_value() || checkShadowPackets ? &rendererTimings : nullptr);
-        if (benchmark.has_value())
-        {
-            benchmark->record(result, transformUpdate, drawListBuild, rendererTimings);
-        }
-        if (result != fire_engine::RenderResult::eNotPresented)
-        {
-            if (checkShadowPackets)
+            std::chrono::steady_clock::time_point drawListStart;
+            if (benchmark.has_value())
             {
-                if (rendererTimings.shadow.drawCount != 1 || rendererTimings.forward.drawCount != 2)
-                {
-                    throw std::runtime_error(std::format(
-                        "Shadow demonstration recorded {} shadow draws and {} forward draws; "
-                        "expected 1 and 2 on every presented frame",
-                        rendererTimings.shadow.drawCount, rendererTimings.forward.drawCount));
-                }
-                // The two-draw fixture stays below the automatic split threshold.
-                // Count recorded chunks, not the requested participant count, so
-                // a forced split that silently falls back cannot pass this check.
-                checkedForwardParticipants =
-                    std::ranges::count(rendererTimings.forward.chunks, true,
-                                       &fire_engine::ForwardParticipantCpuTimings::recorded);
-                if (checkedForwardParticipants != expectedForwardParticipants)
-                {
-                    throw std::runtime_error(
-                        std::format("Shadow demonstration recorded with {} forward participants; "
-                                    "expected {} on every presented frame",
-                                    checkedForwardParticipants, expectedForwardParticipants));
-                }
+                drawListStart = std::chrono::steady_clock::now();
             }
-            ++renderedFrameCount;
-        }
+            const fire_engine::SceneDrawList drawList = content.scene.buildDrawItems(drawListArena);
+            std::chrono::nanoseconds drawListBuild{};
+            if (benchmark.has_value())
+            {
+                drawListBuild = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - drawListStart);
+            }
+
+            fire_engine::RendererCpuTimings rendererTimings;
+            result = renderer.drawFrame(
+                drawList, frameDescription,
+                benchmark.has_value() || checkShadowPackets ? &rendererTimings : nullptr);
+            if (benchmark.has_value())
+            {
+                benchmark->record(result, transformUpdate, drawListBuild, rendererTimings);
+            }
+            if (result != fire_engine::RenderResult::eNotPresented)
+            {
+                if (checkShadowPackets)
+                {
+                    if (rendererTimings.shadow.drawCount != 1 ||
+                        rendererTimings.forward.drawCount != 2)
+                    {
+                        throw std::runtime_error(std::format(
+                            "Shadow demonstration recorded {} shadow draws and {} forward draws; "
+                            "expected 1 and 2 on every presented frame",
+                            rendererTimings.shadow.drawCount, rendererTimings.forward.drawCount));
+                    }
+                    // The two-draw fixture stays below the automatic split threshold.
+                    // Count recorded chunks, not the requested participant count, so
+                    // a forced split that silently falls back cannot pass this check.
+                    checkedForwardParticipants =
+                        std::ranges::count(rendererTimings.forward.chunks, true,
+                                           &fire_engine::ForwardParticipantCpuTimings::recorded);
+                    if (checkedForwardParticipants != expectedForwardParticipants)
+                    {
+                        throw std::runtime_error(std::format(
+                            "Shadow demonstration recorded with {} forward participants; "
+                            "expected {} on every presented frame",
+                            checkedForwardParticipants, expectedForwardParticipants));
+                    }
+                }
+                if (shadowPreparation.has_value())
+                {
+                    ++(repeatedPreparationComplete ? shadowPreparation->replacementFrames
+                                                   : shadowPreparation->originalFrames);
+                }
+                ++renderedFrameCount;
+            }
+        } // Retire the draw-list view before repeated preparation reuses its arena.
         if (!repeatedPreparationComplete && options.reprepareAfterFrame == renderedFrameCount)
         {
             // Replace compiled resources only after a submitted frame has used
             // the original set, exercising prepare()'s retirement wait.
-            addMixedResourceInstances(content);
-            content.scene.updateWorldTransforms();
-            renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
+            if (shadowPreparation.has_value())
+            {
+                // No app-side idle wait here. Unlike the textured prepare-twice
+                // fixture, this replacement also avoids an image-upload fence
+                // that could mask a missing retirement wait inside prepare().
+                const auto replacement = fire_engine::tutorial::replaceShadowCaster(content);
+                content.scene.updateWorldTransforms();
+                const fire_engine::SceneDrawList replacementDrawList =
+                    content.scene.buildDrawItems(drawListArena);
+                const auto& originalObjects = shadowPreparation->originalObjects;
+                if (content.assets.revision() <= shadowPreparation->originalRevision ||
+                    std::ranges::count(originalObjects, replacement.originalObject) != 1 ||
+                    std::ranges::contains(originalObjects, replacement.replacementObject) ||
+                    replacementDrawList.drawItems.size() != originalObjects.size())
+                {
+                    throw std::logic_error("Shadow preparation did not change caster dependencies");
+                }
+                // Preserve ordered receiver identity and policy, independent of
+                // which draw is the caster. Check actual inputs, not just the
+                // helper's returned IDs, before preparing the new graph.
+                for (std::size_t index = 0; index < originalObjects.size(); ++index)
+                {
+                    const bool isCaster = originalObjects[index] == replacement.originalObject;
+                    const fire_engine::RenderObjectId expectedObject =
+                        isCaster ? replacement.replacementObject : originalObjects[index];
+                    if (replacementDrawList.drawItems[index].renderObject != expectedObject ||
+                        content.assets.renderObjects().at(expectedObject.value).castsShadow !=
+                            isCaster)
+                    {
+                        throw std::logic_error(
+                            "Shadow preparation changed receiver identity, policy, or draw order");
+                    }
+                }
+                renderer.prepare(content.assets, replacementDrawList);
+                ++shadowPreparation->preparationCount;
+            }
+            else
+            {
+                addMixedResourceInstances(content);
+                content.scene.updateWorldTransforms();
+                renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
+            }
             repeatedPreparationComplete = true;
         }
         if (result != fire_engine::RenderResult::ePresented || options.recreateEveryFrame)
@@ -472,6 +553,20 @@ try
                      checkedForwardParticipants, checkedForwardParticipants == 1 ? "" : "s",
                      renderedFrameCount);
     }
+    if (shadowPreparation.has_value())
+    {
+        if (shadowPreparation->preparationCount != 1 || shadowPreparation->originalFrames != 2 ||
+            shadowPreparation->replacementFrames != 6)
+        {
+            throw std::runtime_error(
+                "Shadow preparation requires one replacement after two original frames, "
+                "followed by six replacement frames");
+        }
+        std::println("Shadow demonstration preparation: {} replacement, {} original frames, "
+                     "{} replacement frames.",
+                     shadowPreparation->preparationCount, shadowPreparation->originalFrames,
+                     shadowPreparation->replacementFrames);
+    }
     std::println("Presented {} frame{}.", renderedFrameCount, renderedFrameCount == 1 ? "" : "s");
     return 0;
 }
@@ -488,7 +583,8 @@ namespace
 
 [[nodiscard]] constexpr bool isShadowReceiverScenario(SmokeScenario scenario)
 {
-    return scenario == SmokeScenario::eShadow || scenario == SmokeScenario::eShadowReuse;
+    return scenario == SmokeScenario::eShadow || scenario == SmokeScenario::eShadowReuse ||
+           scenario == SmokeScenario::eShadowPrepareTwice;
 }
 
 [[nodiscard]] RunOptions parseOptions(int argumentCount, char* arguments[])
