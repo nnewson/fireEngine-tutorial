@@ -133,6 +133,7 @@ endif()
 # part of the reusable engine or compiling the same implementation twice.
 add_library(fireEngineTutorialAppSupport STATIC
     src/app/procedural_shadow_receiver.cpp
+    src/app/shadow_caster_replacement.cpp
     src/app/tutorial_frame_descriptions.cpp
 )
 target_include_directories(fireEngineTutorialAppSupport PUBLIC src/app)
@@ -322,6 +323,7 @@ add_executable(fireEngineTutorialTests
     tests/animation/test_animation_playback.cpp
     tests/animation/test_animation_validation.cpp
     tests/app/test_procedural_shadow_receiver.cpp
+    tests/app/test_shadow_caster_replacement.cpp
     tests/app/test_tutorial_frame_descriptions.cpp
     tests/content/test_scene_content_validation.cpp
     tests/gltf/test_gltf_loader.cpp
