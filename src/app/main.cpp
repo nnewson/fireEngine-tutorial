@@ -64,6 +64,7 @@ enum class SmokeScenario : std::uint8_t
     eUntextured,   ///< Draw the imported mesh through the persistent white fallback texture.
     eResize,       ///< Recreate presentation-dependent state after every presented frame.
     eShadow,       ///< Add the procedural receiver and use the shadow-demonstration camera.
+    eShadowReuse,  ///< Revisit both frame slots repeatedly with the shadow demonstration.
 };
 
 /** @brief Mutually exclusive top-level application modes selected by the command line. */
@@ -102,7 +103,7 @@ struct SmokeDefinition
 };
 
 /** @brief Named integration-scenario metadata consumed by the command-line parser. */
-constexpr std::array<SmokeDefinition, 5> kSmokeDefinitions{{
+constexpr std::array<SmokeDefinition, 6> kSmokeDefinitions{{
     {
         .name = "basic",
         .scenario = SmokeScenario::eBasic,
@@ -142,9 +143,23 @@ constexpr std::array<SmokeDefinition, 5> kSmokeDefinitions{{
         .reprepareAfterFrame = std::nullopt,
         .recreateEveryFrame = false,
     },
+    {
+        .name = "shadow-reuse",
+        .scenario = SmokeScenario::eShadowReuse,
+        .frameLimit = 32,
+        .reprepareAfterFrame = std::nullopt,
+        .recreateEveryFrame = false,
+    },
 }};
 
 /* --- File-local function declarations --- */
+
+/**
+ * @brief Selects the receiver fixture, camera, and per-frame checks together.
+ * @param scenario Named integration path selected by the application.
+ * @return Whether the scenario exercises the shadow demonstration.
+ */
+[[nodiscard]] constexpr bool isShadowReceiverScenario(SmokeScenario scenario);
 
 /**
  * @brief Reads the optional benchmark, frame limit, and integration-scenario mode.
@@ -218,8 +233,8 @@ try
 {
     const RunOptions options = parseOptions(argumentCount, arguments);
     const std::string applicationName = "fireEngine Tutorial";
-    const bool shadowDemonstration =
-        options.mode == RunMode::eInteractive || options.smokeScenario == SmokeScenario::eShadow;
+    const bool checkShadowPackets = isShadowReceiverScenario(options.smokeScenario);
+    const bool shadowDemonstration = options.mode == RunMode::eInteractive || checkShadowPackets;
     const fire_engine::FrameDescription& frameDescription =
         shadowDemonstration ? fire_engine::tutorial::shadowDemonstrationFrameDescription()
                             : fire_engine::tutorial::animatedCubeFrameDescription();
@@ -303,7 +318,6 @@ try
     }
 
     std::uint64_t renderedFrameCount = 0;
-    const bool checkShadowPackets = options.smokeScenario == SmokeScenario::eShadow;
     const std::size_t expectedForwardParticipants =
         options.forcedForwardRecordingParticipantCount.value_or(1);
     std::size_t checkedForwardParticipants = 0;
@@ -471,6 +485,11 @@ namespace
 {
 /** @cond INTERNAL */
 /* --- File-local functions --- */
+
+[[nodiscard]] constexpr bool isShadowReceiverScenario(SmokeScenario scenario)
+{
+    return scenario == SmokeScenario::eShadow || scenario == SmokeScenario::eShadowReuse;
+}
 
 [[nodiscard]] RunOptions parseOptions(int argumentCount, char* arguments[])
 try
