@@ -64,14 +64,20 @@ performance benchmark.
 CTest runs the Vulkan-free Catch2 suite plus bounded device scenarios covering
 normal AnimatedCube animation, replacement after changed preparation inputs,
 an untextured fallback draw, repeated swapchain recreation, frame capture, and
-benchmark recording controls. The six smoke paths can be selected directly
+benchmark recording controls. The seven smoke paths can be selected directly
 with `--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`,
-`--smoke resize`, `--smoke shadow`, or `--smoke shadow-reuse`.
-The last reuses the receiver scene for 32 presented frames without forced
-recreation or repeated preparation; `shadow` retains its five-frame capture
-contract. Both check packet and actual recording-participant counts on every
-presented frame, including when `--forward-recording-participants 2` forces
-the helper's secondary command buffer to participate.
+`--smoke resize`, `--smoke shadow`, `--smoke shadow-reuse`, or
+`--smoke shadow-prepare-twice`.
+The `shadow-reuse` scenario reuses the receiver scene for 32 presented frames
+without forced recreation or repeated preparation; `shadow` retains its
+five-frame capture contract. The `shadow-prepare-twice` scenario presents two
+original frames, replaces the active caster with narrowed, untextured geometry,
+then presents six replacement frames. It preserves the receiver and animation,
+and exercises preparation without an app-side idle wait or a replacement image
+upload that could mask a missing retirement wait. All three receiver scenarios
+check packet and actual recording-participant counts on every presented frame,
+including when `--forward-recording-participants 2` forces the helper's secondary
+command buffer to participate.
 
 Options belonging to the same mode may be supplied in any order.
 

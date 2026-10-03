@@ -448,7 +448,8 @@ function(fire_engine_add_shadow_receiver_test)
         )
     endif()
     if(NOT "${ARG_SCENARIO}" STREQUAL "shadow" AND
-       NOT "${ARG_SCENARIO}" STREQUAL "shadow-reuse")
+       NOT "${ARG_SCENARIO}" STREQUAL "shadow-reuse" AND
+       NOT "${ARG_SCENARIO}" STREQUAL "shadow-prepare-twice")
         message(FATAL_ERROR "Unknown shadow receiver scenario: ${ARG_SCENARIO}")
     endif()
     if(NOT "${ARG_FRAMES}" MATCHES "^[1-9][0-9]*$")
@@ -489,6 +490,13 @@ function(fire_engine_add_shadow_receiver_test)
         "Shadow demonstration recording: 1 shadow draw, 2 forward draws, "
         "${RECEIVER_PARTICIPANT_REPORT} on each of ${ARG_FRAMES} presented frames[.]"
     )
+    if("${ARG_SCENARIO}" STREQUAL "shadow-prepare-twice")
+        # A separate completion claim prevents the ordinary per-frame summary
+        # from passing a run that never replaced the compiled caster graph.
+        string(APPEND RECEIVER_REPORT
+            "[^|]*Shadow demonstration preparation: 1 replacement, 2 original frames, 6 replacement frames[.]"
+        )
+    endif()
     add_test(NAME ${ARG_NAME}
         COMMAND ${RECEIVER_COMMAND}
         ${RECEIVER_CONFIGURATIONS}
@@ -516,6 +524,10 @@ fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseSmoke
     SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS automatic)
 fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseForwardSplitSmoke
     SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS 2)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowPrepareTwiceSmoke
+    SCENARIO shadow-prepare-twice FRAMES 8 PARTICIPANTS automatic)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowPrepareTwiceForwardSplitSmoke
+    SCENARIO shadow-prepare-twice FRAMES 8 PARTICIPANTS 2)
 fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowSyncValidation
     SCENARIO shadow FRAMES 5 PARTICIPANTS automatic SYNC)
 fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowForwardSplitSyncValidation
@@ -524,6 +536,10 @@ fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseSyncValid
     SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS automatic SYNC)
 fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseForwardSplitSyncValidation
     SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS 2 SYNC)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowPrepareTwiceSyncValidation
+    SCENARIO shadow-prepare-twice FRAMES 8 PARTICIPANTS automatic SYNC)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowPrepareTwiceForwardSplitSyncValidation
+    SCENARIO shadow-prepare-twice FRAMES 8 PARTICIPANTS 2 SYNC)
 
 # Keep capture registration and its Vulkan-device properties together. A new
 # scenario must not be able to omit validation rejection, serialization, or its
