@@ -366,14 +366,6 @@ catch_discover_tests(fireEngineTutorialTests
 add_test(NAME fireEngineTutorialAnimatedCubeSmoke
     COMMAND fireEngineTutorial --smoke basic
 )
-add_test(NAME fireEngineTutorialShadowSmoke
-    COMMAND fireEngineTutorial --smoke shadow
-)
-# Each of the two draw command buffers must establish its own sampled shadow
-# descriptor, even though this fixture is below the automatic split threshold.
-add_test(NAME fireEngineTutorialShadowForwardSplitSmoke
-    COMMAND fireEngineTutorial --smoke shadow --forward-recording-participants 2
-)
 add_test(NAME fireEngineTutorialPrepareTwiceSmoke
     COMMAND fireEngineTutorial --smoke prepare-twice
 )
@@ -433,6 +425,103 @@ set(FIRE_ENGINE_SYNC_VALIDATION_ENVIRONMENT
     VK_LAYER_VALIDATE_SYNC=1
     VK_KHRONOS_VALIDATION_SYNCVAL_SHADER_ACCESSES_HEURISTIC=true
 )
+
+# Receiver scenarios own their complete report assertion and device properties
+# at registration, not through parallel lists that can lose an assertion.
+function(fire_engine_add_shadow_receiver_test)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "SYNC"
+        "NAME;SCENARIO;FRAMES;PARTICIPANTS" ""
+    )
+    if(NOT "${ARG_UNPARSED_ARGUMENTS}" STREQUAL "" OR
+       NOT "${ARG_KEYWORDS_MISSING_VALUES}" STREQUAL "")
+        message(FATAL_ERROR
+            "Unknown or incomplete shadow receiver test arguments: "
+            "${ARG_UNPARSED_ARGUMENTS};${ARG_KEYWORDS_MISSING_VALUES}"
+        )
+    endif()
+    if("${ARG_NAME}" STREQUAL "" OR "${ARG_SCENARIO}" STREQUAL "" OR
+       "${ARG_FRAMES}" STREQUAL "" OR "${ARG_PARTICIPANTS}" STREQUAL "")
+        message(FATAL_ERROR
+            "Shadow receiver tests require NAME, SCENARIO, FRAMES, and PARTICIPANTS"
+        )
+    endif()
+    if(NOT "${ARG_SCENARIO}" STREQUAL "shadow" AND
+       NOT "${ARG_SCENARIO}" STREQUAL "shadow-reuse")
+        message(FATAL_ERROR "Unknown shadow receiver scenario: ${ARG_SCENARIO}")
+    endif()
+    if(NOT "${ARG_FRAMES}" MATCHES "^[1-9][0-9]*$")
+        message(FATAL_ERROR "Shadow receiver FRAMES must be a positive integer")
+    endif()
+
+    set(RECEIVER_COMMAND fireEngineTutorial --smoke ${ARG_SCENARIO})
+    if("${ARG_PARTICIPANTS}" STREQUAL "automatic")
+        # This two-draw fixture must stay below the automatic split threshold.
+        set(RECEIVER_PARTICIPANT_REPORT "1 effective forward participant")
+    elseif("${ARG_PARTICIPANTS}" STREQUAL "2")
+        # Each secondary must establish its own sampled shadow descriptor.
+        list(APPEND RECEIVER_COMMAND --forward-recording-participants 2)
+        set(RECEIVER_PARTICIPANT_REPORT "2 effective forward participants")
+    else()
+        message(FATAL_ERROR "Shadow receiver PARTICIPANTS must be automatic or 2")
+    endif()
+
+    set(RECEIVER_CONFIGURATIONS)
+    if(ARG_SYNC)
+        if(CMAKE_CONFIGURATION_TYPES)
+            list(APPEND RECEIVER_CONFIGURATIONS CONFIGURATIONS Debug)
+        elseif(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+            return()
+        endif()
+    endif()
+
+    # Counts and actual chunk records are checked by the app on every presented
+    # frame, followed by one summary. Ordered device-free identities remain the
+    # filter's proof; this report checks its wiring and resource lifetime.
+    # Keep a single expression: multiple PASS regexes are alternatives, not AND.
+    # The report has no vertical bars; [^|]* also fails promptly on a missing tail.
+    string(CONCAT RECEIVER_REPORT
+        "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*"
+        "Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*"
+        "Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.][^|]*"
+        "Shadow map creations after run: 2[.][^|]*"
+        "Shadow demonstration recording: 1 shadow draw, 2 forward draws, "
+        "${RECEIVER_PARTICIPANT_REPORT} on each of ${ARG_FRAMES} presented frames[.]"
+    )
+    add_test(NAME ${ARG_NAME}
+        COMMAND ${RECEIVER_COMMAND}
+        ${RECEIVER_CONFIGURATIONS}
+    )
+    set_tests_properties(${ARG_NAME} PROPERTIES
+        PASS_REGULAR_EXPRESSION "${RECEIVER_REPORT}"
+        FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
+        LABELS vulkan-device
+        RESOURCE_LOCK fireEngineTutorialVulkan
+        TIMEOUT 30
+    )
+    if(ARG_SYNC)
+        # This adds a disjoint property; never replace the complete report regex.
+        set_tests_properties(${ARG_NAME} PROPERTIES
+            ENVIRONMENT "${FIRE_ENGINE_SYNC_VALIDATION_ENVIRONMENT}"
+        )
+    endif()
+endfunction()
+
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowSmoke
+    SCENARIO shadow FRAMES 5 PARTICIPANTS automatic)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowForwardSplitSmoke
+    SCENARIO shadow FRAMES 5 PARTICIPANTS 2)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseSmoke
+    SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS automatic)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseForwardSplitSmoke
+    SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS 2)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowSyncValidation
+    SCENARIO shadow FRAMES 5 PARTICIPANTS automatic SYNC)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowForwardSplitSyncValidation
+    SCENARIO shadow FRAMES 5 PARTICIPANTS 2 SYNC)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseSyncValidation
+    SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS automatic SYNC)
+fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowReuseForwardSplitSyncValidation
+    SCENARIO shadow-reuse FRAMES 32 PARTICIPANTS 2 SYNC)
 
 # Keep capture registration and its Vulkan-device properties together. A new
 # scenario must not be able to omit validation rejection, serialization, or its
@@ -729,8 +818,6 @@ set_tests_properties(
 # its device scenarios out of Release test lists instead of registering silent
 # duplicates with an environment variable that cannot enable the absent layer.
 set(FIRE_ENGINE_SYNC_VALIDATION_TESTS)
-set(FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS fireEngineTutorialShadowSmoke)
-set(FIRE_ENGINE_SHADOW_FORWARD_SPLIT_TESTS fireEngineTutorialShadowForwardSplitSmoke)
 set(FIRE_ENGINE_SHADOW_MAP_LIFETIME_TESTS fireEngineTutorialRecreationSmoke)
 set(FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS)
 if(CMAKE_CONFIGURATION_TYPES)
@@ -744,20 +831,6 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_test(NAME fireEngineTutorialRecreationSyncValidation
         COMMAND fireEngineTutorial --smoke resize
         ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
-    )
-    add_test(NAME fireEngineTutorialShadowSyncValidation
-        COMMAND fireEngineTutorial --smoke shadow
-        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
-    )
-    add_test(NAME fireEngineTutorialShadowForwardSplitSyncValidation
-        COMMAND fireEngineTutorial --smoke shadow --forward-recording-participants 2
-        ${FIRE_ENGINE_SYNC_VALIDATION_CONFIGURATIONS}
-    )
-    list(APPEND FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS
-        fireEngineTutorialShadowSyncValidation
-    )
-    list(APPEND FIRE_ENGINE_SHADOW_FORWARD_SPLIT_TESTS
-        fireEngineTutorialShadowForwardSplitSyncValidation
     )
     list(APPEND FIRE_ENGINE_SHADOW_MAP_LIFETIME_TESTS
         fireEngineTutorialRecreationSyncValidation
@@ -794,9 +867,7 @@ if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(FIRE_ENGINE_SYNC_VALIDATION_TESTS
         fireEngineTutorialPrepareTwiceSyncValidation
         fireEngineTutorialRecreationSyncValidation
-        fireEngineTutorialShadowSyncValidation
         fireEngineTutorialForwardDirectPrimarySyncValidation
-        fireEngineTutorialShadowForwardSplitSyncValidation
         fireEngineTutorialForwardSplitRecordingSyncValidation
         fireEngineTutorialForwardSplitRecordingMixedResourceSyncValidation
     )
@@ -807,8 +878,6 @@ endif()
 
 set_tests_properties(
     fireEngineTutorialAnimatedCubeSmoke
-    fireEngineTutorialShadowSmoke
-    fireEngineTutorialShadowForwardSplitSmoke
     fireEngineTutorialPrepareTwiceSmoke
     fireEngineTutorialUntexturedSmoke
     fireEngineTutorialRecreationSmoke
@@ -829,21 +898,6 @@ set_tests_properties(
         LABELS vulkan-device
         RESOURCE_LOCK fireEngineTutorialVulkan
         TIMEOUT 30
-)
-
-# The exact geometry and participation policy are device-free contracts. These
-# scenarios check packet and effective participant counts on every presented
-# frame, then print one summary. The input compiler's ordered identity test
-# remains the filter's proof. Keep resource, packet, and participant requirements
-# in one expression rather than overwriting an earlier PASS_REGULAR_EXPRESSION.
-set(FIRE_ENGINE_SHADOW_DEMONSTRATION_REPORT
-    "Forward depth format: D(32Sfloat|16Unorm)[.][^|]*Shadow maps: 2 at 1024x1024, format D(32Sfloat|16Unorm), 2 created[.][^|]*Shadow demonstration content: 2 forward draws, 1 object marked as a shadow caster[.][^|]*Shadow map creations after run: 2[.][^|]*Shadow demonstration recording: 1 shadow draw, 2 forward draws, "
-)
-set_tests_properties(${FIRE_ENGINE_SHADOW_DEMONSTRATION_TESTS} PROPERTIES
-    PASS_REGULAR_EXPRESSION "${FIRE_ENGINE_SHADOW_DEMONSTRATION_REPORT}1 effective forward participant on each of 5 presented frames[.]"
-)
-set_tests_properties(${FIRE_ENGINE_SHADOW_FORWARD_SPLIT_TESTS} PROPERTIES
-    PASS_REGULAR_EXPRESSION "${FIRE_ENGINE_SHADOW_DEMONSTRATION_REPORT}2 effective forward participants on each of 5 presented frames[.]"
 )
 
 # Startup resource values cannot prove that presentation replacement preserved
