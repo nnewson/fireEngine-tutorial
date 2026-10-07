@@ -24,5 +24,13 @@
         }
       ]
     }
-  ]
+  ],
+  "features": {
+    "ci-validation": {
+      "description": "Install the pinned Khronos validation layer for the Linux CI gate.",
+      "dependencies": [
+        "vulkan-validationlayers"
+      ]
+    }
+  }
 }

@@ -85,6 +85,30 @@ Options belonging to the same mode may be supplied in any order.
 ctest --preset default
 ```
 
+Linux CI additionally installs the optional `ci-validation` vcpkg feature from
+the same pinned registry as the loader and headers. Its validation runner
+requires the application's loader trace to show the pinned Khronos layer in
+both the instance and device chains of **every** `vulkan-device` test, including
+wrapped captures. Merely enumerating the layer or setting sync options is not
+enough. It also checks the registered validation settings and rejects failed,
+skipped, missing, or output-truncated tests.
+
+The runner then hides the layer for one ordinary and one synchronization test.
+Those applications must still run, but the same activation check must reject
+their output; restored runs must activate validation again. CI retains the
+registry, per-test output and controls in `linux-validation-evidence`. This
+checks layer activation, not every validator's ability to detect every fault.
+Validation remains optional for normal users and disabled in Release benchmarks.
+
+To reproduce this Linux gate with an X11 display (or under `xvfb-run`):
+
+```sh
+cmake --preset vcpkg -DVCPKG_MANIFEST_FEATURES=ci-validation
+cmake --build --preset default
+python3 -m unittest discover -s tests/ci -v
+python3 tools/ci/run_validation_tests.py --installed-dir build/vcpkg_installed/x64-linux
+```
+
 ## Performance benchmark
 
 The executable can replace AnimatedCube's imported hierarchy with a
