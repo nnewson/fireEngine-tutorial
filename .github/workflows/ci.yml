@@ -264,31 +264,53 @@ jobs:
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: ${{ runner.os }}-vcpkg-validation-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
           restore-keys: |
+            ${{ runner.os }}-vcpkg-validation-
             ${{ runner.os }}-vcpkg-
 
       - name: Configure
-        run: cmake --preset vcpkg -DFIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS=ON
+        # Optional manifest feature: ordinary local builds do not install VVL.
+        run: >-
+          cmake --preset vcpkg -DFIRE_ENGINE_TUTORIAL_WARNINGS_AS_ERRORS=ON
+          -DVCPKG_MANIFEST_FEATURES=ci-validation
 
       - name: Build
         run: cmake --build --preset default
 
-      - name: Inspect Vulkan runtime
+      - name: Inspect system Vulkan runtime (driver inventory only)
         run: xvfb-run --auto-servernum vulkaninfo --summary
 
-      - name: Test
-        run: xvfb-run --auto-servernum ctest --preset default
+      - name: Test validation-gate failure paths (device-free)
+        run: python3 -m unittest discover -s tests/ci -v
+
+      - name: Test with required validation and missing-layer control
+        timeout-minutes: 35
+        run: >-
+          xvfb-run --auto-servernum python3 tools/ci/run_validation_tests.py
+          --build-dir build --installed-dir build/vcpkg_installed/x64-linux
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-validation-evidence
+          path: build/ci-validation
+          if-no-files-found: warn
 
       # Validation is useful for correctness but would distort the host-call
       # ratios this observation exists to expose. Reuse the installed vcpkg
       # tree in a separate Release build and publish values without thresholds.
+      # Keep the feature selected so this configure does not remove the layer
+      # from the shared install tree. Only the test runner sets loader tracing
+      # and layer paths, and Release never requests the validation layer.
       - name: Configure Release benchmark
         run: >-
           cmake --preset vcpkg -B build-benchmark
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF
           -DVCPKG_INSTALLED_DIR=${{ github.workspace }}/build/vcpkg_installed
+          -DVCPKG_MANIFEST_FEATURES=ci-validation
 
       - name: Build Release benchmark
         run: cmake --build build-benchmark --target fireEngineTutorial
