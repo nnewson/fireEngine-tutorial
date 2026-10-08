@@ -67,8 +67,10 @@ void transitionToSampledDepth(const vk::raii::CommandBuffer& commandBuffer,
         .srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
                         vk::PipelineStageFlagBits2::eLateFragmentTests,
         .srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+        // TEMPORARY LINUX POSITIVE CONTROL -- DO NOT MERGE.
+        // Preserve the source/layout transition; omit sampled-read publication.
+        .dstStageMask = vk::PipelineStageFlagBits2::eNone,
+        .dstAccessMask = vk::AccessFlagBits2::eNone,
         .oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
         .newLayout = vk::ImageLayout::eDepthReadOnlyOptimal,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
