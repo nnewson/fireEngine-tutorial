@@ -1,0 +1,71 @@
+Selected Vulkan 1.4 device: Apple M2 Pro
+Driver: KosmicKrisp (vulkan-sdk-1.4.363 (git-269a955c89))
+Graphics queue family: 0
+Present queue family: 0
+Logical device, queues, VMA allocator, and 2 frame slots created.
+Swapchain created: 3 images at 1600x1200 (B8G8R8A8Srgb, Fifo), 3 presentation semaphores.
+Forward depth format: D32Sfloat.
+Shadow maps: 2 at 1024x1024, format D32Sfloat, 2 created.
+Synthetic benchmark content prepared for drawing.
+Shadow map creations after run: 2.
+
+Phase-level CPU benchmark
+  Build configuration: Release
+  Device: Apple M2 Pro
+  Driver: KosmicKrisp (vulkan-sdk-1.4.363 (git-269a955c89))
+  Forward recording path: secondary command buffer
+  Forward secondary recording participants: 2 forced, 2 effective
+  Ownership: cycled frame slots with per-slot recording contexts
+  Frames in flight: 2
+  Presentation: 1600x1200, B8G8R8A8Srgb, Fifo
+  Workload: instances=10000, nodes=10001, draws=10000
+  Recorded packets per frame: shadow=10000, forward=10000
+  Workload includes both passes; earlier one-pass baselines are historical.
+  Frames: 16 warm-up, 64 measured, 0 discarded attempts
+  Fixed animation step: 0.016667 seconds
+
+  Phase                                     mean us    median us       p95 us
+  transform update                          139.088      138.625      146.666
+  draw-list build                            69.366       67.542       74.333
+  frame recording-input build               101.434       98.374      114.292
+  frame-uniform update                        0.914        0.792        1.500
+  shadow command-pool reset                  55.993       51.938       73.500
+  shadow primary command recording         3954.308     3888.562     4330.708
+  forward coordinator command-pool reset       59.402       56.812       71.625
+  forward participant pool reset (summed CPU)      244.731      244.625      303.208
+  forward secondary recording (summed CPU)      590.652      512.625     1107.208
+  forward secondary recording region        430.423      387.500      740.625
+  forward participant-region critical path      426.548      383.667      736.958
+  forward participant reset-region span      133.314      129.105      170.959
+  forward completion join wait               10.311        4.812       41.041
+  forward completion tail                     0.334        0.083        0.250
+  forward helper work remaining at join        9.986        4.708       40.875
+  forward participant 0 pool reset          118.512      122.355      154.500
+  forward participant 0 recording           298.022      257.417      563.083
+  forward participant 0 reset start offset        0.000        0.000        0.000
+  forward participant 1 pool reset          126.218      121.750      162.125
+  forward participant 1 recording           292.630      252.230      539.125
+  forward participant 1 reset start offset        6.627        7.312        8.583
+  forward primary command recording          28.765       25.980       42.750
+  forward secondary command execution      3749.458     3714.083     4118.000
+  queue submission                         2172.850     2082.917     2840.792
+  frame-fence wait                            0.370        0.334        0.708
+  image-acquisition wait                    104.135       54.479      185.250
+  presentation-fence wait                     0.366        0.375        0.625
+  presentation call                          31.243       28.813       44.000
+
+  Snapshot share of measured active work: 2.88%
+  Queue-submission share of measured active work: 20.19%
+  Shadow-pass share of measured active work: 37.26%
+  Fence, acquisition, and presentation durations are reported separately.
+  Forward secondary-execution share of measured active work: 34.84%
+  Forward secondary-recording region share of measured active work: 4.00%
+  Current serial share outside that region: 96.00%
+  Summed participant durations overlap in time and are reported as diagnostics only.
+  Compare the reset-region span with the participant reset durations to judge overlap.
+  The recording region includes dispatch and join, so it prices the threading overhead.
+  Completion acquired by polling: 95.31% of frames
+  Completion required a blocking wait: 4.69% of frames
+  Completion observed at the deadline boundary: 0.00% of frames
+  Forward draw bindings are cached independently inside each command buffer.
+Presented 80 frames.

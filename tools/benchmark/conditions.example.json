@@ -1,0 +1,8 @@
+{
+  "ac_power": true,
+  "cpu_governor": "performance",
+  "background_load": "REPLACE: describe competing work and whether it is stable",
+  "cooldown": "REPLACE: describe the idle interval since the preceding session or load",
+  "presentation_route": "not established",
+  "implicit_layers": "not established; available manifests will be recorded, not assumed active"
+}

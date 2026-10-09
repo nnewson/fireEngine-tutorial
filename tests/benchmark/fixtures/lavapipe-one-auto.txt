@@ -1,0 +1,58 @@
+Selected Vulkan 1.4 device: llvmpipe (LLVM 20.1.2, 256 bits)
+Driver: llvmpipe (Mesa 25.2.8-0ubuntu0.24.04.2 (LLVM 20.1.2))
+Graphics queue family: 0
+Present queue family: 0
+Logical device, queues, VMA allocator, and 2 frame slots created.
+Swapchain created: 4 images at 800x600 (B8G8R8A8Srgb, Mailbox), 4 presentation semaphores.
+Forward depth format: D32Sfloat.
+Shadow maps: 2 at 1024x1024, format D32Sfloat, 2 created.
+Synthetic benchmark content prepared for drawing.
+Shadow map creations after run: 2.
+
+Phase-level CPU benchmark
+  Build configuration: Release
+  Device: llvmpipe (LLVM 20.1.2, 256 bits)
+  Driver: llvmpipe (Mesa 25.2.8-0ubuntu0.24.04.2 (LLVM 20.1.2))
+  Forward recording path: secondary command buffer
+  Forward secondary recording participants: automatic at or above 5000 draws per participant, 1 effective
+  Ownership: cycled frame slots with per-slot recording contexts
+  Frames in flight: 2
+  Presentation: 800x600, B8G8R8A8Srgb, Mailbox
+  Workload: instances=1, nodes=2, draws=1
+  Recorded packets per frame: shadow=1, forward=1
+  Workload includes both passes; earlier one-pass baselines are historical.
+  Frames: 16 warm-up, 64 measured, 0 discarded attempts
+  Fixed animation step: 0.016667 seconds
+
+  Phase                                     mean us    median us       p95 us
+  transform update                            0.583        0.494        1.137
+  draw-list build                             0.150        0.123        0.290
+  frame recording-input build                 2.289        1.895        5.049
+  frame-uniform update                        1.128        0.991        2.352
+  shadow command-pool reset                   5.247        4.780        9.211
+  shadow primary command recording            3.306        2.792        5.815
+  forward coordinator command-pool reset        2.198        1.909        4.302
+  forward participant command-pool reset        2.290        2.091        3.275
+  forward secondary command recording         1.629        1.543        2.203
+  forward secondary recording region          4.145        3.860        5.728
+  forward primary command recording           1.497        1.397        2.295
+  forward secondary command execution         0.342        0.301        0.623
+  queue submission                            2.505        2.212        3.735
+  frame-fence wait                            0.935        0.821        1.547
+  image-acquisition wait                      2.255        1.800        5.279
+  presentation-fence wait                     1.009        0.863        1.725
+  presentation call                        1776.957     1594.751     2548.938
+
+  Snapshot share of measured active work: 12.92%
+  Queue-submission share of measured active work: 10.71%
+  Shadow-pass share of measured active work: 36.57%
+  Fence, acquisition, and presentation durations are reported separately.
+  Forward secondary-execution share of measured active work: 1.46%
+  Forward secondary-recording region share of measured active work: 17.72%
+  Current serial share outside that region: 82.28%
+  Forward participant-pool-reset share of measured active work: 9.79%
+  Split phases attribute ownership; they do not measure placement benefit.
+  Registered p subtracts the one-draw fixed reset estimate from forward work.
+  For two forward participants: serial + fixed reset + variable work / 2.
+  Forward draw bindings are cached independently inside each command buffer.
+Presented 80 frames.
