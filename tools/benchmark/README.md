@@ -254,6 +254,45 @@ precision. Replay checks log/telemetry/build-provenance hashes, exact arm order,
 commands, participant/workload/sample counts and consistent driver/presentation
 metadata. It recomputes the replacement decision; cached analysis is not trusted.
 
+### Hosted CI observations
+
+Linux CI uses the same runner with `--role hosted-lavapipe` after the mandatory
+Debug validation gate and a separate Release build. Its benchmark-tooling tests
+are also mandatory. One Xvfb invocation encloses both automatic qualification
+arms, the nine initial measurements and any registered in-session replacements.
+A new workflow job is a new session, never an extra replacement for an earlier
+unresolved result. Hosted measurements cannot replace either laptop policy cell.
+
+`conditions.hosted.json` records the hosted environment honestly: power and
+governor are not established, host contention is uncontrolled, and there is no
+deliberate cooldown after building. Telemetry still records available readings
+and rejects observed condition changes. No governor, thread limit or implicit
+layer policy is changed. Debug's private validation settings stay confined to
+the validation runner's children; the Release runner rejects inherited overrides.
+
+The acquisition step allows failure because observations are not correctness
+gates. Its launcher output and raw session directories are retained under
+`build/ci-benchmark` and uploaded as **linux-benchmark-evidence**. The subsequent
+summary replays raw evidence instead of trusting cached reports, and uses the
+step's [outcome before `continue-on-error`](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#steps-context),
+not its potentially successful conclusion. Only a successful acquisition plus
+one complete, valid hosted session produces a **COMPLETE** summary. Regressions
+and unresolved comparisons are valid results, not reasons to fail or retry CI.
+
+Missing, corrupt, multiple or unsealed sessions, or an unsuccessful acquisition
+step, produce **INCOMPLETE** and a workflow warning. A sealed failed session's
+verified partial triplets remain visible as non-authoritative context. Summary
+generation returns success when it successfully reports either status; that
+exit code is not an acquisition verdict. The artifact includes `summary.md`,
+`acquisition.log`, and every available raw/derived file, including empty stderr.
+
+Each child retains its 20-minute timeout. The outer step permits 345 minutes
+for up to 17 children plus setup, without changing sample counts or retry rules.
+GitHub's overall job limit also includes setup/build/test time and can terminate
+earlier. Summary and upload steps use `always()` to run after ordinary failure;
+loss of the runner or hard job termination can prevent them. An absent artifact
+or a `running` ledger never establishes completion and must not be resumed.
+
 ### Accounting and limits
 
 `A_phase` is the existing eleven-component sum: snapshot (three rows), shared

@@ -286,6 +286,9 @@ jobs:
       - name: Test validation-gate failure paths (device-free)
         run: python3 -m unittest discover -s tests/ci -v
 
+      - name: Test benchmark tooling failure paths (device-free)
+        run: python3 -m unittest discover -s tests/benchmark -v
+
       - name: Test with required validation and missing-layer control
         timeout-minutes: 35
         run: >-
@@ -317,76 +320,41 @@ jobs:
       - name: Build Release benchmark
         run: cmake --build build-benchmark --target fireEngineTutorial
 
-      - name: Record Lavapipe one-draw forward reset estimate
+      # One Xvfb/session owns qualification, all nine initial arms and any
+      # registered replacement triplets. A new CI job is not a timing retry.
+      - name: Record hosted Lavapipe benchmark matrix (observational)
+        id: hosted_benchmark
         continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 1 --forward-recording-participants 1
+        # Retain the runner's 20-minute per-child bound: at most 17 children
+        # including qualification and both replacements, plus setup margin.
+        # The job's overall timeout can still leave an incomplete session.
+        timeout-minutes: 345
+        shell: bash
+        run: |
+          mkdir -p build/ci-benchmark
+          xvfb-run --auto-servernum python3 -u tools/benchmark/run_matrix.py \
+            --role hosted-lavapipe --icd "${VK_DRIVER_FILES}" \
+            --build-dir build-benchmark \
+            --conditions tools/benchmark/conditions.hosted.json \
+            --output-root build/ci-benchmark \
+            2>&1 | tee build/ci-benchmark/acquisition.log
 
-      # Run one forward participant, two participants, then one participant
-      # again at each workload from
-      # this single binary. The outer arms force one participant so the
-      # comparison survives any change to the automatic split threshold, which
-      # would otherwise silently make the 10,000-draw controls two-participant. T1
-      # and the phase inputs come from the mean of the two outer arms, T2 from
-      # the centre arm, and the registered drift rule classifies the difference
-      # before the materialization gate.
-      - name: Record Lavapipe 1,000-draw one-participant control A
-        continue-on-error: true
-        timeout-minutes: 20
+      - name: Summarize hosted benchmark completeness
+        if: always()
+        env:
+          # outcome is before continue-on-error; conclusion can hide failure.
+          BENCHMARK_OUTCOME: ${{ steps.hosted_benchmark.outcome }}
         run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 1000 --forward-recording-participants 1
+          python3 tools/benchmark/summarize_ci.py
+          --output-root build/ci-benchmark --outcome "${BENCHMARK_OUTCOME}"
 
-      - name: Record Lavapipe 1,000-draw two-participant candidate
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 1000 --forward-recording-participants 2
-
-      - name: Record Lavapipe 1,000-draw one-participant control B
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 1000 --forward-recording-participants 1
-
-      - name: Record Lavapipe 10,000-draw one-participant control A
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 10000 --forward-recording-participants 1
-
-      - name: Record Lavapipe 10,000-draw two-participant candidate
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 10000 --forward-recording-participants 2
-
-      - name: Record Lavapipe 10,000-draw one-participant control B
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 10000 --forward-recording-participants 1
-
-      - name: Record Lavapipe 1,000-draw forward direct-primary control
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 1000 --forward-direct-primary
-
-      - name: Record Lavapipe 10,000-draw forward direct-primary control
-        continue-on-error: true
-        timeout-minutes: 20
-        run: >-
-          xvfb-run --auto-servernum ./build-benchmark/fireEngineTutorial
-          --benchmark 10000 --forward-direct-primary
+      - name: Upload hosted benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-benchmark-evidence
+          path: build/ci-benchmark
+          if-no-files-found: warn
 
   # KosmicKrisp requires Apple Silicon, macOS 26, and an SDK installation that
   # includes the preview driver. Hosted CI therefore runs the device-free suite

@@ -165,6 +165,13 @@ thresholds. The one-instance CTest scenario checks only that scene generation,
 measurement, aggregation, reporting, and Vulkan validation complete
 successfully.
 
+Linux CI runs the
+[reviewed benchmark matrix](https://github.com/nnewson/fireEngine-tutorial/blob/main/tools/benchmark/README.md) in a
+separate Release build and uploads `linux-benchmark-evidence`, including raw
+logs, provenance and replayed results. Its job summary distinguishes complete
+observations from incomplete acquisition. These hosted timings are not policy
+decision measurements or performance thresholds for the correctness gates.
+
 ## Documentation
 
 Public API comments and the explanatory notes alongside the Vulkan implementation
