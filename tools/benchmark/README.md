@@ -286,12 +286,15 @@ generation returns success when it successfully reports either status; that
 exit code is not an acquisition verdict. The artifact includes `summary.md`,
 `acquisition.log`, and every available raw/derived file, including empty stderr.
 
-Each child retains its 20-minute timeout. The outer step permits 345 minutes
-for up to 17 children plus setup, without changing sample counts or retry rules.
-GitHub's overall job limit also includes setup/build/test time and can terminate
-earlier. Summary and upload steps use `always()` to run after ordinary failure;
-loss of the runner or hard job termination can prevent them. An absent artifact
-or a `running` ledger never establishes completion and must not be resumed.
+Each child retains its 20-minute timeout. The outer CI step has a 10-minute
+deadline, roughly 27 times the first hosted session's 22-second duration, with
+headroom for both replacement triplets. This outer deadline can cancel a child
+before its own timeout; sample counts and retry rules are unchanged. Bounding
+acquisition separately leaves time for summary and upload within the overall
+job budget, which also includes setup/build/tests. Those steps use `always()`
+to run after failure; loss of the runner or hard job termination can still
+prevent them. An absent artifact or a `running` ledger never establishes
+completion and must not be resumed.
 
 ### Accounting and limits
 

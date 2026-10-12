@@ -325,10 +325,10 @@ jobs:
       - name: Record hosted Lavapipe benchmark matrix (observational)
         id: hosted_benchmark
         continue-on-error: true
-        # Retain the runner's 20-minute per-child bound: at most 17 children
-        # including qualification and both replacements, plus setup margin.
-        # The job's overall timeout can still leave an incomplete session.
-        timeout-minutes: 345
+        # The first hosted session took 22 seconds. Leave generous headroom
+        # for replacements, but stop before the job budget crowds out evidence
+        # upload. This outer deadline can preempt the 20-minute child timeout.
+        timeout-minutes: 10
         shell: bash
         run: |
           mkdir -p build/ci-benchmark
