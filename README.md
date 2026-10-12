@@ -5,6 +5,9 @@ A tutorial for building a 3D engine step-by-step.
 Based on [FireEngine](https://github.com/nnewson/fireEngine) and documented
 under the development blog at [nnewson.dev](https://nnewson.dev)
 
+Version 0.10.0 adds an explicit shadow pass and retains the measured forward
+recording controls.
+
 ## Build and run
 
 vcpkg is used to manage dependencies. Install it from
@@ -40,8 +43,10 @@ uses nearest comparison filtering, so hard edges and finite resolution are
 visible. Receiver regions outside the map remain lit. Brief grazing-angle
 self-shadow breakup is a documented limitation retained for 0.10.
 
-Use `--smoke shadow` for the bounded cube-and-plane scene. The `--frames` mode
-and other smoke scenarios retain the original AnimatedCube-only fixture.
+Use `--smoke shadow` for the bounded cube-and-plane scene. The reuse and
+changed-preparation receiver scenarios below use the same composition. The
+`--frames` mode and the four original smoke scenarios retain the AnimatedCube-only
+fixture; the shadow pass still runs in all of them.
 Accepted reference images, reproduction commands, and visual limits are in
 [the image notes](https://github.com/nnewson/fireEngine-tutorial/blob/main/docs/images/README.md).
 
@@ -128,10 +133,14 @@ renderer:
 ./build/fireEngineTutorial --benchmark 10000 --forward-direct-primary
 ```
 
-Recording is split between the coordinator and one helper thread only when the
-frame is large enough to have shown a benefit on both decision-bearing
-implementations in the synthetic benchmark, currently 5,000 draws per
-participant. `--forward-recording-participants 2` overrides that policy so a
+Forward recording is split between the coordinator and one helper thread at
+5,000 draws per participant (10,000 total for two participants). This retains
+the existing policy, not a newly measured crossover: the two-pass rebaseline
+resolves a total-active-work improvement on laptop Lavapipe at 10,000 draws,
+but leaves NVIDIA's corresponding result unresolved by the registered drift
+rule. A forward-only improvement does not resolve that primary question.
+The serial shadow pass does not use this threshold.
+`--forward-recording-participants 2` overrides that policy so a
 forced split can be measured or validated below the threshold; it is a
 diagnostic control rather than a production setting. The same option applies to
 `--smoke` scenarios so the mixed-resource fixture can be validated in split
@@ -151,8 +160,8 @@ presentation waits. Every synthetic instance casts, so each measured frame
 records the reported draw count in both passes. These two-pass active-work
 figures have a larger workload and denominator than the historical one-pass
 baselines. The direct-primary control changes only forward recording.
-The per-slot report attributes participant-owned reset and recording work; it
-does not claim a placement speedup before participants exist. Two Vulkan
+The per-participant report attributes reset and recording work. Its overlapping
+durations are detail, not extra terms to add to the active-work total. Two Vulkan
 submission slots are cycled independently of the driver-selected swapchain
 image. Frames affected by out-of-date or suboptimal
 presentation are excluded from the measured sample set.
@@ -201,12 +210,16 @@ GitHub Actions as the repository's Pages source and set the repository Actions
 variable `PUBLISH_DOXYGEN` to `true`. Generated HTML remains under `build/` and
 is not checked into source control.
 
-The project builds a reusable engine library, a small event-loop executable, and
-a Catch2 test executable. `GltfLoader` produces format-neutral `SceneContent`:
+## Renderer structure
+
+The project builds a reusable engine library, shared application-support helpers,
+a small event-loop executable, and a Catch2 test executable. `GltfLoader`
+produces format-neutral `SceneContent`:
 `RenderAssets` owns meshes, decoded images, textures, materials, and render-object
 relationships; `Scene` owns the hierarchy that instances them; and `Animation`
-stores reusable rotation channels. The committed sample and its CC0 attribution
-live under `assets/AnimatedCube`, so builds and tests require no network access.
+stores reusable rotation channels. Imported LINEAR rotations use shortest-arc
+SLERP. The committed sample and its CC0 attribution live under `assets/AnimatedCube`;
+once dependencies are installed, builds and tests need no asset downloads.
 
 `Renderer::prepare()` validates those relationships through a cached
 `RenderPreparation` compiler and uploads only the resources selected by the
@@ -231,38 +244,61 @@ frame-uniform, sampled-image, and depth-image allocations. A Vulkan driver must
 still be installed on the machine and expose Vulkan 1.4, dynamic rendering,
 synchronization 2, push descriptors, maintenance5, swapchain presentation, and
 the KHR or equivalent EXT swapchain-maintenance path used for presentation
-fences. The forward pipeline reads the compiled `forward.spv` directly through
-maintenance5, so no `VkShaderModule` is created.
+fences. The pipelines read compiled `shadow.spv` and `forward.spv` directly
+through maintenance5, so no `VkShaderModule` is created.
 
-Each event-loop iteration waits for the previous frame, acquires a swapchain
-image, recycles the command pool, and records dynamic-rendering draws from the
-scene. The command buffer uses synchronization-2 barriers to discard prior
-attachment contents, clear color and depth, bind compiled mesh and texture
-resources, push the node transform and material factor, and transition the
-completed image for presentation. The Slang forward shader applies the current
-view-projection and samples the glTF base-color texture. `submit2` orders
-rendering after acquisition, then the presentation queue waits for the semaphore
-belonging to that acquired image.
+One frame-input compiler walks the frozen draw list once. Each resource lookup
+emits a forward packet and, only for a caster, a geometry-only shadow packet.
+The two restricted, borrowed views expose no resource owners to their recorders.
+Both passes use camera/light matrices from one frame-slot uniform buffer;
+each actual forward draw command buffer pushes its own shadow descriptor.
 
-Synchronization objects are split by what indexes them, which is the boundary
-that makes both swapchain recreation and multiple frames in flight tractable
-later. `FrameSlot` owns what belongs to a submission slot: uniform storage, the
-image-available semaphore that orders acquisition before rendering, the fence
-that tells the CPU when submitted work has finished, and pending-work state.
-Independent recording contexts own the coordinator's primary pool and the
-worker's secondary pool. `Swapchain` owns what
-belongs to an image: one render-finished semaphore each, so presentation cannot
-still be waiting on a semaphore when a later frame signals it again. The frame
-fence cannot cover that case, because presentation runs after the submission the
-fence tracks. A presentation fence supplied through swapchain maintenance proves
-when each presented image and semaphore can be retired.
+The ownership boundary is explicit rather than a render graph:
 
-The swapchain, depth image, format-compatible pipeline, render-finished
-semaphores, and presentation fences form one replaceable `PresentationState`.
-Framebuffer callbacks request replacement after resize; zero-sized minimized
-windows wait for an event instead of spinning. Recreation passes the retired
-swapchain to Vulkan, updates the projection for the new extent, and leaves
-compiled meshes and textures intact.
+```text
+Renderer
+  compiled scene resources; shadow pipeline and comparison sampler
+  frame-input compiler; shadow recorder; forward recorder and its helper
+  FrameResources[2]
+    FrameSlot: acquisition semaphore, submission fence, pending-work state
+    shared uniform buffer
+    shadow: depth map and primary recording context
+    forward: primary and participant recording contexts
+  replaceable PresentationState
+    swapchain images/views and per-image render-finished semaphores
+    per-image presentation fences
+    per-slot forward depth attachments and compatible forward pipeline
+```
+
+After freezing input, the coordinator waits for the selected slot's fence and
+updates that slot's uniform buffer. It acquires a swapchain image, retires its
+previous presentation fence, then records the shadow primary followed by the
+forward primary. The forward recorder may dispatch its helper and join it
+before executing the completed secondaries. The CPU records one frame at a
+time; the two submission slots cycle independently of acquired image indices.
+
+The shadow entry barrier discards contents only after the slot fence has
+retired **all** prior uses of that map. Its exit barrier publishes early/late
+fragment-test depth writes to fragment-shader sampled reads. One `submit2`
+contains the shadow and forward primaries in that order, with one fence retiring
+both; no inter-pass semaphore is needed. The acquisition semaphore orders
+swapchain color-attachment work. Ordinary presentation waits on the acquired
+image's render-finished semaphore. A diagnostic capture instead retires the
+complete submission on the host before presenting.
+
+Presentation fences supplied through swapchain maintenance cover the image and
+semaphore lifetime that a rendering-submission fence cannot cover. Recreation
+retires submitted work, offers the old swapchain to Vulkan, and replaces only
+`PresentationState`. It preserves prepared scene resources, both shadow maps,
+the shadow pipeline, and the comparison sampler. Forward and shadow depth
+formats are selected and reported independently.
+
+Framebuffer callbacks request replacement after resize. A zero framebuffer
+extent waits for events rather than rebuilding repeatedly. Minimization does
+not necessarily produce zero extent: reviewed macOS/KosmicKrisp runs continued
+rendering at about 120 presentations/s while hidden, with no recreation churn.
+They recovered and closed cleanly, but hidden-window GPU/CPU work is a retained
+limitation, not an idle-power claim.
 
 On macOS, this tutorial targets the KosmicKrisp technical preview from the
 [LunarG Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/1.4.357.0/mac/getting_started.html).

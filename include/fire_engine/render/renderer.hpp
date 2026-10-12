@@ -177,8 +177,9 @@ enum class RenderResult : std::uint8_t
  * The public surface intentionally contains no Vulkan types. Stable mesh,
  * image, texture, and material descriptions are uploaded explicitly by
  * prepare(), while drawFrame() consumes a frozen scene draw-list view and
- * records a fresh command buffer. Presentation resources can be replaced
- * independently, preserving compiled scene resources across window changes.
+ * records shadow and forward command buffers. Presentation resources can be
+ * replaced independently, preserving compiled scene resources and slot-local
+ * shadow maps across window changes.
  * Calls on one Renderer are serialized by the application; public member
  * functions must not be invoked concurrently.
  */
@@ -224,7 +225,7 @@ public:
      * @param timings Optional output populated with host timings for this attempt.
      * @return Whether an image was presented and whether the swapchain remains suitable.
      * @throws std::logic_error if prepare() has not run or a draw reference was not prepared.
-     * @throws std::invalid_argument if the forward camera cannot form a valid perspective view.
+     * @throws std::invalid_argument if the camera or directional-shadow view is invalid.
      * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */
     [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
@@ -240,7 +241,7 @@ public:
      *
      * A minimized window can become zero-sized between an event-loop check and
      * this call, so that transient state is reported rather than treated as an
-     * error. Prepared meshes, textures, and render objects remain unchanged.
+     * error. Prepared scene resources and frame-slot shadow maps remain unchanged.
      */
     [[nodiscard]] bool recreatePresentation(FramebufferExtent framebufferExtent);
 
@@ -255,7 +256,7 @@ public:
 
     /**
      * @brief Returns a Vulkan-free description of the initialized renderer.
-     * @return Device, queues, swapchain, and presentation choices made at construction.
+     * @return Current device, presentation, shadow-resource, and recording-policy details.
      */
     [[nodiscard]] RendererInfo info() const;
 
