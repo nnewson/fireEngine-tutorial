@@ -19,6 +19,7 @@ import benchmark_provenance as provenance
 import benchmark_report as report
 import preflight_lavapipe as preflight
 import run_matrix as runner
+import summarize_ci as ci_summary
 from matrix_fixture import report as fixture
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -469,6 +470,12 @@ class ConditionTests(unittest.TestCase):
         self.assertIn("observed AC offline contradicts declared AC power", issues)
 
 
+def fixture_telemetry(path):
+    # Finite-child tests check acquisition logic, not the CI host's power policy.
+    # Host sampling and condition changes have separate controls.
+    return provenance.Telemetry(path, sample=condition_sample)
+
+
 class AcquisitionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -530,7 +537,7 @@ class AcquisitionTests(unittest.TestCase):
         result["command"] = command
         return result
 
-    def acquire(self, fingerprints=None, telemetry=provenance.Telemetry):
+    def acquire(self, fingerprints=None, telemetry=fixture_telemetry):
         with contextlib.redirect_stdout(io.StringIO()):
             return runner.acquire(
                 self.output,
@@ -544,6 +551,84 @@ class AcquisitionTests(unittest.TestCase):
 
     def rewrite_ledger(self, ledger):
         (self.output / "session.json").write_text(matrix.json_text(ledger))
+
+    def hosted_output(self):
+        root = self.output
+        self.output = root / "matrix-hosted-lavapipe-fixture"
+        self.output.mkdir()
+        (root / "build-provenance.json").replace(self.output / "build-provenance.json")
+        self.session["role"] = "hosted-lavapipe"
+        return root
+
+    def test_hosted_summary_admits_regression_and_unresolved_without_a_timing_gate(
+        self,
+    ):
+        root = self.hosted_output()
+        self.configurations.update(
+            {
+                "1000-X": {"overrides": {report.REGION: 50}},
+                "10000-X": {"overrides": {report.REGION: 30}},
+                "retry-10000-X": {"overrides": {report.REGION: 30}},
+            }
+        )
+        self.acquire()
+        text, complete = ci_summary.summarize(root, "success")
+        self.assertTrue(complete)
+        self.assertIn("**COMPLETE — raw evidence replay verified.**", text)
+        self.assertIn("observational only", text)
+        self.assertIn("regression", text)
+        self.assertIn("Primary remains unresolved", text)
+        self.assertIn("Selected: retry-10000-A", text)
+
+    def test_hosted_summary_does_not_hide_a_failed_step_behind_complete_files(self):
+        root = self.hosted_output()
+        self.acquire()
+        for outcome in ("failure", "cancelled", "skipped", ""):
+            with self.subTest(outcome=outcome):
+                text, complete = ci_summary.summarize(root, outcome)
+                self.assertFalse(complete)
+                self.assertIn("**INCOMPLETE", text)
+                self.assertNotIn("**COMPLETE", text)
+                self.assertNotIn("Forward model:", text)
+
+    def test_hosted_summary_checks_raw_evidence_not_cached_results(self):
+        root = self.hosted_output()
+        self.acquire()
+        # Bad cached reports cannot poison a valid replay; good cached reports
+        # cannot admit damaged raw evidence.
+        (self.output / "results.json").write_text("not JSON")
+        (self.output / "results.md").write_text("invented cached verdict")
+        text, complete = ci_summary.summarize(root, "success")
+        self.assertTrue(complete)
+        self.assertNotIn("invented cached verdict", text)
+        path = self.output / "1000-X.stdout.log"
+        path.write_text(path.read_text() + "changed after seal\n")
+        text, complete = ci_summary.summarize(root, "success")
+        self.assertFalse(complete)
+        self.assertIn("changed stdout", text)
+
+    def test_hosted_summary_retains_verified_failed_triplets_as_context(self):
+        root = self.hosted_output()
+        self.fail_after_regression()
+        text, complete = ci_summary.summarize(root, "failure")
+        self.assertFalse(complete)
+        self.assertIn("**INCOMPLETE", text)
+        self.assertIn("FAILED SESSION — NON-AUTHORITATIVE", text)
+        self.assertIn("regression", text)
+        self.assertNotIn("Forward model:", text)
+
+    def test_hosted_summary_rejects_wrong_role_and_unsealed_ledger(self):
+        root = self.hosted_output()
+        self.acquire()
+        original = copy.deepcopy(self.session)
+        for field, value in (("role", "laptop-lavapipe"), ("status", "running")):
+            with self.subTest(field=field):
+                changed = {**original, field: value}
+                self.rewrite_ledger(changed)
+                text, complete = ci_summary.summarize(root, "success")
+                self.assertFalse(complete)
+                self.assertIn("**INCOMPLETE", text)
+                self.assertNotIn("Forward model:", text)
 
     def test_finite_fake_children_end_to_end_and_read_only_replay(self):
         result = self.acquire()

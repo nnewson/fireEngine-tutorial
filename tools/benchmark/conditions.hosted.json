@@ -1,0 +1,8 @@
+{
+  "ac_power": null,
+  "cpu_governor": "not established",
+  "background_load": "GitHub-hosted ubuntu-24.04 VM; host contention and background services are not controlled.",
+  "cooldown": "No deliberate cooldown; follows Debug correctness checks and the Release build.",
+  "presentation_route": "Xvfb virtual X11 display; no physical display route established.",
+  "implicit_layers": "Inherited default discovery; available manifests are recorded, not assumed active."
+}
