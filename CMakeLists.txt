@@ -336,6 +336,7 @@ add_executable(fireEngineTutorialTests
     tests/render/test_directional_shadow_view.cpp
     tests/render/test_draw_binding_state.cpp
     tests/render/test_forward_secondary_recording_worker.cpp
+    tests/render/test_frame_barriers.cpp
     tests/render/test_frame_recording_input.cpp
     tests/render/test_frame_uniforms.cpp
     tests/render/test_shadow_draw_constants.cpp
