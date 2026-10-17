@@ -3,8 +3,8 @@
 #include <fire_engine/render/detail/cpu_phase_timer.hpp>
 #include <fire_engine/render/detail/draw_binding_state.hpp>
 #include <fire_engine/render/detail/draw_constants.hpp>
+#include <fire_engine/render/detail/frame_barriers.hpp>
 #include <fire_engine/render/detail/frame_uniforms.hpp>
-#include <fire_engine/render/detail/image_subresource_ranges.hpp>
 
 #include <array>
 #include <cassert>
@@ -343,40 +343,15 @@ void mergeChunkTimings(
 void transitionToAttachments(const vk::raii::CommandBuffer& commandBuffer,
                              const ForwardPassTarget& target)
 {
-    // The color image is cleared, so previous presentation contents are discarded.
-    const vk::ImageMemoryBarrier2 colorBarrier{
-        .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .srcAccessMask = vk::AccessFlagBits2::eNone,
-        .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eAttachmentOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = target.colorImage,
-        .subresourceRange = kColorSubresourceRange,
-    };
+    // Chains from the acquire wait; see forwardColorEntryBarrier().
+    const vk::ImageMemoryBarrier2 colorBarrier = forwardColorEntryBarrier(target.colorImage);
     commandBuffer.pipelineBarrier2(vk::DependencyInfo{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &colorBarrier,
     });
 
-    // The depth value is cleared before every use. Slot retirement makes it safe
-    // to discard that slot's previous writes rather than preserving contents.
-    const vk::ImageMemoryBarrier2 depthBarrier{
-        .srcStageMask = vk::PipelineStageFlagBits2::eNone,
-        .srcAccessMask = vk::AccessFlagBits2::eNone,
-        .dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                        vk::PipelineStageFlagBits2::eLateFragmentTests,
-        .dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead |
-                         vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = target.depthImage,
-        .subresourceRange = kDepthSubresourceRange,
-    };
+    // The empty source scope relies on slot retirement; see forwardDepthEntryBarrier().
+    const vk::ImageMemoryBarrier2 depthBarrier = forwardDepthEntryBarrier(target.depthImage);
     commandBuffer.pipelineBarrier2(vk::DependencyInfo{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &depthBarrier,

@@ -14,10 +14,10 @@
 #include <fire_engine/render/detail/depth_buffer.hpp>
 #include <fire_engine/render/detail/device.hpp>
 #include <fire_engine/render/detail/forward_recorder.hpp>
+#include <fire_engine/render/detail/frame_barriers.hpp>
 #include <fire_engine/render/detail/frame_recording_input.hpp>
 #include <fire_engine/render/detail/frame_resources.hpp>
 #include <fire_engine/render/detail/frame_slot.hpp>
-#include <fire_engine/render/detail/image_subresource_ranges.hpp>
 #include <fire_engine/render/detail/presentation_state.hpp>
 #include <fire_engine/render/detail/readback_buffer.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
@@ -561,7 +561,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
 
         const vk::SemaphoreSubmitInfo waitInfo{
             .semaphore = *frameSlot.imageAvailable(),
-            .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            .stageMask = detail::kAcquireWaitStage,
         };
         // Publication at the end of the shadow primary precedes the forward
         // primary in the same submission. One slot fence retires both buffers.
@@ -571,7 +571,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         };
         const vk::SemaphoreSubmitInfo signalInfo{
             .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
-            .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            .stageMask = detail::kRenderFinishedSignalStage,
         };
         const vk::SubmitInfo2 submitInfo{
             .waitSemaphoreInfoCount = 1,
@@ -750,18 +750,9 @@ void Renderer::Impl::endPrimaryRecording(const vk::raii::CommandBuffer& commandB
 void Renderer::Impl::transitionToPresent(const vk::raii::CommandBuffer& commandBuffer,
                                          std::uint32_t imageIndex) const
 {
-    const vk::ImageMemoryBarrier2 toPresent{
-        .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .dstAccessMask = vk::AccessFlagBits2::eNone,
-        .oldLayout = vk::ImageLayout::eAttachmentOptimal,
-        .newLayout = vk::ImageLayout::ePresentSrcKHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = presentation_->swapchain().image(imageIndex),
-        .subresourceRange = detail::kColorSubresourceRange,
-    };
+    // Chains into the render-finished signal; see detail::presentationBarrier().
+    const vk::ImageMemoryBarrier2 toPresent =
+        detail::presentationBarrier(presentation_->swapchain().image(imageIndex));
     const vk::DependencyInfo endDependency{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &toPresent,
@@ -776,18 +767,9 @@ void Renderer::Impl::recordCapture(const vk::raii::CommandBuffer& commandBuffer,
     assert(attempt.extent == presentation_->swapchain().extent());
     assert(attempt.imageFormat == presentation_->swapchain().imageFormat());
 
-    const vk::ImageMemoryBarrier2 toTransfer{
-        .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-        .oldLayout = vk::ImageLayout::eAttachmentOptimal,
-        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = presentation_->swapchain().image(imageIndex),
-        .subresourceRange = detail::kColorSubresourceRange,
-    };
+    // Its new layout must match copyInfo.srcImageLayout below.
+    const vk::ImageMemoryBarrier2 toTransfer =
+        detail::captureCopySourceBarrier(presentation_->swapchain().image(imageIndex));
     const vk::DependencyInfo transferDependency{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &toTransfer,
@@ -818,18 +800,10 @@ void Renderer::Impl::recordCapture(const vk::raii::CommandBuffer& commandBuffer,
     };
     commandBuffer.copyImageToBuffer2(copyInfo);
 
-    const vk::ImageMemoryBarrier2 toPresent{
-        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferRead,
-        .dstStageMask = vk::PipelineStageFlagBits2::eNone,
-        .dstAccessMask = vk::AccessFlagBits2::eNone,
-        .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
-        .newLayout = vk::ImageLayout::ePresentSrcKHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = presentation_->swapchain().image(imageIndex),
-        .subresourceRange = detail::kColorSubresourceRange,
-    };
+    // The empty destination relies on capture's host wait; see
+    // detail::capturePresentationBarrier().
+    const vk::ImageMemoryBarrier2 toPresent =
+        detail::capturePresentationBarrier(presentation_->swapchain().image(imageIndex));
     const vk::DependencyInfo presentDependency{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &toPresent,
