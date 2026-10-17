@@ -1,8 +1,8 @@
 #include <fire_engine/render/detail/shadow_recorder.hpp>
 
 #include <fire_engine/render/detail/cpu_phase_timer.hpp>
+#include <fire_engine/render/detail/frame_barriers.hpp>
 #include <fire_engine/render/detail/frame_uniforms.hpp>
-#include <fire_engine/render/detail/image_subresource_ranges.hpp>
 #include <fire_engine/render/detail/shadow_draw_constants.hpp>
 
 #include <cassert>
@@ -33,22 +33,8 @@ static_assert(std::is_trivially_copyable_v<ShadowPassTarget>);
 void transitionToDepthAttachment(const vk::raii::CommandBuffer& commandBuffer,
                                  const ShadowPassTarget& target)
 {
-    // Slot-fence retirement completed all prior use, including sampled reads.
-    // The source is empty because this transition discards those retired contents.
-    const vk::ImageMemoryBarrier2 barrier{
-        .srcStageMask = vk::PipelineStageFlagBits2::eNone,
-        .srcAccessMask = vk::AccessFlagBits2::eNone,
-        .dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                        vk::PipelineStageFlagBits2::eLateFragmentTests,
-        .dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead |
-                         vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = target.depthImage,
-        .subresourceRange = kDepthSubresourceRange,
-    };
+    // The empty source scope relies on slot retirement; see shadowMapEntryBarrier().
+    const vk::ImageMemoryBarrier2 barrier = shadowMapEntryBarrier(target.depthImage);
     commandBuffer.pipelineBarrier2(vk::DependencyInfo{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &barrier,
@@ -63,19 +49,7 @@ void transitionToDepthAttachment(const vk::raii::CommandBuffer& commandBuffer,
 void transitionToSampledDepth(const vk::raii::CommandBuffer& commandBuffer,
                               const ShadowPassTarget& target)
 {
-    const vk::ImageMemoryBarrier2 barrier{
-        .srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                        vk::PipelineStageFlagBits2::eLateFragmentTests,
-        .srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-        .oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-        .newLayout = vk::ImageLayout::eDepthReadOnlyOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = target.depthImage,
-        .subresourceRange = kDepthSubresourceRange,
-    };
+    const vk::ImageMemoryBarrier2 barrier = shadowMapPublicationBarrier(target.depthImage);
     commandBuffer.pipelineBarrier2(vk::DependencyInfo{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &barrier,
