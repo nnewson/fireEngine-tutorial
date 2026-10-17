@@ -12,7 +12,7 @@ template <typename Handle, typename NativeHandle>
 {
     if constexpr (std::is_pointer_v<NativeHandle>)
     {
-        return Handle{reinterpret_cast<NativeHandle>(value)};
+        return Handle{reinterpret_cast<NativeHandle>(value)}; // NOLINT(performance-no-int-to-ptr)
     }
     else
     {

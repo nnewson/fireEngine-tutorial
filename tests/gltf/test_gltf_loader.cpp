@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <cstddef>
 #include <filesystem>
 #include <string_view>
 #include <variant>
@@ -52,7 +53,7 @@ TEST_CASE("The minimal glTF loader imports AnimatedCube CPU descriptions")
     REQUIRE(loaded.assets.images().size() == 2);
     REQUIRE(loaded.assets.images().front().width == 512);
     REQUIRE(loaded.assets.images().front().height == 512);
-    REQUIRE(loaded.assets.images().front().pixels.size() == 512 * 512 * 4);
+    REQUIRE(loaded.assets.images().front().pixels.size() == std::size_t{512} * 512 * 4);
     REQUIRE(loaded.assets.textures().size() == 2);
     REQUIRE(loaded.assets.materials().size() == 1);
     REQUIRE(loaded.assets.materials().front().baseColorTexture ==

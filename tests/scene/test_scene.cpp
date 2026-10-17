@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <variant>
@@ -28,6 +29,18 @@ static_assert(!std::is_copy_constructible_v<SceneDrawListArena>);
 static_assert(!std::is_copy_assignable_v<SceneDrawListArena>);
 static_assert(!std::is_move_constructible_v<SceneDrawListArena>);
 static_assert(!std::is_move_assignable_v<SceneDrawListArena>);
+
+// clang-tidy cannot see that a failed REQUIRE() throws, so accesses go through
+// an explicit guard rather than relying on a preceding has_value() assertion.
+template <typename T>
+[[nodiscard]] T requireValue(const std::optional<T>& optional)
+{
+    if (!optional.has_value())
+    {
+        throw std::runtime_error{"Test expected an engaged optional"};
+    }
+    return optional.value();
+}
 } // namespace
 
 TEST_CASE("Scene resolves transforms and emits draw items depth first")
@@ -53,9 +66,9 @@ TEST_CASE("Scene resolves transforms and emits draw items depth first")
 
     scene.addRoot(std::move(root));
     REQUIRE(childReference.id().has_value());
-    const auto registeredChild = scene.findNode(*childReference.id());
+    const auto registeredChild = scene.findNode(requireValue(childReference.id()));
     REQUIRE(registeredChild.has_value());
-    REQUIRE(&registeredChild->get() == &childReference);
+    REQUIRE(&requireValue(registeredChild).get() == &childReference);
     scene.updateWorldTransforms();
 
     REQUIRE(childReference.worldTransform()[0, 3] == 1.0f);
@@ -86,10 +99,10 @@ TEST_CASE("Scene registers attached subtrees immediately and preserves stable ID
     const auto rootId = root.id();
 
     REQUIRE(rootId.has_value());
-    REQUIRE(rootId->valid());
-    const auto foundRoot = scene.findNode(*rootId);
+    REQUIRE(requireValue(rootId).valid());
+    const auto foundRoot = scene.findNode(requireValue(rootId));
     REQUIRE(foundRoot.has_value());
-    REQUIRE(&foundRoot->get() == &root);
+    REQUIRE(&requireValue(foundRoot).get() == &root);
 
     auto child = std::make_unique<SceneNode>("child");
     SceneNode& grandchild = child->addChild("grandchild");
@@ -97,23 +110,24 @@ TEST_CASE("Scene registers attached subtrees immediately and preserves stable ID
 
     const auto childId = childReference.id();
     REQUIRE(childId.has_value());
-    REQUIRE(childId->valid());
+    REQUIRE(requireValue(childId).valid());
     REQUIRE(childId != rootId);
-    const auto foundChild = scene.findNode(*childId);
+    const auto foundChild = scene.findNode(requireValue(childId));
     REQUIRE(foundChild.has_value());
-    REQUIRE(&foundChild->get() == &childReference);
+    REQUIRE(&requireValue(foundChild).get() == &childReference);
 
     const auto grandchildId = grandchild.id();
     REQUIRE(grandchildId.has_value());
-    REQUIRE(grandchildId->valid());
-    const auto foundGrandchild = scene.findNode(*grandchildId);
+    REQUIRE(requireValue(grandchildId).valid());
+    const auto foundGrandchild = scene.findNode(requireValue(grandchildId));
     REQUIRE(foundGrandchild.has_value());
-    REQUIRE(&foundGrandchild->get() == &grandchild);
+    REQUIRE(&requireValue(foundGrandchild).get() == &grandchild);
 
-    SceneNode& sibling = scene.addChild(*rootId, std::make_unique<SceneNode>("sibling"));
+    SceneNode& sibling =
+        scene.addChild(requireValue(rootId), std::make_unique<SceneNode>("sibling"));
     const auto siblingId = sibling.id();
     REQUIRE(siblingId.has_value());
-    REQUIRE(scene.findNode(*siblingId).has_value());
+    REQUIRE(scene.findNode(requireValue(siblingId)).has_value());
 
     scene.updateWorldTransforms();
     REQUIRE(root.id() == rootId);
@@ -130,8 +144,9 @@ TEST_CASE("Scene registers attached subtrees immediately and preserves stable ID
     REQUIRE_FALSE(scene.findNode(SceneNodeId{.value = 100}).has_value());
 
     const Scene& constScene = scene;
-    const auto childNameLength = constScene.findNode(*childId).transform(
-        [](fire_engine::SceneNodeConstRef node) { return node.get().name().size(); });
+    const auto constChild = constScene.findNode(requireValue(childId));
+    const auto childNameLength = constChild.transform([](fire_engine::SceneNodeConstRef node)
+                                                      { return node.get().name().size(); });
     REQUIRE(childNameLength == std::optional<std::size_t>{5});
 }
 
@@ -202,7 +217,7 @@ TEST_CASE("Scene rejects null nodes")
 
     REQUIRE_THROWS_AS(scene.addRoot(std::unique_ptr<SceneNode>{}), std::invalid_argument);
     REQUIRE_THROWS_AS(node.addChild(std::unique_ptr<SceneNode>{}), std::invalid_argument);
-    REQUIRE_THROWS_WITH(scene.addChild(*root.id(), std::unique_ptr<SceneNode>{}),
+    REQUIRE_THROWS_WITH(scene.addChild(requireValue(root.id()), std::unique_ptr<SceneNode>{}),
                         Catch::Matchers::ContainsSubstring("cannot be null"));
     REQUIRE_THROWS_WITH(scene.addChild(foreignRoot, std::unique_ptr<SceneNode>{}),
                         Catch::Matchers::ContainsSubstring("cannot be null"));

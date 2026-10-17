@@ -123,9 +123,12 @@ jobs:
         run: cmake --build --preset default
 
       - name: clang-tidy
-        # Catch2's generated macros need a test-specific configuration. Keep the
-        # production checks strict until that configuration is introduced.
-        run: find src -name '*.cpp' -print0 | xargs -0 clang-tidy-22 -p build
+        # Tests are scanned too: a first-party header can be included only by
+        # tests before any production consumer exists. -n1 gives each file its
+        # own invocation so -P4 can run them concurrently.
+        run: |
+          find src tests -name '*.cpp' -print0 |
+            xargs -0 -n1 -P4 clang-tidy-22 -p build
 
   documentation:
     name: documentation
