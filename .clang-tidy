@@ -33,7 +33,7 @@ WarningsAsErrors: '*'
 # clang-tidy matches this against the path it reports a diagnostic against, which is
 # absolute. An anchored '^include/...' pattern therefore never matches and silently
 # skips every first-party header, so the leading '.*/' is load-bearing.
-HeaderFilterRegex: '.*/(include/fire_engine|src)/.*'
+HeaderFilterRegex: '.*/(include/fire_engine|src|tests)/.*'
 FormatStyle: file
 CheckOptions:
   - key: readability-implicit-bool-conversion.AllowIntegerConditions
