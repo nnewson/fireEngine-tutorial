@@ -241,11 +241,11 @@ color values unrelated vector operations.
 The executable links the Vulkan loader supplied by vcpkg and uses GLFW to create
 its window surface. Vulkan Memory Allocator owns vertex, index, staging,
 frame-uniform, sampled-image, and depth-image allocations. A Vulkan driver must
-still be installed on the machine and expose Vulkan 1.4, dynamic rendering,
-synchronization 2, push descriptors, maintenance5, swapchain presentation, and
-the KHR or equivalent EXT swapchain-maintenance path used for presentation
-fences. The pipelines read compiled `shadow.spv` and `forward.spv` directly
-through maintenance5, so no `VkShaderModule` is created.
+still be installed on the machine and expose Vulkan 1.4, timeline semaphores,
+dynamic rendering, synchronization 2, push descriptors, maintenance5, swapchain
+presentation, and the KHR or equivalent EXT swapchain-maintenance path used for
+presentation fences. The pipelines read compiled `shadow.spv` and `forward.spv`
+directly through maintenance5, so no `VkShaderModule` is created.
 
 One frame-input compiler walks the frozen draw list once. Each resource lookup
 emits a forward packet and, only for a caster, a geometry-only shadow packet.
