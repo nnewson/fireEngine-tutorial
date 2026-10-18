@@ -330,6 +330,7 @@ add_executable(fireEngineTutorialTests
     tests/gltf/test_gltf_loader.cpp
     tests/graphics/test_asset_validation.cpp
     tests/graphics/test_frame_capture.cpp
+    tests/graphics/test_render_assets.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
     tests/render/test_camera.cpp

@@ -19,24 +19,34 @@ namespace fire_engine
  *
  * Images, textures, meshes, and materials are stored once. RenderObject connects
  * one mesh and material and can then be instanced by any number of SceneNodes.
+ *
+ * Each catalog has a process-unique identity that follows its content. Within
+ * one identity the content is append-only: an entry, once added, keeps its ID
+ * and never changes, so preparation and drawing may rely on it at every later
+ * revision. No catalog function mutates an existing entry or returns a
+ * writable alias. Callers must also not mutate storage they transferred into
+ * the catalog, for example through a pointer kept from a moved vector; the
+ * catalog cannot detect such a write.
  */
 class RenderAssets final
 {
 public:
-    RenderAssets() = default;
+    /** @brief Creates an empty collection with a new identity at revision zero. */
+    RenderAssets() noexcept;
     ~RenderAssets() = default;
 
     RenderAssets(const RenderAssets&) = delete;
     RenderAssets& operator=(const RenderAssets&) = delete;
     /**
-     * @brief Moves every render description from another collection.
-     * @param other Collection whose contents are transferred.
+     * @brief Moves every render description, with its identity and revision, from another
+     * collection.
+     * @param other Collection left empty, with a new identity and revision zero.
      */
     RenderAssets(RenderAssets&& other) noexcept;
     /**
-     * @brief Replaces this collection by moving another.
-     * @param other Collection whose contents are transferred.
-     * @return This collection with a newly incremented revision.
+     * @brief Replaces this collection's content, identity, and revision with another's.
+     * @param other Collection left empty, with a new identity and revision zero.
+     * @return This collection. Its previous identity is never issued again.
      */
     RenderAssets& operator=(RenderAssets&& other) noexcept;
 
@@ -94,17 +104,33 @@ public:
     [[nodiscard]] const std::vector<RenderObject>& renderObjects() const noexcept;
 
     /**
+     * @brief Returns the identity of this collection's content history.
+     * @return Process-unique ID, carried by moves and never issued twice.
+     */
+    [[nodiscard]] RenderAssetsId id() const noexcept;
+
+    /**
      * @brief Returns the revision of descriptions requiring GPU preparation.
-     * @return Monotonically increasing revision changed by every insertion.
+     * @return Insertions into this identity's content history, starting at zero.
      */
     [[nodiscard]] std::size_t revision() const noexcept;
 
+    /**
+     * @brief Returns this collection's identity and revision together.
+     * @return Stamp describing exactly the content currently held.
+     */
+    [[nodiscard]] RenderAssetsStamp stamp() const noexcept;
+
 private:
+    /** @brief Empties a moved-from collection and starts a new identity at revision zero. */
+    void restart() noexcept;
+
     std::vector<Mesh> meshes_;                ///< CPU mesh descriptions.
     std::vector<ImageData> images_;           ///< Decoded RGBA8 pixel data.
     std::vector<Texture> textures_;           ///< Image and sampling relationships.
     std::vector<Material> materials_;         ///< CPU material descriptions.
     std::vector<RenderObject> renderObjects_; ///< Typed mesh/material relationships.
+    RenderAssetsId id_;                       ///< Identity of this content history.
     std::size_t revision_ = 0;                ///< Incremented by every description insertion.
 };
 } // namespace fire_engine

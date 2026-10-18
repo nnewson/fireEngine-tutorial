@@ -35,7 +35,7 @@ struct RenderPreparationPlan
     std::vector<MaterialId> materials; ///< Distinct required materials in stable ID order.
     std::vector<PreparedRenderObject> renderObjects; ///< Required relationships by ID.
     PipelineDescription pipeline;   ///< Pipeline requirements proved compatible with every draw.
-    std::size_t assetRevision = 0;  ///< Asset revision represented by this plan.
+    RenderAssetsStamp assets;       ///< Catalog identity and revision this plan was built from.
     std::size_t dependencyHash = 0; ///< Transform-independent draw dependency hash.
 };
 
@@ -44,14 +44,16 @@ struct RenderPreparationPlan
 /**
  * @brief Validates render descriptions and caches compilation of a scene draw list.
  *
- * Asset validation is repeated only when the RenderAssets instance or revision
- * changes. Plan compilation is repeated only when that asset state or the exact
- * ordered RenderObjectId dependencies change. World transforms never invalidate
- * the plan because they are consumed later during command recording.
+ * Asset validation is repeated only when the catalog's identity or revision
+ * changes. A cached plan is reused only for the exact catalog identity and
+ * revision it was built from, the same pipeline, and the same ordered
+ * RenderObjectId dependencies. The two are keyed separately because a build
+ * can validate a catalog and then reject its draws, leaving the cached plan
+ * from an earlier catalog. World transforms never invalidate the plan because
+ * they are consumed later during command recording.
  *
- * Collection identity is represented by its address and revision. As with any
- * address-based cache, destroying a collection and constructing another at the
- * same address with the same revision requires a fresh RenderPreparation.
+ * Catalog identities follow content and are never reused, so a catalog
+ * destroyed and replaced at the same address cannot match an earlier plan.
  */
 class RenderPreparation final
 {
@@ -84,8 +86,7 @@ public:
     [[nodiscard]] std::size_t generation() const noexcept;
 
 private:
-    const RenderAssets* validatedAssets_ = nullptr;     ///< Collection associated with validation.
-    std::optional<std::size_t> validatedRevision_;      ///< Last fully validated asset revision.
+    std::optional<RenderAssetsStamp> validatedAssets_;  ///< Last fully validated catalog state.
     std::vector<RenderObjectId> cachedDependencies_;    ///< Exact collision-proof plan key.
     std::optional<PipelineDescription> cachedPipeline_; ///< Pipeline requirement in the plan key.
     std::optional<RenderPreparationPlan> cachedPlan_;   ///< Most recently compiled subset.

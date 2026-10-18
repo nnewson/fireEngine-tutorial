@@ -6,7 +6,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace
@@ -17,6 +19,7 @@ using fire_engine::Material;
 using fire_engine::Mesh;
 using fire_engine::PipelineDescription;
 using fire_engine::RenderAssets;
+using fire_engine::RenderAssetsStamp;
 using fire_engine::RenderObject;
 using fire_engine::RenderObjectId;
 using fire_engine::RenderPreparation;
@@ -109,14 +112,15 @@ TEST_CASE("Render preparation preserves shadow participation across same-shaped 
     REQUIRE(castingPlan.renderObjects.front().castsShadow);
 
     RenderAssets replacement = makeTriangleAssets(false);
+    const fire_engine::RenderAssetsId replacementId = replacement.id();
     REQUIRE(replacement.revision() == originalRevision);
     assets = std::move(replacement);
 
-    // src/graphics/render_assets.cpp deliberately makes RenderAssets::operator=(RenderAssets&&)
-    // increment the destination's existing revision rather than adopt the same-shaped source
-    // revision. This protects cache invalidation when identity, cardinality, IDs, and draw
-    // dependencies remain unchanged.
-    REQUIRE(assets.revision() == originalRevision + 1);
+    // The destination adopts the replacement's identity with its content. The
+    // revision, numeric IDs and draw dependencies all coincide with the
+    // prepared catalog's, so only the identity can invalidate the plan.
+    REQUIRE(assets.id() == replacementId);
+    REQUIRE(assets.revision() == originalRevision);
     const auto replacementDrawList = scene.buildDrawItems(drawListArena);
     REQUIRE(replacementDrawList.dependencyHash == dependencyHash);
     const RenderPreparationPlan& replacementPlan =
@@ -157,7 +161,7 @@ TEST_CASE("Render preparation shares mesh and material resources")
     REQUIRE(plan.meshes.size() == 1);
     REQUIRE(plan.materials.size() == 1);
     REQUIRE(plan.renderObjects.size() == 2);
-    REQUIRE(plan.assetRevision == assets.revision());
+    REQUIRE(plan.assets == assets.stamp());
     REQUIRE(plan.pipeline == PipelineDescription{});
     REQUIRE(plan.renderObjects.front().vertexLayout ==
             VertexLayoutKey::ePositionColorTextureCoordinate);
@@ -403,4 +407,105 @@ TEST_CASE("Image and texture additions invalidate render preparation")
     static_cast<void>(
         preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}));
     REQUIRE(preparation.generation() == 3);
+}
+
+TEST_CASE("Render preparation never reuses a plan for a catalog built at a destroyed one's address")
+{
+    std::optional<RenderAssets> assets{std::in_place, makeTriangleAssets(true)};
+    const RenderAssets* const address = &*assets;
+    Scene scene;
+    SceneDrawListArena drawListArena;
+    scene.addRoot("triangle").component(RenderObjectId{.value = 0});
+
+    RenderPreparation preparation;
+    REQUIRE(preparation.build(*assets, scene.buildDrawItems(drawListArena), PipelineDescription{})
+                .renderObjects.front()
+                .castsShadow);
+    const std::size_t revision = assets->revision();
+
+    // The same address, revision, numeric IDs and draws: only the identity differs.
+    assets.reset();
+    assets.emplace(makeTriangleAssets(false));
+    REQUIRE(&*assets == address);
+    REQUIRE(assets->revision() == revision);
+
+    const RenderPreparationPlan& plan =
+        preparation.build(*assets, scene.buildDrawItems(drawListArena), PipelineDescription{});
+    REQUIRE(preparation.generation() == 2);
+    REQUIRE(plan.assets == assets->stamp());
+    REQUIRE_FALSE(plan.renderObjects.front().castsShadow);
+}
+
+TEST_CASE("Render preparation reuses a plan for a catalog moved with unchanged content")
+{
+    RenderAssets original = makeTriangleAssets(true);
+    Scene scene;
+    SceneDrawListArena drawListArena;
+    scene.addRoot("triangle").component(RenderObjectId{.value = 0});
+
+    RenderPreparation preparation;
+    const RenderPreparationPlan& first =
+        preparation.build(original, scene.buildDrawItems(drawListArena), PipelineDescription{});
+    const RenderAssetsStamp stamp = original.stamp();
+
+    const RenderAssets moved{std::move(original)};
+    const RenderPreparationPlan& reused =
+        preparation.build(moved, scene.buildDrawItems(drawListArena), PipelineDescription{});
+
+    REQUIRE(preparation.generation() == 1);
+    REQUIRE(&reused == &first);
+    REQUIRE(reused.assets == stamp);
+}
+
+TEST_CASE("Render preparation never returns another catalog's plan after a rejected build")
+{
+    const RenderAssets first = makeTriangleAssets(true);
+    const RenderAssets second = makeTriangleAssets(false);
+    Scene scene;
+    SceneDrawListArena drawListArena;
+    scene.addRoot("triangle").component(RenderObjectId{.value = 0});
+    Scene dangling;
+    SceneDrawListArena danglingArena;
+    dangling.addRoot("missing").component(RenderObjectId{.value = 5});
+
+    RenderPreparation preparation;
+    static_cast<void>(
+        preparation.build(first, scene.buildDrawItems(drawListArena), PipelineDescription{}));
+
+    // The second catalog validates, then its draws are rejected while planning.
+    REQUIRE_THROWS_AS(
+        preparation.build(second, dangling.buildDrawItems(danglingArena), PipelineDescription{}),
+        std::invalid_argument);
+
+    const RenderPreparationPlan& retry =
+        preparation.build(second, scene.buildDrawItems(drawListArena), PipelineDescription{});
+    REQUIRE(preparation.generation() == 2);
+    REQUIRE(retry.assets == second.stamp());
+    REQUIRE_FALSE(retry.renderObjects.front().castsShadow);
+}
+
+TEST_CASE("Render preparation never returns an earlier revision's plan after a rejected build")
+{
+    RenderAssets assets = makeTriangleAssets(true);
+    Scene scene;
+    SceneDrawListArena drawListArena;
+    scene.addRoot("triangle").component(RenderObjectId{.value = 0});
+    Scene dangling;
+    SceneDrawListArena danglingArena;
+    dangling.addRoot("missing").component(RenderObjectId{.value = 5});
+
+    RenderPreparation preparation;
+    static_cast<void>(
+        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}));
+    static_cast<void>(assets.addMaterial(Material{}));
+
+    // The appended catalog validates, then its draws are rejected while planning.
+    REQUIRE_THROWS_AS(
+        preparation.build(assets, dangling.buildDrawItems(danglingArena), PipelineDescription{}),
+        std::invalid_argument);
+
+    const RenderPreparationPlan& retry =
+        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{});
+    REQUIRE(preparation.generation() == 2);
+    REQUIRE(retry.assets == assets.stamp());
 }

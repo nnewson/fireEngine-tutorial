@@ -30,17 +30,18 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
                                                       const SceneDrawList& drawList,
                                                       PipelineDescription pipeline)
 {
-    const bool assetsChanged = validatedAssets_ != &assets || !validatedRevision_.has_value() ||
-                               *validatedRevision_ != assets.revision();
-    if (assetsChanged)
+    const RenderAssetsStamp stamp = assets.stamp();
+    if (validatedAssets_ != stamp)
     {
         detail::validateAssets(assets);
-        validatedAssets_ = &assets;
-        validatedRevision_ = assets.revision();
+        validatedAssets_ = stamp;
     }
 
+    // Validation can succeed for a catalog whose draws are then rejected
+    // below, so it never vouches for the cached plan. Only the plan's own
+    // stamp proves which catalog state it describes.
     std::vector<RenderObjectId> currentDependencies = dependencies(drawList);
-    if (!assetsChanged && cachedPlan_.has_value() && cachedPipeline_ == pipeline &&
+    if (cachedPlan_.has_value() && cachedPlan_->assets == stamp && cachedPipeline_ == pipeline &&
         cachedPlan_->dependencyHash == drawList.dependencyHash &&
         cachedDependencies_ == currentDependencies)
     {
@@ -59,7 +60,7 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
 
     RenderPreparationPlan plan;
     plan.pipeline = pipeline;
-    plan.assetRevision = assets.revision();
+    plan.assets = stamp;
     plan.dependencyHash = drawList.dependencyHash;
     std::vector<bool> usedMeshes(assets.meshes().size(), false);
     std::vector<bool> usedImages(assets.images().size(), false);

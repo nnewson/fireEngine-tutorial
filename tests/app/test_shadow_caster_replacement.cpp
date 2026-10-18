@@ -230,7 +230,8 @@ TEST_CASE("Shadow caster replacement changes geometry and removes all prepared i
         const SceneDrawList draws = content.scene.buildDrawItems(arena);
         const RenderPreparationPlan& plan = preparation.build(content.assets, draws, {});
         REQUIRE(preparation.generation() == 2);
-        REQUIRE(plan.assetRevision == originalRevision + 3);
+        REQUIRE(plan.assets == content.assets.stamp());
+        REQUIRE(plan.assets.revision == originalRevision + 3);
         // Preparation sorts distinct resources by ID, unlike the scene's draw order.
         REQUIRE(plan.meshes == std::vector<MeshId>{receiverObject.mesh, appended.mesh});
         REQUIRE(plan.materials ==
