@@ -103,7 +103,7 @@ struct RenderAssetsId
     [[nodiscard]] constexpr bool operator==(const RenderAssetsId&) const noexcept = default;
 };
 
-/** @brief Catalog identity and revision that a preparation plan was built from. */
+/** @brief Catalog identity and revision that a plan or scene snapshot was built from. */
 struct RenderAssetsStamp
 {
     RenderAssetsId catalog;   ///< Content history the descriptions belong to.

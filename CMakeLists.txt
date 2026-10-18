@@ -97,6 +97,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/swapchain_selection.cpp
     src/scene/scene.cpp
     src/scene/scene_node.cpp
+    src/scene/scene_snapshot.cpp
 )
 
 target_include_directories(fireEngineTutorialEngine PUBLIC include)
@@ -349,6 +350,7 @@ add_executable(fireEngineTutorialTests
     tests/render/test_submission_serials.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
+    tests/scene/test_scene_snapshot.cpp
 )
 target_compile_definitions(fireEngineTutorialTests PRIVATE
     FIRE_ENGINE_TEST_ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets"

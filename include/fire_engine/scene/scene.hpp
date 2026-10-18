@@ -6,9 +6,10 @@
 #include <string>
 #include <vector>
 
-#include <fire_engine/scene/scene_draw_list.hpp>
+#include <fire_engine/graphics/draw_item.hpp>
 #include <fire_engine/scene/scene_node.hpp>
 #include <fire_engine/scene/scene_node_id.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
 namespace fire_engine
 {
@@ -92,11 +93,18 @@ public:
     void updateWorldTransforms();
 
     /**
-     * @brief Builds this frame's draws in stable depth-first order and freezes a read-only view.
-     * @param arena Reusable storage invalidating the view returned by its previous build.
-     * @return Current draws plus a transform-independent dependency hash.
+     * @brief Builds this frame's draws in stable depth-first order into an owned snapshot.
+     *
+     * The scene does not know which catalog minted its render-object IDs; the
+     * caller pairs them, as SceneContent does.
+     *
+     * @param catalog Catalog whose render-object IDs this scene uses; stamped, not retained.
+     * @param storage Storage to reuse, typically released from the previous snapshot. It is
+     * cleared before the draws are written.
+     * @return Snapshot owning the draws and stamped with the catalog's identity and revision.
      */
-    [[nodiscard]] SceneDrawList buildDrawItems(SceneDrawListArena& arena) const;
+    [[nodiscard]] SceneSnapshot buildSnapshot(const RenderAssets& catalog,
+                                              std::vector<DrawItem> storage = {}) const;
 
     /**
      * @brief Returns the owned root nodes in insertion order.

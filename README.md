@@ -153,17 +153,17 @@ form:
 
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
-draw-list construction, shared frame-input compilation and uniform updates,
-shadow pool reset and primary recording, forward coordinator and participant
-pool resets, forward primary and secondary recording, submission, and
-presentation waits. Every synthetic instance casts, so each measured frame
-records the reported draw count in both passes. These two-pass active-work
-figures have a larger workload and denominator than the historical one-pass
-baselines. The direct-primary control changes only forward recording.
-The per-participant report attributes reset and recording work. Its overlapping
-durations are detail, not extra terms to add to the active-work total. Two Vulkan
-submission slots are cycled independently of the driver-selected swapchain
-image. Frames affected by out-of-date or suboptimal
+scene-snapshot construction (reported as draw-list build), shared frame-input
+compilation and uniform updates, shadow pool reset and primary recording,
+forward coordinator and participant pool resets, forward primary and secondary
+recording, submission, and presentation waits. Every synthetic instance casts,
+so each measured frame records the reported draw count in both passes. These
+two-pass active-work figures have a larger workload and denominator than the
+historical one-pass baselines. The direct-primary control changes only forward
+recording. The per-participant report attributes reset and recording work. Its
+overlapping durations are detail, not extra terms to add to the active-work
+total. Two Vulkan submission slots are cycled independently of the
+driver-selected swapchain image. Frames affected by out-of-date or suboptimal
 presentation are excluded from the measured sample set.
 
 Use a Release build for performance results. Values are comparable only for
@@ -221,19 +221,24 @@ stores reusable rotation channels. Imported LINEAR rotations use shortest-arc
 SLERP. The committed sample and its CC0 attribution live under `assets/AnimatedCube`;
 once dependencies are installed, builds and tests need no asset downloads.
 
-`Renderer::prepare()` validates those relationships through a cached
-`RenderPreparation` compiler and uploads only the resources selected by the
-current `SceneDrawList`. The internal `CompiledResources` subsystem owns mesh
-buffers, sampled images, samplers, and the persistent white fallback texture,
-and records the last frame submission that used them. A changed `prepare()`
-compiles the replacement first, then waits only for that submission before
-destroying the old resources; it does not wait for presentation. The separate
-internal `ResourceCompiler` owns mutable compilation, staging, and its dedicated
-setup-time upload command pool and fence. Scene traversal hashes only ordered
-render-object dependencies, so animation-only transform changes reuse the same
-preparation plan while `Renderer::drawFrame()` records current transforms.
-Device, allocator, resource compiler, compiled resources, presentation state,
-and frame resources remain hidden behind the renderer facade.
+`Scene::buildSnapshot()` writes the current draws into a `SceneSnapshot`, which
+owns them and records the identity and revision of the `RenderAssets` catalog
+they refer to. Applications recycle one draw buffer by releasing each snapshot's
+storage into the next build. `Renderer::prepare()` validates the catalog's
+relationships through a cached `RenderPreparation` compiler and uploads only the
+resources the snapshot selects. The internal `CompiledResources` subsystem owns
+mesh buffers, sampled images, samplers, and the persistent white fallback
+texture, and records the last frame submission that used them. A changed
+`prepare()` compiles the replacement first, then waits only for that submission
+before destroying the old resources; it does not wait for presentation. The
+separate internal `ResourceCompiler` owns mutable compilation, staging, and its
+dedicated setup-time upload command pool and fence. The preparation cache keys
+on the catalog's identity and revision and the exact ordered render-object
+references, never transforms, so animation-only changes reuse the same plan
+while `Renderer::drawFrame()` records current transforms. Neither call keeps a
+reference to the snapshot after it returns. Device, allocator, resource
+compiler, compiled resources, presentation state, and frame resources remain
+hidden behind the renderer facade.
 
 Mathematical coordinates use `Vec3` and `Vec4`, while graphics colors use the
 separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain
@@ -249,7 +254,7 @@ presentation, and the KHR or equivalent EXT swapchain-maintenance path used for
 presentation fences. The pipelines read compiled `shadow.spv` and `forward.spv`
 directly through maintenance5, so no `VkShaderModule` is created.
 
-One frame-input compiler walks the frozen draw list once. Each resource lookup
+One frame-input compiler walks the snapshot's draws once. Each resource lookup
 emits a forward packet and, only for a caster, a geometry-only shadow packet.
 The two restricted, borrowed views expose no resource owners to their recorders.
 Both passes use camera/light matrices from one frame-slot uniform buffer;

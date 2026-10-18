@@ -34,8 +34,6 @@ using fire_engine::RenderPreparation;
 using fire_engine::RenderPreparationPlan;
 using fire_engine::Scene;
 using fire_engine::SceneContent;
-using fire_engine::SceneDrawList;
-using fire_engine::SceneDrawListArena;
 using fire_engine::SceneNode;
 using fire_engine::SceneNodeId;
 using fire_engine::SceneNodeRef;
@@ -54,12 +52,10 @@ SceneNode& cubeNode(SceneContent& content)
     return *content.scene.roots().front()->children().front();
 }
 
-std::vector<RenderObjectId> drawDependencies(const Scene& scene)
+std::vector<RenderObjectId> drawDependencies(const SceneContent& content)
 {
-    SceneDrawListArena arena;
-    const SceneDrawList draws = scene.buildDrawItems(arena);
     std::vector<RenderObjectId> result;
-    for (const DrawItem& draw : draws.drawItems)
+    for (const DrawItem& draw : content.scene.buildSnapshot(content.assets).drawItems())
     {
         result.push_back(draw.renderObject);
     }
@@ -146,13 +142,12 @@ TEST_CASE("Shadow caster replacement changes geometry and removes all prepared i
     const TextureId originalTexture = originalMaterial.baseColorTexture.value_or(TextureId{});
     const ImageId originalImage = content.assets.textures().at(originalTexture.value).image;
     const std::size_t originalRevision = content.assets.revision();
-    REQUIRE(drawDependencies(content.scene) == std::vector<RenderObjectId>{caster, receiver});
+    REQUIRE(drawDependencies(content) == std::vector<RenderObjectId>{caster, receiver});
 
     RenderPreparation preparation;
-    SceneDrawListArena arena;
     {
-        const SceneDrawList draws = content.scene.buildDrawItems(arena);
-        const RenderPreparationPlan& plan = preparation.build(content.assets, draws, {});
+        const RenderPreparationPlan& plan =
+            preparation.build(content.assets, content.scene.buildSnapshot(content.assets), {});
         REQUIRE(plan.images == std::vector<ImageId>{originalImage});
         REQUIRE(plan.textures == std::vector<TextureId>{originalTexture});
         REQUIRE(preparation.generation() == 1);
@@ -224,11 +219,11 @@ TEST_CASE("Shadow caster replacement changes geometry and removes all prepared i
     }
 
     content.scene.updateWorldTransforms();
-    REQUIRE(drawDependencies(content.scene) ==
+    REQUIRE(drawDependencies(content) ==
             std::vector<RenderObjectId>{replacement.replacementObject, receiver});
     {
-        const SceneDrawList draws = content.scene.buildDrawItems(arena);
-        const RenderPreparationPlan& plan = preparation.build(content.assets, draws, {});
+        const RenderPreparationPlan& plan =
+            preparation.build(content.assets, content.scene.buildSnapshot(content.assets), {});
         REQUIRE(preparation.generation() == 2);
         REQUIRE(plan.assets == content.assets.stamp());
         REQUIRE(plan.assets.revision == originalRevision + 3);
@@ -284,7 +279,7 @@ TEST_CASE("Shadow caster replacement selects the active instance rather than cat
     REQUIRE(second.node == first.node);
     REQUIRE(second.originalObject == first.replacementObject);
     REQUIRE(second.replacementObject != first.replacementObject);
-    REQUIRE(drawDependencies(content.scene) ==
+    REQUIRE(drawDependencies(content) ==
             std::vector<RenderObjectId>{second.replacementObject, receiver});
 }
 
@@ -309,11 +304,11 @@ TEST_CASE("Shadow caster replacement rejects a nonunique casting instance before
         content.scene.addRoot("Different caster").component(other);
     }
     const std::size_t revision = content.assets.revision();
-    const auto dependencies = drawDependencies(content.scene);
+    const auto dependencies = drawDependencies(content);
     REQUIRE_THROWS_WITH(tutorial::replaceShadowCaster(content),
                         "Shadow replacement fixture requires exactly one casting scene node");
     REQUIRE(content.assets.revision() == revision);
-    REQUIRE(drawDependencies(content.scene) == dependencies);
+    REQUIRE(drawDependencies(content) == dependencies);
 }
 
 TEST_CASE("Shadow caster replacement rejects missing asset references before mutation")
@@ -337,8 +332,8 @@ TEST_CASE("Shadow caster replacement rejects missing asset references before mut
         node.component(content.assets.addRenderObject(broken));
     }
     const std::size_t revision = content.assets.revision();
-    const auto dependencies = drawDependencies(content.scene);
+    const auto dependencies = drawDependencies(content);
     REQUIRE_THROWS_AS(tutorial::replaceShadowCaster(content), std::out_of_range);
     REQUIRE(content.assets.revision() == revision);
-    REQUIRE(drawDependencies(content.scene) == dependencies);
+    REQUIRE(drawDependencies(content) == dependencies);
 }

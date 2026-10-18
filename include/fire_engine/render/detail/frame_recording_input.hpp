@@ -14,7 +14,7 @@
 
 namespace fire_engine
 {
-struct SceneDrawList;
+class SceneSnapshot;
 
 namespace detail
 {
@@ -195,7 +195,7 @@ public:
 
     /**
      * @brief Resolves each external draw once and freezes both pass-specific packet sequences.
-     * @param drawList External immutable scene snapshot consumed only during this call.
+     * @param snapshot External scene draws, read only during this call; packets are copied.
      * @param resources Restricted lookup into the current compiled-resource generation.
      * @param frameUniforms Shared camera and light values written after slot retirement.
      * @param shadowState Current frame-slot shadow recording state.
@@ -205,7 +205,7 @@ public:
      * pipeline-incompatible.
      * @pre The previous input returned by this compiler has no remaining CPU consumers.
      */
-    [[nodiscard]] FrameRecordingInput compile(const SceneDrawList& drawList,
+    [[nodiscard]] FrameRecordingInput compile(const SceneSnapshot& snapshot,
                                               CompiledResourcesView resources,
                                               FrameUniforms frameUniforms,
                                               ShadowRecordingState shadowState,

@@ -25,8 +25,8 @@ using fire_engine::RenderObjectId;
 using fire_engine::RenderPreparation;
 using fire_engine::RenderPreparationPlan;
 using fire_engine::Scene;
-using fire_engine::SceneDrawListArena;
 using fire_engine::SceneNode;
+using fire_engine::SceneSnapshot;
 using fire_engine::Texture;
 using fire_engine::TextureFilter;
 using fire_engine::TextureWrap;
@@ -70,6 +70,17 @@ Texture makeTexture(fire_engine::ImageId image)
     };
 }
 
+/** @brief Returns a snapshot's ordered render-object references. */
+std::vector<RenderObjectId> renderObjects(const SceneSnapshot& snapshot)
+{
+    std::vector<RenderObjectId> result;
+    for (const fire_engine::DrawItem& drawItem : snapshot.drawItems())
+    {
+        result.push_back(drawItem.renderObject);
+    }
+    return result;
+}
+
 RenderAssets makeTriangleAssets(bool castsShadow)
 {
     RenderAssets assets;
@@ -99,14 +110,12 @@ TEST_CASE("Render preparation preserves shadow participation across same-shaped 
     RenderAssets assets = makeTriangleAssets(true);
     const std::size_t originalRevision = assets.revision();
     Scene scene;
-    SceneDrawListArena drawListArena;
     scene.addRoot("triangle").component(RenderObjectId{.value = 0});
 
     RenderPreparation preparation;
-    const auto firstDrawList = scene.buildDrawItems(drawListArena);
-    const std::size_t dependencyHash = firstDrawList.dependencyHash;
+    const SceneSnapshot castingSnapshot = scene.buildSnapshot(assets);
     const RenderPreparationPlan& castingPlan =
-        preparation.build(assets, firstDrawList, PipelineDescription{});
+        preparation.build(assets, castingSnapshot, PipelineDescription{});
     REQUIRE(preparation.generation() == 1);
     REQUIRE(castingPlan.renderObjects.size() == 1);
     REQUIRE(castingPlan.renderObjects.front().castsShadow);
@@ -121,10 +130,10 @@ TEST_CASE("Render preparation preserves shadow participation across same-shaped 
     // prepared catalog's, so only the identity can invalidate the plan.
     REQUIRE(assets.id() == replacementId);
     REQUIRE(assets.revision() == originalRevision);
-    const auto replacementDrawList = scene.buildDrawItems(drawListArena);
-    REQUIRE(replacementDrawList.dependencyHash == dependencyHash);
+    const SceneSnapshot replacementSnapshot = scene.buildSnapshot(assets);
+    REQUIRE(renderObjects(replacementSnapshot) == renderObjects(castingSnapshot));
     const RenderPreparationPlan& replacementPlan =
-        preparation.build(assets, replacementDrawList, PipelineDescription{});
+        preparation.build(assets, replacementSnapshot, PipelineDescription{});
 
     REQUIRE(preparation.generation() == 2);
     REQUIRE(replacementPlan.renderObjects.size() == 1);
@@ -136,7 +145,6 @@ TEST_CASE("Render preparation shares mesh and material resources")
 {
     RenderAssets assets;
     Scene scene;
-    SceneDrawListArena drawListArena;
     const auto mesh = assets.addMesh(makeTriangle());
     const auto material = assets.addMaterial(Material{});
     const auto first = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
@@ -156,7 +164,7 @@ TEST_CASE("Render preparation shares mesh and material resources")
 
     RenderPreparation preparation;
     const auto& plan =
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{});
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{});
 
     REQUIRE(plan.meshes.size() == 1);
     REQUIRE(plan.materials.size() == 1);
@@ -177,26 +185,24 @@ TEST_CASE("Render preparation keys its cache by the selected pipeline")
     const auto material = assets.addMaterial(Material{});
     const auto object = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
     Scene scene;
-    SceneDrawListArena drawListArena;
     scene.addRoot("incompatible").component(object);
 
     RenderPreparation firstBuildPreparation;
-    REQUIRE_THROWS_AS(firstBuildPreparation.build(assets, scene.buildDrawItems(drawListArena),
-                                                  PipelineDescription{}),
-                      std::invalid_argument);
+    REQUIRE_THROWS_AS(
+        firstBuildPreparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}),
+        std::invalid_argument);
 
     RenderPreparation preparation;
     const PipelineDescription alternatePipeline{.vertexLayout = alternateLayout};
     const RenderPreparationPlan& firstPlan =
-        preparation.build(assets, scene.buildDrawItems(drawListArena), alternatePipeline);
+        preparation.build(assets, scene.buildSnapshot(assets), alternatePipeline);
     REQUIRE(firstPlan.pipeline == alternatePipeline);
     REQUIRE(preparation.generation() == 1);
 
     // If the pipeline description were absent from the cache key, this would
     // return firstPlan before reaching the incompatible-layout check.
-    REQUIRE_THROWS_AS(
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}),
-        std::invalid_argument);
+    REQUIRE_THROWS_AS(preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}),
+                      std::invalid_argument);
     REQUIRE(preparation.generation() == 1);
 }
 
@@ -222,7 +228,6 @@ TEST_CASE("Render preparation extracts shared image and texture dependencies")
         assets.addRenderObject(RenderObject{.mesh = mesh, .material = secondMaterial});
 
     Scene scene;
-    SceneDrawListArena drawListArena;
     SceneNode& firstNode = scene.addRoot("first");
     firstNode.component(firstObject);
     SceneNode& secondNode = scene.addRoot("second");
@@ -230,7 +235,7 @@ TEST_CASE("Render preparation extracts shared image and texture dependencies")
 
     RenderPreparation preparation;
     const auto& plan =
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{});
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{});
 
     REQUIRE(plan.images == std::vector{image});
     REQUIRE(plan.textures == std::vector{firstTexture, secondTexture});
@@ -243,14 +248,13 @@ TEST_CASE("Render preparation rejects incomplete mesh data")
     {
         RenderAssets assets;
         Scene scene;
-        SceneDrawListArena drawListArena;
         const auto mesh = assets.addMesh(Mesh{.vertices = {}, .indices = {0, 1, 2}});
         const auto material = assets.addMaterial(Material{});
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = material}));
 
         RenderPreparation preparation;
         REQUIRE_THROWS_AS(
-            preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}),
+            preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}),
             std::invalid_argument);
     }
 
@@ -258,7 +262,6 @@ TEST_CASE("Render preparation rejects incomplete mesh data")
     {
         RenderAssets assets;
         Scene scene;
-        SceneDrawListArena drawListArena;
         Mesh triangle = makeTriangle();
         triangle.indices[2] = 3;
         const auto mesh = assets.addMesh(std::move(triangle));
@@ -267,7 +270,7 @@ TEST_CASE("Render preparation rejects incomplete mesh data")
 
         RenderPreparation preparation;
         REQUIRE_THROWS_AS(
-            preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}),
+            preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}),
             std::invalid_argument);
     }
 }
@@ -278,13 +281,12 @@ TEST_CASE("Render preparation rejects dangling references")
     {
         RenderAssets assets;
         Scene scene;
-        SceneDrawListArena drawListArena;
         const auto mesh = assets.addMesh(makeTriangle());
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = {}}));
 
         RenderPreparation preparation;
         REQUIRE_THROWS_AS(
-            preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}),
+            preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}),
             std::invalid_argument);
     }
 
@@ -292,7 +294,6 @@ TEST_CASE("Render preparation rejects dangling references")
     {
         RenderAssets assets;
         Scene scene;
-        SceneDrawListArena drawListArena;
         const auto mesh = assets.addMesh(makeTriangle());
         const auto material = assets.addMaterial(Material{});
         static_cast<void>(assets.addRenderObject(RenderObject{.mesh = mesh, .material = material}));
@@ -303,7 +304,7 @@ TEST_CASE("Render preparation rejects dangling references")
 
         RenderPreparation preparation;
         REQUIRE_THROWS_AS(
-            preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}),
+            preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}),
             std::invalid_argument);
     }
 }
@@ -316,14 +317,13 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
     const auto object = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
 
     Scene scene;
-    SceneDrawListArena drawListArena;
     SceneNode& root = scene.addRoot("triangle");
     root.component(object);
     scene.updateWorldTransforms();
 
     RenderPreparation preparation;
-    const auto firstDrawList = scene.buildDrawItems(drawListArena);
-    const auto& firstPlan = preparation.build(assets, firstDrawList, PipelineDescription{});
+    const SceneSnapshot firstSnapshot = scene.buildSnapshot(assets);
+    const auto& firstPlan = preparation.build(assets, firstSnapshot, PipelineDescription{});
     REQUIRE(preparation.generation() == 1);
 
     root.localTransform({
@@ -332,27 +332,24 @@ TEST_CASE("Render preparation caches assets and transform-independent dependenci
         .scale = {.x = 1.0f, .y = 1.0f, .z = 1.0f},
     });
     scene.updateWorldTransforms();
-    const auto movedDrawList = scene.buildDrawItems(drawListArena);
-    const auto& reusedPlan = preparation.build(assets, movedDrawList, PipelineDescription{});
+    const SceneSnapshot movedSnapshot = scene.buildSnapshot(assets);
+    const auto& reusedPlan = preparation.build(assets, movedSnapshot, PipelineDescription{});
 
-    REQUIRE(movedDrawList.dependencyHash == firstDrawList.dependencyHash);
+    REQUIRE(movedSnapshot.drawItems().front().world != firstSnapshot.drawItems().front().world);
     REQUIRE(&reusedPlan == &firstPlan);
     REQUIRE(preparation.generation() == 1);
 
     SceneNode& second = scene.addRoot("second triangle");
     second.component(object);
-    auto expandedDrawList = scene.buildDrawItems(drawListArena);
-    // Simulate a hash collision: the exact dependency sequence must still
-    // distinguish one instance from two.
-    expandedDrawList.dependencyHash = firstDrawList.dependencyHash;
-    static_cast<void>(preparation.build(assets, expandedDrawList, PipelineDescription{}));
+    const SceneSnapshot expandedSnapshot = scene.buildSnapshot(assets);
+    static_cast<void>(preparation.build(assets, expandedSnapshot, PipelineDescription{}));
     REQUIRE(preparation.generation() == 2);
 
     const RenderPreparationPlan beforeAssetMutation =
-        preparation.build(assets, expandedDrawList, PipelineDescription{});
+        preparation.build(assets, expandedSnapshot, PipelineDescription{});
     static_cast<void>(assets.addMaterial(Material{}));
     const RenderPreparationPlan& afterAssetMutation =
-        preparation.build(assets, expandedDrawList, PipelineDescription{});
+        preparation.build(assets, expandedSnapshot, PipelineDescription{});
     REQUIRE(preparation.generation() == 3);
     REQUIRE(afterAssetMutation.meshes == beforeAssetMutation.meshes);
     REQUIRE(afterAssetMutation.images == beforeAssetMutation.images);
@@ -389,23 +386,22 @@ TEST_CASE("Image and texture additions invalidate render preparation")
     const auto material = assets.addMaterial(Material{});
     const auto object = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
     Scene scene;
-    SceneDrawListArena drawListArena;
     scene.addRoot("triangle").component(object);
 
     RenderPreparation preparation;
     static_cast<void>(
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}));
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}));
     REQUIRE(preparation.generation() == 1);
 
     const auto image =
         assets.addImage(ImageData{.width = 1, .height = 1, .pixels = {255, 255, 255, 255}});
     static_cast<void>(
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}));
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}));
     REQUIRE(preparation.generation() == 2);
 
     static_cast<void>(assets.addTexture(makeTexture(image)));
     static_cast<void>(
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}));
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}));
     REQUIRE(preparation.generation() == 3);
 }
 
@@ -414,11 +410,10 @@ TEST_CASE("Render preparation never reuses a plan for a catalog built at a destr
     std::optional<RenderAssets> assets{std::in_place, makeTriangleAssets(true)};
     const RenderAssets* const address = &*assets;
     Scene scene;
-    SceneDrawListArena drawListArena;
     scene.addRoot("triangle").component(RenderObjectId{.value = 0});
 
     RenderPreparation preparation;
-    REQUIRE(preparation.build(*assets, scene.buildDrawItems(drawListArena), PipelineDescription{})
+    REQUIRE(preparation.build(*assets, scene.buildSnapshot(*assets), PipelineDescription{})
                 .renderObjects.front()
                 .castsShadow);
     const std::size_t revision = assets->revision();
@@ -430,7 +425,7 @@ TEST_CASE("Render preparation never reuses a plan for a catalog built at a destr
     REQUIRE(assets->revision() == revision);
 
     const RenderPreparationPlan& plan =
-        preparation.build(*assets, scene.buildDrawItems(drawListArena), PipelineDescription{});
+        preparation.build(*assets, scene.buildSnapshot(*assets), PipelineDescription{});
     REQUIRE(preparation.generation() == 2);
     REQUIRE(plan.assets == assets->stamp());
     REQUIRE_FALSE(plan.renderObjects.front().castsShadow);
@@ -440,17 +435,16 @@ TEST_CASE("Render preparation reuses a plan for a catalog moved with unchanged c
 {
     RenderAssets original = makeTriangleAssets(true);
     Scene scene;
-    SceneDrawListArena drawListArena;
     scene.addRoot("triangle").component(RenderObjectId{.value = 0});
 
     RenderPreparation preparation;
     const RenderPreparationPlan& first =
-        preparation.build(original, scene.buildDrawItems(drawListArena), PipelineDescription{});
+        preparation.build(original, scene.buildSnapshot(original), PipelineDescription{});
     const RenderAssetsStamp stamp = original.stamp();
 
     const RenderAssets moved{std::move(original)};
     const RenderPreparationPlan& reused =
-        preparation.build(moved, scene.buildDrawItems(drawListArena), PipelineDescription{});
+        preparation.build(moved, scene.buildSnapshot(moved), PipelineDescription{});
 
     REQUIRE(preparation.generation() == 1);
     REQUIRE(&reused == &first);
@@ -462,23 +456,20 @@ TEST_CASE("Render preparation never returns another catalog's plan after a rejec
     const RenderAssets first = makeTriangleAssets(true);
     const RenderAssets second = makeTriangleAssets(false);
     Scene scene;
-    SceneDrawListArena drawListArena;
     scene.addRoot("triangle").component(RenderObjectId{.value = 0});
     Scene dangling;
-    SceneDrawListArena danglingArena;
     dangling.addRoot("missing").component(RenderObjectId{.value = 5});
 
     RenderPreparation preparation;
-    static_cast<void>(
-        preparation.build(first, scene.buildDrawItems(drawListArena), PipelineDescription{}));
+    static_cast<void>(preparation.build(first, scene.buildSnapshot(first), PipelineDescription{}));
 
     // The second catalog validates, then its draws are rejected while planning.
     REQUIRE_THROWS_AS(
-        preparation.build(second, dangling.buildDrawItems(danglingArena), PipelineDescription{}),
+        preparation.build(second, dangling.buildSnapshot(second), PipelineDescription{}),
         std::invalid_argument);
 
     const RenderPreparationPlan& retry =
-        preparation.build(second, scene.buildDrawItems(drawListArena), PipelineDescription{});
+        preparation.build(second, scene.buildSnapshot(second), PipelineDescription{});
     REQUIRE(preparation.generation() == 2);
     REQUIRE(retry.assets == second.stamp());
     REQUIRE_FALSE(retry.renderObjects.front().castsShadow);
@@ -488,24 +479,72 @@ TEST_CASE("Render preparation never returns an earlier revision's plan after a r
 {
     RenderAssets assets = makeTriangleAssets(true);
     Scene scene;
-    SceneDrawListArena drawListArena;
     scene.addRoot("triangle").component(RenderObjectId{.value = 0});
     Scene dangling;
-    SceneDrawListArena danglingArena;
     dangling.addRoot("missing").component(RenderObjectId{.value = 5});
 
     RenderPreparation preparation;
     static_cast<void>(
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{}));
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{}));
     static_cast<void>(assets.addMaterial(Material{}));
 
     // The appended catalog validates, then its draws are rejected while planning.
     REQUIRE_THROWS_AS(
-        preparation.build(assets, dangling.buildDrawItems(danglingArena), PipelineDescription{}),
+        preparation.build(assets, dangling.buildSnapshot(assets), PipelineDescription{}),
         std::invalid_argument);
 
     const RenderPreparationPlan& retry =
-        preparation.build(assets, scene.buildDrawItems(drawListArena), PipelineDescription{});
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{});
     REQUIRE(preparation.generation() == 2);
     REQUIRE(retry.assets == assets.stamp());
+}
+
+TEST_CASE("Render preparation keys its plan on the exact ordered dependencies")
+{
+    RenderAssets assets;
+    const auto mesh = assets.addMesh(makeTriangle());
+    const auto material = assets.addMaterial(Material{});
+    const auto first = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
+    const auto second = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
+    Scene forward;
+    forward.addRoot("first").component(first);
+    forward.addRoot("second").component(second);
+    Scene reversed;
+    reversed.addRoot("second").component(second);
+    reversed.addRoot("first").component(first);
+
+    RenderPreparation preparation;
+    static_cast<void>(
+        preparation.build(assets, forward.buildSnapshot(assets), PipelineDescription{}));
+
+    // The same length and the same distinct objects, in another order.
+    const SceneSnapshot reorderedSnapshot = reversed.buildSnapshot(assets);
+    REQUIRE(renderObjects(reorderedSnapshot) == std::vector<RenderObjectId>{second, first});
+    static_cast<void>(preparation.build(assets, reorderedSnapshot, PipelineDescription{}));
+    REQUIRE(preparation.generation() == 2);
+}
+
+TEST_CASE("Render preparation keeps no reference to the snapshot it was built from")
+{
+    RenderAssets assets;
+    const auto mesh = assets.addMesh(makeTriangle());
+    const auto material = assets.addMaterial(Material{});
+    const auto first = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
+    const auto second = assets.addRenderObject(RenderObject{.mesh = mesh, .material = material});
+    Scene scene;
+    scene.addRoot("first").component(first);
+
+    RenderPreparation preparation;
+    SceneSnapshot snapshot = scene.buildSnapshot(assets);
+    const RenderPreparationPlan& plan = preparation.build(assets, snapshot, PipelineDescription{});
+
+    // Reuse the released storage for other draws. A key that still viewed it
+    // would now describe the second object and miss below.
+    std::vector<fire_engine::DrawItem> storage = std::move(snapshot).releaseStorage();
+    storage.front().renderObject = second;
+
+    const RenderPreparationPlan& reused =
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{});
+    REQUIRE(preparation.generation() == 1);
+    REQUIRE(&reused == &plan);
 }

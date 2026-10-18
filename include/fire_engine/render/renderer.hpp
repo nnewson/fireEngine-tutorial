@@ -18,8 +18,8 @@ namespace fire_engine
 
 class Glfw;
 class RenderAssets;
+class SceneSnapshot;
 class Window;
-struct SceneDrawList;
 
 /* --- Enums --- */
 
@@ -179,8 +179,9 @@ enum class RenderResult : std::uint8_t
  *
  * The public surface intentionally contains no Vulkan types. Stable mesh,
  * image, texture, and material descriptions are uploaded explicitly by
- * prepare(), while drawFrame() consumes a frozen scene draw-list view and
- * records shadow and forward command buffers. Presentation resources can be
+ * prepare(), while drawFrame() consumes an owned scene snapshot and
+ * records shadow and forward command buffers. Neither call keeps a reference
+ * to the snapshot after it returns. Presentation resources can be
  * replaced independently, preserving compiled scene resources and slot-local
  * shadow maps across window changes.
  * Calls on one Renderer are serialized by the application; public member
@@ -210,23 +211,24 @@ public:
     Renderer& operator=(Renderer&&) = delete;
 
     /**
-     * @brief Validates and uploads stable assets required by a frozen draw list.
+     * @brief Validates and uploads stable assets required by a scene snapshot.
      * @param assets Vulkan-free render descriptions to compile.
-     * @param drawList Frozen draws whose render-object references are validated.
-     * Repeating the same asset revision and scene dependencies reuses the
-     * cached plan and GPU resources. Changed inputs compile a replacement
-     * subset, then wait only for the submitted frames that used the old one;
-     * they do not wait for presentation or for the device to become idle.
+     * @param snapshot Draws whose render-object references are validated.
+     * Repeating the same catalog identity and revision with the same ordered
+     * scene dependencies reuses the cached plan and GPU resources. Changed
+     * inputs compile a replacement subset, then wait only for the submitted
+     * frames that used the old one; they do not wait for presentation or for
+     * the device to become idle.
      *
      * @throws std::invalid_argument if assets or draw references are invalid.
      * @throws std::runtime_error if a GPU allocation, upload, or wait for the
      * old subset's frames fails.
      */
-    void prepare(const RenderAssets& assets, const SceneDrawList& drawList);
+    void prepare(const RenderAssets& assets, const SceneSnapshot& snapshot);
 
     /**
      * @brief Freezes frame input, records it, submits it, and presents one image.
-     * @param drawList Read-only draw view valid until this call returns.
+     * @param snapshot Draws for this frame, read only during this call.
      * @param frameDescription Vulkan-free camera and shadow values sampled for this frame.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Whether an image was presented and whether the swapchain remains suitable.
@@ -234,7 +236,7 @@ public:
      * @throws std::invalid_argument if the camera or directional-shadow view is invalid.
      * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */
-    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+    [[nodiscard]] RenderResult drawFrame(const SceneSnapshot& snapshot,
                                          const FrameDescription& frameDescription,
                                          RendererCpuTimings* timings = nullptr);
 

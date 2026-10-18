@@ -1,6 +1,6 @@
 #include <fire_engine/render/detail/frame_recording_input.hpp>
 
-#include <fire_engine/scene/scene_draw_list.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
 #include <optional>
 #include <stdexcept>
@@ -69,7 +69,7 @@ const ForwardRecordingInput& FrameRecordingInput::forward() const noexcept
     return forwardInput_;
 }
 
-FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneDrawList& drawList,
+FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneSnapshot& snapshot,
                                                          CompiledResourcesView resources,
                                                          FrameUniforms frameUniforms,
                                                          ShadowRecordingState shadowState,
@@ -83,7 +83,7 @@ FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneDrawList& dr
 
     shadowDraws_.clear();
     forwardDraws_.clear();
-    for (const DrawItem& item : drawList.drawItems)
+    for (const DrawItem& item : snapshot.drawItems())
     {
         const std::optional<CompiledRenderObject> compiledObject =
             resources.find(item.renderObject);

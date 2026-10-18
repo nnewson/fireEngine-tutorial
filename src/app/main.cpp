@@ -290,20 +290,22 @@ try
     {
         selectUntexturedScene(content);
     }
-    fire_engine::SceneDrawListArena drawListArena;
+    // One draw buffer is recycled through every snapshot, so steady-state
+    // frames allocate nothing once it reaches its high-water size.
+    std::vector<fire_engine::DrawItem> drawStorage;
     content.scene.updateWorldTransforms();
     std::size_t initialForwardDrawCount = 0;
     std::size_t initialShadowCasterCount = 0;
     std::optional<ShadowPreparationProgress> shadowPreparation;
     {
-        const fire_engine::SceneDrawList initialDrawList =
-            content.scene.buildDrawItems(drawListArena);
-        renderer.prepare(content.assets, initialDrawList);
+        fire_engine::SceneSnapshot initialSnapshot =
+            content.scene.buildSnapshot(content.assets, std::move(drawStorage));
+        renderer.prepare(content.assets, initialSnapshot);
         if (shadowDemonstration)
         {
-            initialForwardDrawCount = initialDrawList.drawItems.size();
+            initialForwardDrawCount = initialSnapshot.drawItems().size();
             initialShadowCasterCount =
-                std::ranges::count_if(initialDrawList.drawItems,
+                std::ranges::count_if(initialSnapshot.drawItems(),
                                       [&content](const auto& drawItem)
                                       {
                                           return content.assets.renderObjects()
@@ -318,11 +320,12 @@ try
                 throw std::logic_error("Shadow preparation requires one caster and one receiver");
             }
             shadowPreparation.emplace();
-            // Copy IDs, not the arena-backed view: the next draw rebuilds it.
-            shadowPreparation->originalObjects = {initialDrawList.drawItems[0].renderObject,
-                                                  initialDrawList.drawItems[1].renderObject};
+            // Copy IDs: the snapshot's storage is released to the next frame.
+            shadowPreparation->originalObjects = {initialSnapshot.drawItems()[0].renderObject,
+                                                  initialSnapshot.drawItems()[1].renderObject};
             shadowPreparation->originalRevision = content.assets.revision();
         }
+        drawStorage = std::move(initialSnapshot).releaseStorage();
     }
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
@@ -409,7 +412,8 @@ try
             {
                 drawListStart = std::chrono::steady_clock::now();
             }
-            const fire_engine::SceneDrawList drawList = content.scene.buildDrawItems(drawListArena);
+            fire_engine::SceneSnapshot snapshot =
+                content.scene.buildSnapshot(content.assets, std::move(drawStorage));
             std::chrono::nanoseconds drawListBuild{};
             if (benchmark.has_value())
             {
@@ -419,7 +423,7 @@ try
 
             fire_engine::RendererCpuTimings rendererTimings;
             result = renderer.drawFrame(
-                drawList, frameDescription,
+                snapshot, frameDescription,
                 benchmark.has_value() || checkShadowPackets ? &rendererTimings : nullptr);
             if (benchmark.has_value())
             {
@@ -458,7 +462,8 @@ try
                 }
                 ++renderedFrameCount;
             }
-        } // Retire the draw-list view before repeated preparation reuses its arena.
+            drawStorage = std::move(snapshot).releaseStorage();
+        }
         if (!repeatedPreparationComplete && options.reprepareAfterFrame == renderedFrameCount)
         {
             // Replace compiled resources only after a submitted frame has used
@@ -470,13 +475,13 @@ try
                 // that could mask a missing retirement wait inside prepare().
                 const auto replacement = fire_engine::tutorial::replaceShadowCaster(content);
                 content.scene.updateWorldTransforms();
-                const fire_engine::SceneDrawList replacementDrawList =
-                    content.scene.buildDrawItems(drawListArena);
+                fire_engine::SceneSnapshot replacementSnapshot =
+                    content.scene.buildSnapshot(content.assets, std::move(drawStorage));
                 const auto& originalObjects = shadowPreparation->originalObjects;
                 if (content.assets.revision() <= shadowPreparation->originalRevision ||
                     std::ranges::count(originalObjects, replacement.originalObject) != 1 ||
                     std::ranges::contains(originalObjects, replacement.replacementObject) ||
-                    replacementDrawList.drawItems.size() != originalObjects.size())
+                    replacementSnapshot.drawItems().size() != originalObjects.size())
                 {
                     throw std::logic_error("Shadow preparation did not change caster dependencies");
                 }
@@ -488,7 +493,7 @@ try
                     const bool isCaster = originalObjects[index] == replacement.originalObject;
                     const fire_engine::RenderObjectId expectedObject =
                         isCaster ? replacement.replacementObject : originalObjects[index];
-                    if (replacementDrawList.drawItems[index].renderObject != expectedObject ||
+                    if (replacementSnapshot.drawItems()[index].renderObject != expectedObject ||
                         content.assets.renderObjects().at(expectedObject.value).castsShadow !=
                             isCaster)
                     {
@@ -496,14 +501,15 @@ try
                             "Shadow preparation changed receiver identity, policy, or draw order");
                     }
                 }
-                renderer.prepare(content.assets, replacementDrawList);
+                renderer.prepare(content.assets, replacementSnapshot);
+                drawStorage = std::move(replacementSnapshot).releaseStorage();
                 ++shadowPreparation->preparationCount;
             }
             else
             {
                 addMixedResourceInstances(content);
                 content.scene.updateWorldTransforms();
-                renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
+                renderer.prepare(content.assets, content.scene.buildSnapshot(content.assets));
             }
             repeatedPreparationComplete = true;
         }

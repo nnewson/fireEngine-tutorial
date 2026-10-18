@@ -12,7 +12,7 @@ namespace fire_engine
 /* --- Forward declarations --- */
 
 class RenderAssets;
-struct SceneDrawList;
+class SceneSnapshot;
 
 /* --- POD structs --- */
 
@@ -34,15 +34,14 @@ struct RenderPreparationPlan
     std::vector<TextureId> textures;   ///< Distinct required textures in stable ID order.
     std::vector<MaterialId> materials; ///< Distinct required materials in stable ID order.
     std::vector<PreparedRenderObject> renderObjects; ///< Required relationships by ID.
-    PipelineDescription pipeline;   ///< Pipeline requirements proved compatible with every draw.
-    RenderAssetsStamp assets;       ///< Catalog identity and revision this plan was built from.
-    std::size_t dependencyHash = 0; ///< Transform-independent draw dependency hash.
+    PipelineDescription pipeline; ///< Pipeline requirements proved compatible with every draw.
+    RenderAssetsStamp assets;     ///< Catalog identity and revision this plan was built from.
 };
 
 /* --- Classes --- */
 
 /**
- * @brief Validates render descriptions and caches compilation of a scene draw list.
+ * @brief Validates render descriptions and caches compilation of a scene snapshot's draws.
  *
  * Asset validation is repeated only when the catalog's identity or revision
  * changes. A cached plan is reused only for the exact catalog identity and
@@ -50,7 +49,8 @@ struct RenderPreparationPlan
  * RenderObjectId dependencies. The two are keyed separately because a build
  * can validate a catalog and then reject its draws, leaving the cached plan
  * from an earlier catalog. World transforms never invalidate the plan because
- * they are consumed later during command recording.
+ * they are consumed later during command recording. The ordered dependencies
+ * are copied, so no reference to a snapshot outlives build().
  *
  * Catalog identities follow content and are never reused, so a catalog
  * destroyed and replaced at the same address cannot match an earlier plan.
@@ -71,13 +71,13 @@ public:
     /**
      * @brief Returns a cached plan or compiles one for the supplied dependencies.
      * @param assets Complete catalog of Vulkan-free render descriptions.
-     * @param drawList Current scene instances and dependency hash.
+     * @param snapshot Current scene draws, read only during this call.
      * @param pipeline Vulkan-free requirements selected for the compiled draw packets.
      * @return Reference valid until the next build() call that changes the plan.
      * @throws std::invalid_argument if an asset or draw dependency is invalid.
      */
     [[nodiscard]] const RenderPreparationPlan&
-    build(const RenderAssets& assets, const SceneDrawList& drawList, PipelineDescription pipeline);
+    build(const RenderAssets& assets, const SceneSnapshot& snapshot, PipelineDescription pipeline);
 
     /**
      * @brief Returns how many distinct plans this compiler has produced.
@@ -87,7 +87,7 @@ public:
 
 private:
     std::optional<RenderAssetsStamp> validatedAssets_;  ///< Last fully validated catalog state.
-    std::vector<RenderObjectId> cachedDependencies_;    ///< Exact collision-proof plan key.
+    std::vector<RenderObjectId> cachedDependencies_;    ///< Exact ordered draw dependencies.
     std::optional<PipelineDescription> cachedPipeline_; ///< Pipeline requirement in the plan key.
     std::optional<RenderPreparationPlan> cachedPlan_;   ///< Most recently compiled subset.
     std::size_t generation_ = 0; ///< Number of cache misses compiled by build().

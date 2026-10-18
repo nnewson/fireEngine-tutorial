@@ -2,7 +2,7 @@
 
 #include <fire_engine/graphics/detail/asset_validation.hpp>
 #include <fire_engine/graphics/render_assets.hpp>
-#include <fire_engine/scene/scene_draw_list.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
 #include <stdexcept>
 #include <utility>
@@ -16,18 +16,18 @@ namespace
 /* --- File-local function declarations --- */
 
 /**
- * @brief Extracts the exact ordered dependency key retained beside its hash.
- * @param drawList Draw items whose render-object references form the key.
+ * @brief Extracts the exact ordered dependency key.
+ * @param snapshot Draws whose render-object references form the key.
  * @return Render-object IDs in draw order, including repeated references.
  */
-[[nodiscard]] std::vector<RenderObjectId> dependencies(const SceneDrawList& drawList);
+[[nodiscard]] std::vector<RenderObjectId> dependencies(const SceneSnapshot& snapshot);
 /** @endcond */
 } // namespace
 
 /* --- Public member functions --- */
 
 const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets,
-                                                      const SceneDrawList& drawList,
+                                                      const SceneSnapshot& snapshot,
                                                       PipelineDescription pipeline)
 {
     const RenderAssetsStamp stamp = assets.stamp();
@@ -40,9 +40,8 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
     // Validation can succeed for a catalog whose draws are then rejected
     // below, so it never vouches for the cached plan. Only the plan's own
     // stamp proves which catalog state it describes.
-    std::vector<RenderObjectId> currentDependencies = dependencies(drawList);
+    std::vector<RenderObjectId> currentDependencies = dependencies(snapshot);
     if (cachedPlan_.has_value() && cachedPlan_->assets == stamp && cachedPipeline_ == pipeline &&
-        cachedPlan_->dependencyHash == drawList.dependencyHash &&
         cachedDependencies_ == currentDependencies)
     {
         return *cachedPlan_;
@@ -61,7 +60,6 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
     RenderPreparationPlan plan;
     plan.pipeline = pipeline;
     plan.assets = stamp;
-    plan.dependencyHash = drawList.dependencyHash;
     std::vector<bool> usedMeshes(assets.meshes().size(), false);
     std::vector<bool> usedImages(assets.images().size(), false);
     std::vector<bool> usedTextures(assets.textures().size(), false);
@@ -144,11 +142,11 @@ namespace
 /** @cond INTERNAL */
 /* --- File-local functions --- */
 
-std::vector<RenderObjectId> dependencies(const SceneDrawList& drawList)
+std::vector<RenderObjectId> dependencies(const SceneSnapshot& snapshot)
 {
     std::vector<RenderObjectId> result;
-    result.reserve(drawList.drawItems.size());
-    for (const DrawItem& drawItem : drawList.drawItems)
+    result.reserve(snapshot.drawItems().size());
+    for (const DrawItem& drawItem : snapshot.drawItems())
     {
         result.push_back(drawItem.renderObject);
     }
