@@ -97,12 +97,15 @@ struct ForwardParticipantCpuTimings
 /** @brief Host timings for frame-lifecycle work shared by every render pass. */
 struct CommonFrameCpuTimings
 {
-    std::chrono::nanoseconds recordingInputBuild{};   ///< Shared draw validation and packet freeze.
-    std::chrono::nanoseconds frameFenceWait{};        ///< Reusable-frame completion wait.
+    std::chrono::nanoseconds recordingInputBuild{}; ///< Shared draw validation and packet freeze.
+    /// Frame-slot retirement wait on the renderer's timeline semaphore; no wait on a slot's first
+    /// use. The name and its "frame-fence wait" report label predate the timeline and are kept
+    /// for report compatibility.
+    std::chrono::nanoseconds frameFenceWait{};
     std::chrono::nanoseconds frameUniformUpdate{};    ///< Shared slot-local shader-value write.
     std::chrono::nanoseconds imageAcquisitionWait{};  ///< Presentable-image acquisition.
     std::chrono::nanoseconds presentationFenceWait{}; ///< Per-image retirement wait.
-    std::chrono::nanoseconds queueSubmission{};       ///< Fence reset and graphics submission.
+    std::chrono::nanoseconds queueSubmission{};       ///< Graphics submission.
     std::chrono::nanoseconds presentation{};          ///< Host presentation call.
 };
 

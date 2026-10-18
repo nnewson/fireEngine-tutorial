@@ -18,6 +18,7 @@
 #include <fire_engine/render/detail/frame_recording_input.hpp>
 #include <fire_engine/render/detail/frame_resources.hpp>
 #include <fire_engine/render/detail/frame_slot.hpp>
+#include <fire_engine/render/detail/frame_submission.hpp>
 #include <fire_engine/render/detail/presentation_state.hpp>
 #include <fire_engine/render/detail/readback_buffer.hpp>
 #include <fire_engine/render/detail/recording_context.hpp>
@@ -25,6 +26,7 @@
 #include <fire_engine/render/detail/shadow_map_policy.hpp>
 #include <fire_engine/render/detail/shadow_pipeline.hpp>
 #include <fire_engine/render/detail/shadow_recorder.hpp>
+#include <fire_engine/render/detail/submission_serials.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
 #include <fire_engine/scene/scene_draw_list.hpp>
 
@@ -72,6 +74,16 @@ struct CaptureAttempt final
  */
 [[nodiscard]] std::optional<FrameCaptureRequest>
 validatedCaptureRequest(std::optional<FrameCaptureRequest> request);
+
+/**
+ * @brief Creates the renderer-owned timeline semaphore that retires frame submissions.
+ * @param device Logical device with timeline semaphores enabled.
+ * @param initialValue Counter value matching the submission ledger's starting serial.
+ * @return Timeline semaphore whose counter starts at initialValue.
+ * @throws vk::SystemError if Vulkan cannot create the semaphore.
+ */
+[[nodiscard]] vk::raii::Semaphore createFrameTimeline(const detail::Device& device,
+                                                      std::uint64_t initialValue);
 
 [[nodiscard]] constexpr vk::Viewport sceneViewport(vk::Extent2D extent) noexcept;
 } // namespace
@@ -177,10 +189,17 @@ private:
     [[nodiscard]] CaptureAttempt prepareCaptureAttempt();
 
     /**
-     * @brief Waits for one submitted slot before host access to its readback bytes.
-     * @param frameSlot Slot whose submission fence was signaled by the capture copy.
+     * @brief Waits on the host until the frame timeline reaches one submission serial.
+     * @param serial Serial signaled by a successful frame submission.
+     * @return Vulkan's wait result; anything but success authorizes no reuse.
      */
-    void waitForCaptureSubmission(const detail::FrameSlot& frameSlot) const;
+    [[nodiscard]] vk::Result waitForSubmission(std::uint64_t serial) const;
+
+    /**
+     * @brief Waits for the capture submission before host access to its readback bytes.
+     * @param serial Serial signaled by the submission that recorded the capture copy.
+     */
+    void waitForCaptureSubmission(std::uint64_t serial) const;
 
     /**
      * @brief Invalidates, converts, and writes one successfully presented capture.
@@ -209,8 +228,11 @@ private:
     std::unique_ptr<detail::PresentationState> presentation_; ///< Swapchain-compatible resources.
 
     std::array<detail::FrameResources, detail::kFrameSlotCount>
-        frames_;                            ///< Presentation-independent slot state.
-    std::size_t nextFrameSlotIndex_ = 0;    ///< Slot selected independently of acquired images.
+        frames_; ///< Presentation-independent slot state.
+    // The ledger precedes the timeline, which is created at the ledger's value.
+    // Neither belongs to PresentationState, so recreation never resets them.
+    detail::SubmissionSerials submissionSerials_; ///< Published serials and the selected slot.
+    vk::raii::Semaphore frameTimeline_;     ///< Signaled once per successful frame submission.
     std::uint64_t presentedFrameCount_ = 0; ///< Successful presentations seen by capture logic.
     std::uint64_t presentationRecreationCount_ = 0; ///< Completed presentation replacements.
     bool captureComplete_ = false; ///< Whether the configured PNG committed successfully.
@@ -338,6 +360,7 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
                                                         configuration.forwardRecordingMode)}},
                   },
           }},
+      frameTimeline_{createFrameTimeline(device_, submissionSerials_.lastSubmitted())},
       forwardRecorder_{configuration.forwardRecordingMode,
                        configuration.forcedForwardRecordingParticipantCount}
 {
@@ -349,12 +372,11 @@ Renderer::Impl::Impl(const Glfw& glfw, const Window& window, const std::string& 
     {
         throw std::runtime_error("VMA returned a null allocator");
     }
-    for (const detail::FrameResources& frame : frames_)
+    // Each slot's first use waits for nothing, so retirement depends on the
+    // counter starting exactly where the ledger's serials begin.
+    if (frameTimeline_.getCounterValue() != submissionSerials_.lastSubmitted())
     {
-        if (frame.slot.frameFinished().getStatus() != vk::Result::eSuccess)
-        {
-            throw std::runtime_error("A frame-finished fence was not initially signaled");
-        }
+        throw std::runtime_error("The frame timeline did not start at its initial value");
     }
 }
 
@@ -435,7 +457,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         // therefore cannot abandon a signaled image-available semaphore.
         captureAttempt.emplace(prepareCaptureAttempt());
     }
-    const std::size_t frameSlotIndex = nextFrameSlotIndex_;
+    const std::size_t frameSlotIndex = submissionSerials_.slot();
     detail::FrameResources& frame = frames_[frameSlotIndex];
     detail::FrameSlot& frameSlot = frame.slot;
     // Freeze external IDs and transforms before acquisition. A compiler
@@ -475,16 +497,24 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
                                                     forwardRecordingState);
     }();
 
-    const vk::raii::Device& logicalDevice = device_.logicalDevice();
-    vk::Result fenceResult = vk::Result::eSuccess;
+    // Choosing the serial reserves nothing; exhaustion is rejected here, before
+    // acquisition and before this slot's state is touched.
+    const std::uint64_t submissionSerial = submissionSerials_.candidate();
+    vk::Result retirementResult = vk::Result::eSuccess;
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.frameFenceWait};
-        fenceResult = logicalDevice.waitForFences(*frameSlot.frameFinished(), vk::True,
-                                                  std::numeric_limits<std::uint64_t>::max());
+        // A slot's first use waits for nothing. Later uses wait for the serial of
+        // that slot's own last successful submission.
+        if (const std::optional<std::uint64_t> retirementValue =
+                submissionSerials_.retirementValue())
+        {
+            retirementResult = waitForSubmission(*retirementValue);
+        }
     }
-    if (fenceResult != vk::Result::eSuccess)
+    if (retirementResult != vk::Result::eSuccess)
     {
-        throw vk::SystemError{vk::make_error_code(fenceResult), "Waiting for the frame fence"};
+        throw vk::SystemError{vk::make_error_code(retirementResult),
+                              "Waiting for frame-slot retirement"};
     }
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.frameUniformUpdate};
@@ -504,8 +534,8 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
     }
     catch (const vk::OutOfDateKHRError&)
     {
-        // The fence is still signaled because acquisition happens before
-        // its reset. Do not advance the cycle when this slot submitted nothing.
+        // Nothing was submitted, so no serial is published and the same slot
+        // is selected again with its retirement value unchanged.
         return RenderResult::eNotPresented;
     }
 
@@ -553,42 +583,40 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         endPrimaryRecording(primaryCommandBuffer, imageIndex,
                             captureAttempt.has_value() ? &*captureAttempt : nullptr);
     }
-    // Nothing intentionally abandons the frame after this reset: a
-    // successful submission will signal the fence, while errors unwind.
+    // A failed submission publishes nothing: the slot stays selected and keeps
+    // waiting for its previous serial, which an earlier submission signals.
     {
         CpuPhaseTimer timer{timings == nullptr ? nullptr : &timings->common.queueSubmission};
-        logicalDevice.resetFences(*frameSlot.frameFinished());
 
         const vk::SemaphoreSubmitInfo waitInfo{
             .semaphore = *frameSlot.imageAvailable(),
             .stageMask = detail::kAcquireWaitStage,
         };
         // Publication at the end of the shadow primary precedes the forward
-        // primary in the same submission. One slot fence retires both buffers.
+        // primary in the same submission. One timeline serial retires both.
         const std::array commandInfos{
             vk::CommandBufferSubmitInfo{.commandBuffer = *frame.shadow.primary.commandBuffer()},
             vk::CommandBufferSubmitInfo{.commandBuffer = *frame.forward.primary.commandBuffer()},
         };
-        const vk::SemaphoreSubmitInfo signalInfo{
-            .semaphore = *presentation_->swapchain().renderFinished(imageIndex),
-            .stageMask = detail::kRenderFinishedSignalStage,
-        };
+        // Capture signals no render-finished semaphore; see
+        // detail::frameSignalSemaphoreInfos().
+        const detail::FrameSignals signals = detail::frameSignalSemaphoreInfos(
+            *frameTimeline_, submissionSerial,
+            *presentation_->swapchain().renderFinished(imageIndex), captureAttempt.has_value());
         const vk::SubmitInfo2 submitInfo{
             .waitSemaphoreInfoCount = 1,
             .pWaitSemaphoreInfos = &waitInfo,
             .commandBufferInfoCount = static_cast<std::uint32_t>(commandInfos.size()),
             .pCommandBufferInfos = commandInfos.data(),
-            // Capture retires this complete submission on the host before
-            // presentation. Do not signal a binary semaphore that the capture
-            // presentation will not consume; it would remain signaled when
-            // this swapchain image is reused.
-            .signalSemaphoreInfoCount = captureAttempt.has_value() ? 0U : 1U,
-            .pSignalSemaphoreInfos = captureAttempt.has_value() ? nullptr : &signalInfo,
+            .signalSemaphoreInfoCount = signals.count,
+            .pSignalSemaphoreInfos = signals.infos.data(),
         };
-        device_.graphicsQueue().submit2(submitInfo, *frameSlot.frameFinished());
+        device_.graphicsQueue().submit2(submitInfo);
     }
+    // The submission succeeded, so this is the commit point. Neither call
+    // throws, and a later capture or presentation failure leaves both in place.
+    submissionSerials_.commit(submissionSerial);
     frameSlot.markWorkPending();
-    nextFrameSlotIndex_ = (frameSlotIndex + 1) % detail::kFrameSlotCount;
     if (captureAttempt.has_value())
     {
         // Capture is a one-shot diagnostic, so retire the complete submission
@@ -600,7 +628,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         // waited on a semaphore whose signal covered the capture transfer.
         // Re-test that GPU-side path when a release driver is available; this
         // bounded diagnostic path deliberately favours portability over overlap.
-        waitForCaptureSubmission(frameSlot);
+        waitForCaptureSubmission(submissionSerial);
     }
 
     const vk::Semaphore renderFinished = *presentation_->swapchain().renderFinished(imageIndex);
@@ -849,10 +877,21 @@ CaptureAttempt Renderer::Impl::prepareCaptureAttempt()
     };
 }
 
-void Renderer::Impl::waitForCaptureSubmission(const detail::FrameSlot& frameSlot) const
+vk::Result Renderer::Impl::waitForSubmission(std::uint64_t serial) const
 {
-    const vk::Result result = device_.logicalDevice().waitForFences(
-        *frameSlot.frameFinished(), vk::True, std::numeric_limits<std::uint64_t>::max());
+    const vk::Semaphore timeline = *frameTimeline_;
+    const vk::SemaphoreWaitInfo waitInfo{
+        .semaphoreCount = 1,
+        .pSemaphores = &timeline,
+        .pValues = &serial,
+    };
+    return device_.logicalDevice().waitSemaphores(waitInfo,
+                                                  std::numeric_limits<std::uint64_t>::max());
+}
+
+void Renderer::Impl::waitForCaptureSubmission(std::uint64_t serial) const
+{
+    const vk::Result result = waitForSubmission(serial);
     if (result != vk::Result::eSuccess)
     {
         throw vk::SystemError{vk::make_error_code(result), "Waiting for frame capture completion"};
@@ -911,6 +950,18 @@ validatedCaptureRequest(std::optional<FrameCaptureRequest> request)
             "A frame capture requires a non-empty path and positive frame ordinal");
     }
     return request;
+}
+
+vk::raii::Semaphore createFrameTimeline(const detail::Device& device, std::uint64_t initialValue)
+{
+    const vk::SemaphoreTypeCreateInfo typeInfo{
+        .semaphoreType = vk::SemaphoreType::eTimeline,
+        .initialValue = initialValue,
+    };
+    const vk::SemaphoreCreateInfo createInfo{
+        .pNext = &typeInfo,
+    };
+    return {device.logicalDevice(), createInfo};
 }
 
 /**

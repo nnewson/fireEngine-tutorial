@@ -32,7 +32,7 @@ public:
      * @param input Immutable pipeline state and ordered caster packets.
      * @param target Plain selected shadow-map attachment handles.
      * @param timings Optional output receiving shadow durations and recorded draw count.
-     * @pre The containing slot's fence has retired every prior use of the context and map.
+     * @pre The slot's timeline wait has retired every prior use of the context and map.
      * @pre Shared frame uniforms have been written after that retirement.
      */
     void record(const RecordingContext& primary, const ShadowRecordingInput& input,

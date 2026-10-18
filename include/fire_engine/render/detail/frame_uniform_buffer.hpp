@@ -19,7 +19,8 @@ class MemoryAllocator;
  *
  * The buffer survives presentation recreation and is selected by frame-slot
  * index rather than acquired-image index. The renderer updates it only after
- * the matching slot fence retires and before that slot is submitted again.
+ * the slot's timeline wait retires its last submission and before that slot is
+ * submitted again.
  */
 class FrameUniformBuffer final
 {

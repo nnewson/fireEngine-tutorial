@@ -32,7 +32,7 @@ inline constexpr vk::PipelineStageFlags2 kRenderFinishedSignalStage =
 /**
  * @brief Discards a retired shadow map and establishes depth-attachment access.
  *
- * Slot-fence retirement completed all prior use, including sampled reads. The
+ * The slot's timeline wait retired all prior use, including sampled reads. The
  * source is empty because this transition discards those retired contents.
  *
  * @param shadowMap Selected frame-slot shadow-map image.

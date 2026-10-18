@@ -259,8 +259,9 @@ The ownership boundary is explicit rather than a render graph:
 Renderer
   compiled scene resources; shadow pipeline and comparison sampler
   frame-input compiler; shadow recorder; forward recorder and its helper
+  frame timeline semaphore and submission serials (slot selection)
   FrameResources[2]
-    FrameSlot: acquisition semaphore, submission fence, pending-work state
+    FrameSlot: acquisition semaphore, pending-work state
     shared uniform buffer
     shadow: depth map and primary recording context
     forward: primary and participant recording contexts
@@ -270,28 +271,35 @@ Renderer
     per-slot forward depth attachments and compatible forward pipeline
 ```
 
-After freezing input, the coordinator waits for the selected slot's fence and
-updates that slot's uniform buffer. It acquires a swapchain image, retires its
-previous presentation fence, then records the shadow primary followed by the
-forward primary. The forward recorder may dispatch its helper and join it
-before executing the completed secondaries. The CPU records one frame at a
-time; the two submission slots cycle independently of acquired image indices.
+After freezing input, the coordinator waits on the renderer's timeline
+semaphore for the serial of the selected slot's last submission, then updates
+that slot's uniform buffer. A slot's first use waits for nothing. It acquires a
+swapchain image, retires its previous presentation fence, then records the
+shadow primary followed by the forward primary. The forward recorder may
+dispatch its helper and join it before executing the completed secondaries. The
+CPU records one frame at a time; the two submission slots cycle independently
+of acquired image indices.
 
-The shadow entry barrier discards contents only after the slot fence has
-retired **all** prior uses of that map. Its exit barrier publishes early/late
+The shadow entry barrier discards contents only after that wait has retired
+**all** prior uses of that map. Its exit barrier publishes early/late
 fragment-test depth writes to fragment-shader sampled reads. One `submit2`
-contains the shadow and forward primaries in that order, with one fence retiring
-both; no inter-pass semaphore is needed. The acquisition semaphore orders
-swapchain color-attachment work. Ordinary presentation waits on the acquired
-image's render-finished semaphore. A diagnostic capture instead retires the
-complete submission on the host before presenting.
+contains the shadow and forward primaries in that order, and signals the next
+serial on the timeline with all-commands scope, retiring both; no inter-pass
+semaphore is needed. The serial is published, and the slot advanced, only after
+submission succeeds. An attempt that fails before successful submission
+consumes no serial. Later capture or presentation failures leave the published
+serial and advanced slot intact. The acquisition semaphore orders swapchain
+color-attachment work. Ordinary presentation waits on the acquired image's
+render-finished semaphore. A diagnostic capture instead retires the complete
+submission on the host before presenting.
 
 Presentation fences supplied through swapchain maintenance cover the image and
-semaphore lifetime that a rendering-submission fence cannot cover. Recreation
-retires submitted work, offers the old swapchain to Vulkan, and replaces only
-`PresentationState`. It preserves prepared scene resources, both shadow maps,
-the shadow pipeline, and the comparison sampler. Forward and shadow depth
-formats are selected and reported independently.
+semaphore lifetime that the timeline's command completion cannot cover.
+Recreation retires submitted work, offers the old swapchain to Vulkan, and
+replaces only `PresentationState`. It preserves prepared scene resources, both
+shadow maps, the shadow pipeline, the comparison sampler, and the frame
+timeline's serials. Forward and shadow depth formats are selected and reported
+independently.
 
 Framebuffer callbacks request replacement after resize. A zero framebuffer
 extent waits for events rather than rebuilding repeatedly. Minimization does
