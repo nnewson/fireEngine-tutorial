@@ -27,7 +27,7 @@ enum class RecordingBufferKind : std::uint8_t
  * @brief Owns one externally synchronized command pool and optional buffer.
  *
  * A future worker receives only this recording-local state. It contains no
- * queue, submission fence, allocator, or frame-slot ownership.
+ * queue, timeline semaphore, allocator, or frame-slot ownership.
  */
 class RecordingContext final
 {

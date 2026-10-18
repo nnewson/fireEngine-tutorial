@@ -518,7 +518,7 @@ try
         }
     }
 
-    // Presentation is not covered by the per-frame fence. Renderer::waitIdle
+    // Presentation is not covered by the frame timeline. Renderer::waitIdle
     // first waits for device work, then waits for every presentation fence
     // supplied through the KHR or equivalent EXT swapchain-maintenance extension.
     // Together they make submitted and presentation resources safe to destroy.

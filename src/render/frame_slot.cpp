@@ -11,21 +11,11 @@ FrameSlot::FrameSlot(const Device& device)
 {
     constexpr vk::SemaphoreCreateInfo semaphoreInfo{};
     imageAvailable_ = vk::raii::Semaphore{device.logicalDevice(), semaphoreInfo};
-
-    const vk::FenceCreateInfo fenceInfo{
-        .flags = vk::FenceCreateFlagBits::eSignaled,
-    };
-    frameFinished_ = vk::raii::Fence{device.logicalDevice(), fenceInfo};
 }
 
 const vk::raii::Semaphore& FrameSlot::imageAvailable() const noexcept
 {
     return imageAvailable_;
-}
-
-const vk::raii::Fence& FrameSlot::frameFinished() const noexcept
-{
-    return frameFinished_;
 }
 
 bool FrameSlot::workMayBePending() const noexcept

@@ -11,13 +11,18 @@ class Device;
 
 /* --- Classes --- */
 
-/** @brief Owns synchronization and pending-work state reused as one frame slot. */
+/**
+ * @brief Owns the acquisition semaphore and pending-work state reused as one frame slot.
+ *
+ * Slot retirement is not stored here: the renderer waits on its frame timeline
+ * for the slot's last submission serial, which detail::SubmissionSerials records.
+ */
 class FrameSlot final
 {
 public:
     /**
-     * @brief Creates synchronization objects for one submission slot.
-     * @param device Logical device used to create synchronization objects.
+     * @brief Creates the acquisition semaphore for one submission slot.
+     * @param device Logical device used to create the semaphore.
      */
     explicit FrameSlot(const Device& device);
 
@@ -35,11 +40,14 @@ public:
 
     /** @brief Returns the acquisition semaphore. @return Initially unsignaled semaphore. */
     [[nodiscard]] const vk::raii::Semaphore& imageAvailable() const noexcept;
-    /** @brief Returns the submission fence. @return Initially signaled fence. */
-    [[nodiscard]] const vk::raii::Fence& frameFinished() const noexcept;
     /**
      * @brief Reports whether submitted work may still use slot-owned resources.
-     * @return true after submission until the renderer completes its retirement wait.
+     *
+     * This is conservative cleanup state, not command completion. Only a full
+     * device and presentation wait clears it: a timeline value showing that the
+     * commands finished says nothing about presentation still using resources.
+     *
+     * @return true after submission until a device and presentation wait clears it.
      */
     [[nodiscard]] bool workMayBePending() const noexcept;
     /** @brief Marks the slot as potentially referenced by submitted work. */
@@ -49,7 +57,6 @@ public:
 
 private:
     vk::raii::Semaphore imageAvailable_{nullptr}; ///< Signals image acquisition.
-    vk::raii::Fence frameFinished_{nullptr};      ///< Signals submission completion.
     bool workMayBePending_ = false;               ///< Whether defensive retirement must wait.
 };
 /** @endcond */

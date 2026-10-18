@@ -92,6 +92,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/shadow_pipeline.cpp
     src/render/shadow_recorder.cpp
     src/render/spirv_loader.cpp
+    src/render/submission_serials.cpp
     src/render/swapchain.cpp
     src/render/swapchain_selection.cpp
     src/scene/scene.cpp
@@ -338,10 +339,12 @@ add_executable(fireEngineTutorialTests
     tests/render/test_forward_secondary_recording_worker.cpp
     tests/render/test_frame_barriers.cpp
     tests/render/test_frame_recording_input.cpp
+    tests/render/test_frame_submission.cpp
     tests/render/test_frame_uniforms.cpp
     tests/render/test_shadow_draw_constants.cpp
     tests/render/test_shadow_map_policy.cpp
     tests/render/test_spirv_loader.cpp
+    tests/render/test_submission_serials.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
 )

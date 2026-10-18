@@ -344,14 +344,22 @@ inspectDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Su
             "{}: neither compatible swapchain maintenance1 extension is available", deviceName));
     }
 
-    // Vulkan 1.3 mandates both features, so a conformant Vulkan 1.4 driver
-    // reports them as supported. Keep the checks for defensive diagnostics with
-    // preview drivers and to show that querying support is separate from enabling
-    // the features during logical-device creation.
+    // Vulkan 1.2 mandates timeline semaphores and Vulkan 1.3 mandates the next
+    // two features, so a conformant Vulkan 1.4 driver reports them as supported.
+    // Keep the checks for defensive diagnostics with preview drivers and to show
+    // that querying support is separate from enabling the features during
+    // logical-device creation.
     const auto features =
-        physicalDevice.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features,
-                                    vk::PhysicalDeviceVulkan14Features,
-                                    vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
+        physicalDevice
+            .getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan12Features,
+                          vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceVulkan14Features,
+                          vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
+    // Frame-slot retirement waits on one timeline semaphore that each frame
+    // submission advances.
+    if (features.get<vk::PhysicalDeviceVulkan12Features>().timelineSemaphore != vk::True)
+    {
+        return std::unexpected(std::format("{}: timeline semaphores are unavailable", deviceName));
+    }
     const auto& features13 = features.get<vk::PhysicalDeviceVulkan13Features>();
     if (features13.dynamicRendering != vk::True)
     {
@@ -527,11 +535,11 @@ makeQueueCreateInfos(const DeviceSelection& selection)
         selection.swapchainMaintenanceExtension,
     };
 
-    // Querying support does not enable features. Enable exactly the Vulkan 1.3
-    // and 1.4 features the tutorial uses, and no others.
+    // Querying support does not enable features. Enable exactly the Vulkan 1.2,
+    // 1.3 and 1.4 features the tutorial uses, and no others.
     //
     // Each structure is linked into the next one's pNext chain. Note that these
-    // two locals cannot be const: pNext is a void*, so a structure that another
+    // locals cannot be const: pNext is a void*, so a structure that another
     // structure points at must be mutable even though nothing here modifies it.
     //
     // Vulkan-Hpp offers vk::StructureChain to build such a chain with the links
@@ -555,9 +563,13 @@ makeQueueCreateInfos(const DeviceSelection& selection)
         .synchronization2 = vk::True,
         .dynamicRendering = vk::True,
     };
+    vk::PhysicalDeviceVulkan12Features enabledFeatures12{
+        .pNext = &enabledFeatures13,
+        .timelineSemaphore = vk::True,
+    };
 
     const vk::DeviceCreateInfo deviceCreateInfo{
-        .pNext = &enabledFeatures13,
+        .pNext = &enabledFeatures12,
         .queueCreateInfoCount = static_cast<std::uint32_t>(queueCreateInfos.size()),
         .pQueueCreateInfos = queueCreateInfos.data(),
         .enabledExtensionCount = static_cast<std::uint32_t>(requiredDeviceExtensions.size()),
