@@ -224,14 +224,16 @@ once dependencies are installed, builds and tests need no asset downloads.
 `Renderer::prepare()` validates those relationships through a cached
 `RenderPreparation` compiler and uploads only the resources selected by the
 current `SceneDrawList`. The internal `CompiledResources` subsystem owns mesh
-buffers, sampled images, samplers, and the persistent white fallback texture.
-The separate internal `ResourceCompiler` owns mutable compilation, staging, and
-its dedicated setup-time upload command pool and fence. Scene traversal hashes
-only ordered render-object dependencies, so animation-only transform changes
-reuse the same preparation plan while `Renderer::drawFrame()` records current
-transforms. Device, allocator, resource compiler, compiled resources,
-presentation state, and frame resources remain hidden behind the renderer
-facade.
+buffers, sampled images, samplers, and the persistent white fallback texture,
+and records the last frame submission that used them. A changed `prepare()`
+compiles the replacement first, then waits only for that submission before
+destroying the old resources; it does not wait for presentation. The separate
+internal `ResourceCompiler` owns mutable compilation, staging, and its dedicated
+setup-time upload command pool and fence. Scene traversal hashes only ordered
+render-object dependencies, so animation-only transform changes reuse the same
+preparation plan while `Renderer::drawFrame()` records current transforms.
+Device, allocator, resource compiler, compiled resources, presentation state,
+and frame resources remain hidden behind the renderer facade.
 
 Mathematical coordinates use `Vec3` and `Vec4`, while graphics colors use the
 separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain
@@ -285,13 +287,13 @@ The shadow entry barrier discards contents only after that wait has retired
 fragment-test depth writes to fragment-shader sampled reads. One `submit2`
 contains the shadow and forward primaries in that order, and signals the next
 serial on the timeline with all-commands scope, retiring both; no inter-pass
-semaphore is needed. The serial is published, and the slot advanced, only after
-submission succeeds. An attempt that fails before successful submission
-consumes no serial. Later capture or presentation failures leave the published
-serial and advanced slot intact. The acquisition semaphore orders swapchain
-color-attachment work. Ordinary presentation waits on the acquired image's
-render-finished semaphore. A diagnostic capture instead retires the complete
-submission on the host before presenting.
+semaphore is needed. The serial is published, the slot advanced, and the serial
+recorded as the compiled resources' last use, only after submission succeeds. An
+attempt that fails before successful submission consumes no serial. Later
+capture or presentation failures leave all three intact. The acquisition
+semaphore orders swapchain color-attachment work. Ordinary presentation waits on
+the acquired image's render-finished semaphore. A diagnostic capture instead
+retires the complete submission on the host before presenting.
 
 Presentation fences supplied through swapchain maintenance cover the image and
 semaphore lifetime that the timeline's command completion cannot cover.
