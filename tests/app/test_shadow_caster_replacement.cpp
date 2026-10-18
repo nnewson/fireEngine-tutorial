@@ -37,6 +37,7 @@ using fire_engine::SceneContent;
 using fire_engine::SceneNode;
 using fire_engine::SceneNodeId;
 using fire_engine::SceneNodeRef;
+using fire_engine::SceneSnapshot;
 using fire_engine::TextureId;
 using fire_engine::Vertex;
 
@@ -54,8 +55,11 @@ SceneNode& cubeNode(SceneContent& content)
 
 std::vector<RenderObjectId> drawDependencies(const SceneContent& content)
 {
+    // A named snapshot: C++23 extends a temporary's lifetime across a range-for
+    // loop, but compilers without that rule (GCC 14) would destroy it first.
+    const SceneSnapshot snapshot = content.scene.buildSnapshot(content.assets);
     std::vector<RenderObjectId> result;
-    for (const DrawItem& draw : content.scene.buildSnapshot(content.assets).drawItems())
+    for (const DrawItem& draw : snapshot.drawItems())
     {
         result.push_back(draw.renderObject);
     }
