@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -37,7 +38,13 @@ private:
     std::span<const std::optional<CompiledRenderObject>> objects_; ///< Borrowed lookup capability.
 };
 
-/** @brief Owns the GPU resources compiled from the current render-preparation plan. */
+/**
+ * @brief Owns the installed compiled-resource graph and the last submission that used it.
+ *
+ * The last use is the timeline serial of the latest successful frame
+ * submission recorded against the installed graph, or none when no submission
+ * has used it.
+ */
 class CompiledResources final
 {
 public:
@@ -67,10 +74,26 @@ public:
      * @brief Commits one complete compiler-produced ownership graph.
      * @param replacement Complete candidate whose borrowers refer only to its owners.
      * @pre No CompiledResourcesView or frame recording input still borrows the current graph.
+     * @pre Every submission that used the current graph has completed.
+     * @post No submission has used the installed graph.
      */
     void replace(std::unique_ptr<CompiledResourceGraph> replacement) noexcept;
 
+    /**
+     * @brief Records one successful frame submission against the installed graph.
+     * @param serial Timeline serial published by that submission.
+     * @pre @p serial exceeds the installed graph's previous last use.
+     */
+    void markUsed(std::uint64_t serial) noexcept;
+
+    /**
+     * @brief Returns the latest submission recorded against the installed graph.
+     * @return Its timeline serial, or nullopt when no submission has used the graph.
+     */
+    [[nodiscard]] std::optional<std::uint64_t> lastUse() const noexcept;
+
 private:
     std::unique_ptr<CompiledResourceGraph> graph_; ///< Complete stable GPU ownership graph.
+    std::optional<std::uint64_t> lastUse_;         ///< Latest submission that used graph_.
 };
 } // namespace fire_engine::detail

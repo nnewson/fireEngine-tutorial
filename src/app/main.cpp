@@ -127,8 +127,9 @@ constexpr std::array<SmokeDefinition, 7> kSmokeDefinitions{{
         .name = "prepare-twice",
         .scenario = SmokeScenario::ePrepareTwice,
         // Two original frames populate both submission slots before preparation
-        // quiesces them. Three replacement frames then revisit both slots while
-        // image count and acquisition order remain driver-selected.
+        // waits for the frames that used the original resources. Three
+        // replacement frames then revisit both slots while image count and
+        // acquisition order remain driver-selected.
         .frameLimit = 5,
         .reprepareAfterFrame = 2,
         .recreateEveryFrame = false,

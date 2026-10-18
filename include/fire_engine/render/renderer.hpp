@@ -214,10 +214,13 @@ public:
      * @param assets Vulkan-free render descriptions to compile.
      * @param drawList Frozen draws whose render-object references are validated.
      * Repeating the same asset revision and scene dependencies reuses the
-     * cached plan and GPU resources. Changed inputs replace the compiled subset.
+     * cached plan and GPU resources. Changed inputs compile a replacement
+     * subset, then wait only for the submitted frames that used the old one;
+     * they do not wait for presentation or for the device to become idle.
      *
      * @throws std::invalid_argument if assets or draw references are invalid.
-     * @throws std::runtime_error if a GPU allocation or upload fails.
+     * @throws std::runtime_error if a GPU allocation, upload, or wait for the
+     * old subset's frames fails.
      */
     void prepare(const RenderAssets& assets, const SceneDrawList& drawList);
 

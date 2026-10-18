@@ -239,7 +239,7 @@ private:
 
     // Prepared state compiled from the current scene dependencies.
     RenderPreparation renderPreparation_;           ///< Vulkan-free validation and plan cache.
-    detail::CompiledResources compiledResources_;   ///< GPU state selected by the current plan.
+    detail::CompiledResources compiledResources_;   ///< Installed GPU graph and its last use.
     std::optional<std::size_t> compiledGeneration_; ///< Plan generation uploaded to the GPU.
     detail::FrameRecordingInputCompiler
         frameRecordingInputCompiler_;       ///< Reusable pass-specific packet-freeze arenas.
@@ -423,16 +423,25 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& dr
         return;
     }
 
-    // Replacing compiled buffers requires earlier submissions to have
-    // finished using them. Identical preparation inputs return above and
-    // avoid both this wait and every allocation below.
-    if (workMayBePending())
-    {
-        waitIdle();
-    }
-
+    // The installed graph stays usable while its replacement compiles. A
+    // failure here or in the wait below leaves the installed graph, its last
+    // use and the compiled generation unchanged.
     std::unique_ptr<detail::CompiledResourceGraph> candidate =
         resourceCompiler_.compile(assets, plan, compiledResources_.graph());
+
+    // Only recorded commands use compiled resources, and the all-commands
+    // timeline signal for their last use also covers every earlier
+    // submission. Presentation never uses them, so its retirement stays with
+    // waitIdle() and the destructor. A graph no submission used needs no wait.
+    if (const std::optional<std::uint64_t> lastUse = compiledResources_.lastUse())
+    {
+        const vk::Result retirementResult = waitForSubmission(*lastUse);
+        if (retirementResult != vk::Result::eSuccess)
+        {
+            throw vk::SystemError{vk::make_error_code(retirementResult),
+                                  "Waiting for compiled-resource retirement"};
+        }
+    }
     compiledResources_.replace(std::move(candidate));
     compiledGeneration_ = renderPreparation_.generation();
 }
@@ -613,10 +622,12 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
         };
         device_.graphicsQueue().submit2(submitInfo);
     }
-    // The submission succeeded, so this is the commit point. Neither call
-    // throws, and a later capture or presentation failure leaves both in place.
+    // The submission succeeded, so this is the commit point. None of these
+    // calls throws, and a later capture or presentation failure leaves all
+    // three in place.
     submissionSerials_.commit(submissionSerial);
     frameSlot.markWorkPending();
+    compiledResources_.markUsed(submissionSerial);
     if (captureAttempt.has_value())
     {
         // Capture is a one-shot diagnostic, so retire the complete submission
