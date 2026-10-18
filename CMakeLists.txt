@@ -334,6 +334,7 @@ add_executable(fireEngineTutorialTests
     tests/math/test_mat4.cpp
     tests/render/test_camera.cpp
     tests/render/test_capture_format_mapping.cpp
+    tests/render/test_compiled_resources.cpp
     tests/render/test_directional_shadow_view.cpp
     tests/render/test_draw_binding_state.cpp
     tests/render/test_forward_secondary_recording_worker.cpp

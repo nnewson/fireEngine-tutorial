@@ -8,7 +8,10 @@
 #include <fire_engine/render/detail/device.hpp>
 #include <fire_engine/render/detail/image_subresource_ranges.hpp>
 
+#include <cassert>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -147,6 +150,19 @@ const CompiledResourceGraph& CompiledResources::graph() const noexcept
 void CompiledResources::replace(std::unique_ptr<CompiledResourceGraph> replacement) noexcept
 {
     graph_ = std::move(replacement);
+    lastUse_.reset();
+}
+
+void CompiledResources::markUsed(std::uint64_t serial) noexcept
+{
+    // Successful submissions publish strictly increasing serials.
+    assert(!lastUse_.has_value() || serial > *lastUse_);
+    lastUse_ = serial;
+}
+
+std::optional<std::uint64_t> CompiledResources::lastUse() const noexcept
+{
+    return lastUse_;
 }
 
 namespace
