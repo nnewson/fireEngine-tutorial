@@ -6,6 +6,7 @@
 #include "benchmark.hpp"
 #include "procedural_shadow_receiver.hpp"
 #include "shadow_caster_replacement.hpp"
+#include "snapshot_acceptance.hpp"
 #include "tutorial_frame_descriptions.hpp"
 
 #include <algorithm>
@@ -67,6 +68,7 @@ enum class SmokeScenario : std::uint8_t
     eShadow,             ///< Add the procedural receiver and use the shadow-demonstration camera.
     eShadowReuse,        ///< Revisit both frame slots repeatedly with the shadow demonstration.
     eShadowPrepareTwice, ///< Replace caster dependencies without an image-upload wait.
+    eSnapshotAcceptance, ///< Script accepted and rejected snapshots against prepared catalogs.
 };
 
 /** @brief Mutually exclusive top-level application modes selected by the command line. */
@@ -114,8 +116,17 @@ struct ShadowPreparationProgress
     std::size_t preparationCount = 0;    ///< Successful replacement preparation calls.
 };
 
+/** @brief Counts observed by the scripted snapshot-acceptance scenario. */
+struct SnapshotAcceptanceReport
+{
+    std::uint64_t presentedFrames = 0;    ///< Frames presented by the script.
+    std::size_t rejectedDraws = 0;        ///< drawFrame() calls rejected as expected.
+    std::size_t rejectedPreparations = 0; ///< prepare() calls rejected as expected.
+    std::size_t preparations = 1;         ///< Successful prepare() calls, counting the first.
+};
+
 /** @brief Named integration-scenario metadata consumed by the command-line parser. */
-constexpr std::array<SmokeDefinition, 7> kSmokeDefinitions{{
+constexpr std::array<SmokeDefinition, 8> kSmokeDefinitions{{
     {
         .name = "basic",
         .scenario = SmokeScenario::eBasic,
@@ -171,7 +182,44 @@ constexpr std::array<SmokeDefinition, 7> kSmokeDefinitions{{
         .reprepareAfterFrame = 2,
         .recreateEveryFrame = false,
     },
+    {
+        .name = "snapshot-acceptance",
+        .scenario = SmokeScenario::eSnapshotAcceptance,
+        // Five scripted frames, then three more from the replacement catalog.
+        .frameLimit = 8,
+        .reprepareAfterFrame = std::nullopt,
+        .recreateEveryFrame = false,
+    },
 }};
+
+/* --- File-local function templates --- */
+
+/**
+ * @brief Requires one rejection of the expected exception type and reason.
+ * @tparam Rejection Exception type the attempt must throw.
+ * @param step Scenario step named in a failure.
+ * @param reason Text the exception message must contain.
+ * @param attempt Call that must be rejected.
+ * @throws std::runtime_error if the attempt succeeds or is rejected for another reason.
+ */
+template <typename Rejection, typename Attempt>
+void requireRejection(std::string_view step, std::string_view reason, const Attempt& attempt)
+{
+    try
+    {
+        attempt();
+    }
+    catch (const Rejection& error)
+    {
+        if (!std::string_view{error.what()}.contains(reason))
+        {
+            throw std::runtime_error(std::format(
+                "Snapshot acceptance: {} was rejected for another reason: {}", step, error.what()));
+        }
+        return;
+    }
+    throw std::runtime_error(std::format("Snapshot acceptance: {} was accepted", step));
+}
 
 /* --- File-local function declarations --- */
 
@@ -230,6 +278,29 @@ void selectUntexturedScene(fire_engine::SceneContent& content);
 void addMixedResourceInstances(fire_engine::SceneContent& content);
 
 /**
+ * @brief Draws accepted and rejected snapshots against the prepared and replaced catalogs.
+ *
+ * Starts after the shared first preparation of the shadow demonstration. Every
+ * expected rejection is matched by exception type and message. Validation, not
+ * this function, shows that no rejected attempt acquired an image: a rejected
+ * attempt that had acquired would leave its slot's semaphore signaled for the
+ * next acquisition.
+ *
+ * @param renderer Renderer holding the first prepared graph.
+ * @param window Window polled between frames and used for recreation.
+ * @param content Shadow demonstration content; its catalog is replaced by move assignment.
+ * @param frameDescription Camera and shadow view used for every frame.
+ * @param frameLimit Total frames to present.
+ * @return Presented frames and accepted, rejected, and successful operation counts.
+ * @throws std::runtime_error if any step is accepted or rejected unexpectedly.
+ */
+[[nodiscard]] SnapshotAcceptanceReport
+runSnapshotAcceptance(fire_engine::Renderer& renderer, fire_engine::Window& window,
+                      fire_engine::SceneContent& content,
+                      const fire_engine::FrameDescription& frameDescription,
+                      std::uint64_t frameLimit);
+
+/**
  * @brief Waits without spinning and retries recreation until the framebuffer is drawable.
  * @param renderer Renderer whose presentation-dependent state is replaced.
  * @param window Window whose events and framebuffer extent are inspected.
@@ -255,7 +326,9 @@ try
     const RunOptions options = parseOptions(argumentCount, arguments);
     const std::string applicationName = "fireEngine Tutorial";
     const bool checkShadowPackets = isShadowReceiverScenario(options.smokeScenario);
-    const bool shadowDemonstration = options.mode == RunMode::eInteractive || checkShadowPackets;
+    const bool snapshotAcceptance = options.smokeScenario == SmokeScenario::eSnapshotAcceptance;
+    const bool shadowDemonstration =
+        options.mode == RunMode::eInteractive || checkShadowPackets || snapshotAcceptance;
     const fire_engine::FrameDescription& frameDescription =
         shadowDemonstration ? fire_engine::tutorial::shadowDemonstrationFrameDescription()
                             : fire_engine::tutorial::animatedCubeFrameDescription();
@@ -290,20 +363,22 @@ try
     {
         selectUntexturedScene(content);
     }
-    fire_engine::SceneDrawListArena drawListArena;
+    // One draw buffer is recycled through every snapshot, so steady-state
+    // frames allocate nothing once it reaches its high-water size.
+    std::vector<fire_engine::DrawItem> drawStorage;
     content.scene.updateWorldTransforms();
     std::size_t initialForwardDrawCount = 0;
     std::size_t initialShadowCasterCount = 0;
     std::optional<ShadowPreparationProgress> shadowPreparation;
     {
-        const fire_engine::SceneDrawList initialDrawList =
-            content.scene.buildDrawItems(drawListArena);
-        renderer.prepare(content.assets, initialDrawList);
+        fire_engine::SceneSnapshot initialSnapshot =
+            content.scene.buildSnapshot(content.assets, std::move(drawStorage));
+        renderer.prepare(content.assets, initialSnapshot);
         if (shadowDemonstration)
         {
-            initialForwardDrawCount = initialDrawList.drawItems.size();
+            initialForwardDrawCount = initialSnapshot.drawItems().size();
             initialShadowCasterCount =
-                std::ranges::count_if(initialDrawList.drawItems,
+                std::ranges::count_if(initialSnapshot.drawItems(),
                                       [&content](const auto& drawItem)
                                       {
                                           return content.assets.renderObjects()
@@ -318,11 +393,12 @@ try
                 throw std::logic_error("Shadow preparation requires one caster and one receiver");
             }
             shadowPreparation.emplace();
-            // Copy IDs, not the arena-backed view: the next draw rebuilds it.
-            shadowPreparation->originalObjects = {initialDrawList.drawItems[0].renderObject,
-                                                  initialDrawList.drawItems[1].renderObject};
+            // Copy IDs: the snapshot's storage is released to the next frame.
+            shadowPreparation->originalObjects = {initialSnapshot.drawItems()[0].renderObject,
+                                                  initialSnapshot.drawItems()[1].renderObject};
             shadowPreparation->originalRevision = content.assets.revision();
         }
+        drawStorage = std::move(initialSnapshot).releaseStorage();
     }
 
     const fire_engine::RendererInfo rendererInfo = renderer.info();
@@ -365,6 +441,15 @@ try
         }
         return !options.frameLimit.has_value() || renderedFrameCount < *options.frameLimit;
     };
+    std::optional<SnapshotAcceptanceReport> snapshotAcceptanceReport;
+    if (snapshotAcceptance)
+    {
+        // The scripted scenario presents every requested frame itself, so the
+        // ordinary loop below finds nothing left to do.
+        snapshotAcceptanceReport =
+            runSnapshotAcceptance(renderer, window, content, frameDescription, *options.frameLimit);
+        renderedFrameCount = snapshotAcceptanceReport->presentedFrames;
+    }
     while (!window.shouldClose() && runIncomplete())
     {
         window.pollEvents();
@@ -409,7 +494,8 @@ try
             {
                 drawListStart = std::chrono::steady_clock::now();
             }
-            const fire_engine::SceneDrawList drawList = content.scene.buildDrawItems(drawListArena);
+            fire_engine::SceneSnapshot snapshot =
+                content.scene.buildSnapshot(content.assets, std::move(drawStorage));
             std::chrono::nanoseconds drawListBuild{};
             if (benchmark.has_value())
             {
@@ -419,7 +505,7 @@ try
 
             fire_engine::RendererCpuTimings rendererTimings;
             result = renderer.drawFrame(
-                drawList, frameDescription,
+                snapshot, frameDescription,
                 benchmark.has_value() || checkShadowPackets ? &rendererTimings : nullptr);
             if (benchmark.has_value())
             {
@@ -458,7 +544,8 @@ try
                 }
                 ++renderedFrameCount;
             }
-        } // Retire the draw-list view before repeated preparation reuses its arena.
+            drawStorage = std::move(snapshot).releaseStorage();
+        }
         if (!repeatedPreparationComplete && options.reprepareAfterFrame == renderedFrameCount)
         {
             // Replace compiled resources only after a submitted frame has used
@@ -470,13 +557,13 @@ try
                 // that could mask a missing retirement wait inside prepare().
                 const auto replacement = fire_engine::tutorial::replaceShadowCaster(content);
                 content.scene.updateWorldTransforms();
-                const fire_engine::SceneDrawList replacementDrawList =
-                    content.scene.buildDrawItems(drawListArena);
+                fire_engine::SceneSnapshot replacementSnapshot =
+                    content.scene.buildSnapshot(content.assets, std::move(drawStorage));
                 const auto& originalObjects = shadowPreparation->originalObjects;
                 if (content.assets.revision() <= shadowPreparation->originalRevision ||
                     std::ranges::count(originalObjects, replacement.originalObject) != 1 ||
                     std::ranges::contains(originalObjects, replacement.replacementObject) ||
-                    replacementDrawList.drawItems.size() != originalObjects.size())
+                    replacementSnapshot.drawItems().size() != originalObjects.size())
                 {
                     throw std::logic_error("Shadow preparation did not change caster dependencies");
                 }
@@ -488,7 +575,7 @@ try
                     const bool isCaster = originalObjects[index] == replacement.originalObject;
                     const fire_engine::RenderObjectId expectedObject =
                         isCaster ? replacement.replacementObject : originalObjects[index];
-                    if (replacementDrawList.drawItems[index].renderObject != expectedObject ||
+                    if (replacementSnapshot.drawItems()[index].renderObject != expectedObject ||
                         content.assets.renderObjects().at(expectedObject.value).castsShadow !=
                             isCaster)
                     {
@@ -496,14 +583,15 @@ try
                             "Shadow preparation changed receiver identity, policy, or draw order");
                     }
                 }
-                renderer.prepare(content.assets, replacementDrawList);
+                renderer.prepare(content.assets, replacementSnapshot);
+                drawStorage = std::move(replacementSnapshot).releaseStorage();
                 ++shadowPreparation->preparationCount;
             }
             else
             {
                 addMixedResourceInstances(content);
                 content.scene.updateWorldTransforms();
-                renderer.prepare(content.assets, content.scene.buildDrawItems(drawListArena));
+                renderer.prepare(content.assets, content.scene.buildSnapshot(content.assets));
             }
             repeatedPreparationComplete = true;
         }
@@ -567,6 +655,16 @@ try
                      "{} replacement frames.",
                      shadowPreparation->preparationCount, shadowPreparation->originalFrames,
                      shadowPreparation->replacementFrames);
+    }
+    if (snapshotAcceptanceReport.has_value())
+    {
+        std::println("Snapshot acceptance: {} presented frames, {} rejected draws, {} rejected "
+                     "preparation{}, {} preparations.",
+                     snapshotAcceptanceReport->presentedFrames,
+                     snapshotAcceptanceReport->rejectedDraws,
+                     snapshotAcceptanceReport->rejectedPreparations,
+                     snapshotAcceptanceReport->rejectedPreparations == 1 ? "" : "s",
+                     snapshotAcceptanceReport->preparations);
     }
     std::println("Presented {} frame{}.", renderedFrameCount, renderedFrameCount == 1 ? "" : "s");
     return 0;
@@ -869,6 +967,135 @@ void addMixedResourceInstances(fire_engine::SceneContent& content)
         node.component(object);
         offset += 1.5f;
     }
+}
+
+SnapshotAcceptanceReport
+runSnapshotAcceptance(fire_engine::Renderer& renderer, fire_engine::Window& window,
+                      fire_engine::SceneContent& content,
+                      const fire_engine::FrameDescription& frameDescription,
+                      std::uint64_t frameLimit)
+{
+    SnapshotAcceptanceReport report;
+    // Presents one snapshot and checks its packets, recreating presentation when
+    // the surface changes. Unexpected rejections propagate and fail the run.
+    const auto present = [&](const fire_engine::SceneSnapshot& snapshot, std::size_t shadowDraws,
+                             std::size_t forwardDraws)
+    {
+        while (true)
+        {
+            window.pollEvents();
+            if (window.shouldClose())
+            {
+                throw std::runtime_error("Snapshot acceptance: the window closed early");
+            }
+            fire_engine::RendererCpuTimings timings;
+            const fire_engine::RenderResult result =
+                renderer.drawFrame(snapshot, frameDescription, &timings);
+            const bool presented = result != fire_engine::RenderResult::eNotPresented;
+            if (presented)
+            {
+                if (timings.shadow.drawCount != shadowDraws ||
+                    timings.forward.drawCount != forwardDraws)
+                {
+                    throw std::runtime_error(std::format(
+                        "Snapshot acceptance recorded {} shadow and {} forward draws; expected "
+                        "{} and {}",
+                        timings.shadow.drawCount, timings.forward.drawCount, shadowDraws,
+                        forwardDraws));
+                }
+                ++report.presentedFrames;
+            }
+            if (result != fire_engine::RenderResult::ePresented)
+            {
+                static_cast<void>(window.consumeFramebufferResize());
+                if (!recreateWhenDrawable(renderer, window))
+                {
+                    throw std::runtime_error("Snapshot acceptance: the window closed early");
+                }
+            }
+            if (presented)
+            {
+                return;
+            }
+        }
+    };
+    // Draw rejections are logic errors raised before acquisition.
+    const auto requireDrawRejected = [&](std::string_view step,
+                                         const fire_engine::SceneSnapshot& snapshot,
+                                         std::string_view reason)
+    {
+        requireRejection<std::logic_error>(
+            step, reason,
+            [&] { static_cast<void>(renderer.drawFrame(snapshot, frameDescription)); });
+        ++report.rejectedDraws;
+    };
+
+    // 1. The shared first preparation compiled exactly these draws.
+    const fire_engine::SceneSnapshot prepared = content.scene.buildSnapshot(content.assets);
+    const auto caster = std::ranges::find_if(
+        prepared.drawItems(), [&](const auto& draw)
+        { return content.assets.renderObjects().at(draw.renderObject.value).castsShadow; });
+    const auto receiver = std::ranges::find_if_not(
+        prepared.drawItems(), [&](const auto& draw)
+        { return content.assets.renderObjects().at(draw.renderObject.value).castsShadow; });
+    if (prepared.drawItems().size() != 2 || caster == prepared.drawItems().end() ||
+        receiver == prepared.drawItems().end())
+    {
+        throw std::logic_error("Snapshot acceptance requires one caster and one receiver");
+    }
+    const fire_engine::DrawItem casterDraw = *caster;
+    const fire_engine::DrawItem receiverDraw = *receiver;
+    present(prepared, 1, 2);
+
+    // 2. Unrelated content changes the revision; no preparation is needed.
+    const fire_engine::RenderObjectId unprepared =
+        fire_engine::tutorial::appendRenderObjectLike(content.assets, casterDraw.renderObject);
+    const fire_engine::SceneSnapshot newer = content.scene.buildSnapshot(content.assets);
+    if (newer.catalog() == prepared.catalog())
+    {
+        throw std::logic_error("Snapshot acceptance did not change the catalog revision");
+    }
+    present(newer, 1, 2);
+
+    // 3. Draws may be reordered and repeated without preparing.
+    present(fire_engine::SceneSnapshot{content.assets, {receiverDraw, casterDraw, casterDraw}}, 2,
+            3);
+
+    // 4. An object added after preparation is not covered.
+    requireDrawRejected(
+        "a draw of an unprepared object",
+        fire_engine::SceneSnapshot{
+            content.assets, {casterDraw, {.renderObject = unprepared, .world = casterDraw.world}}},
+        "not compiled by prepare");
+
+    // 5. The same entries, IDs and revision in another catalog are rejected,
+    //    and the prepared graph is untouched.
+    fire_engine::RenderAssets duplicate = fire_engine::tutorial::duplicateCatalog(content.assets);
+    const fire_engine::SceneSnapshot duplicated = content.scene.buildSnapshot(duplicate);
+    requireDrawRejected("a snapshot from another catalog", duplicated, "was built from catalog");
+    requireRejection<std::invalid_argument>("preparing another catalog's snapshot",
+                                            "not built from these render assets",
+                                            [&] { renderer.prepare(content.assets, duplicated); });
+    ++report.rejectedPreparations;
+    present(newer, 1, 2);
+
+    // 6. Replacing the catalog's content requires preparing it, after which the
+    //    replaced catalog's snapshots are rejected.
+    content.assets = std::move(duplicate);
+    const fire_engine::SceneSnapshot replacement = content.scene.buildSnapshot(content.assets);
+    requireDrawRejected("the replacement catalog's snapshot before preparation", replacement,
+                        "was built from catalog");
+    renderer.prepare(content.assets, replacement);
+    ++report.preparations;
+    requireDrawRejected("the replaced catalog's snapshot", newer, "was built from catalog");
+    present(replacement, 1, 2);
+
+    // 7. Ordinary frames from the replacement catalog.
+    while (report.presentedFrames < frameLimit)
+    {
+        present(content.scene.buildSnapshot(content.assets), 1, 2);
+    }
+    return report;
 }
 
 [[nodiscard]] bool recreateWhenDrawable(fire_engine::Renderer& renderer,

@@ -5,8 +5,8 @@
 #include <fire_engine/graphics/mesh.hpp>
 #include <fire_engine/graphics/render_object.hpp>
 #include <fire_engine/math/transform.hpp>
-#include <fire_engine/scene/scene_draw_list.hpp>
 #include <fire_engine/scene/scene_node.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -92,11 +92,10 @@ TEST_CASE("Procedural shadow receiver appends the registered receive-only plane"
     REQUIRE(std::get<fire_engine::RenderObjectId>(root.component()) == receiver);
 
     content.scene.updateWorldTransforms();
-    fire_engine::SceneDrawListArena drawListArena;
-    const fire_engine::SceneDrawList drawList = content.scene.buildDrawItems(drawListArena);
-    REQUIRE(drawList.drawItems.size() == 1);
-    REQUIRE(drawList.drawItems.front().renderObject == receiver);
-    REQUIRE(drawList.drawItems.front().world == expectedTransform.matrix());
+    const fire_engine::SceneSnapshot snapshot = content.scene.buildSnapshot(content.assets);
+    REQUIRE(snapshot.drawItems().size() == 1);
+    REQUIRE(snapshot.drawItems().front().renderObject == receiver);
+    REQUIRE(snapshot.drawItems().front().world == expectedTransform.matrix());
 }
 
 TEST_CASE("Procedural shadow receiver appends without replacing existing content")
@@ -131,9 +130,8 @@ TEST_CASE("Procedural shadow receiver appends without replacing existing content
     REQUIRE(content.scene.roots().back()->name() == "Procedural shadow receiver");
 
     content.scene.updateWorldTransforms();
-    fire_engine::SceneDrawListArena drawListArena;
-    const fire_engine::SceneDrawList drawList = content.scene.buildDrawItems(drawListArena);
-    REQUIRE(drawList.drawItems.size() == 2);
-    REQUIRE(drawList.drawItems[0].renderObject == existingObject);
-    REQUIRE(drawList.drawItems[1].renderObject == receiver);
+    const fire_engine::SceneSnapshot snapshot = content.scene.buildSnapshot(content.assets);
+    REQUIRE(snapshot.drawItems().size() == 2);
+    REQUIRE(snapshot.drawItems()[0].renderObject == existingObject);
+    REQUIRE(snapshot.drawItems()[1].renderObject == receiver);
 }

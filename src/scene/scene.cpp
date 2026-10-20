@@ -1,7 +1,5 @@
 #include <fire_engine/scene/scene.hpp>
 
-#include <fire_engine/core/detail/hash.hpp>
-
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -101,30 +99,14 @@ void Scene::updateWorldTransforms()
     }
 }
 
-SceneDrawList Scene::buildDrawItems(SceneDrawListArena& arena) const
+SceneSnapshot Scene::buildSnapshot(const RenderAssets& catalog, std::vector<DrawItem> storage) const
 {
-    arena.drawItems_.clear();
+    storage.clear();
     for (const std::unique_ptr<SceneNode>& root : roots_)
     {
-        root->appendDrawItems(arena.drawItems_);
+        root->appendDrawItems(storage);
     }
-
-    // Hash only preparation dependencies. Exact IDs are retained in drawItems
-    // so RenderPreparation can still prove equality after this fast check.
-    constexpr std::size_t kHashCombineConstant = static_cast<std::size_t>(
-        sizeof(std::size_t) == sizeof(std::uint64_t) ? detail::k64BitGoldenRatio
-                                                     : detail::k32BitGoldenRatio);
-    std::size_t dependencyHash = arena.drawItems_.size();
-    for (const DrawItem& drawItem : arena.drawItems_)
-    {
-        const std::size_t value = std::hash<std::size_t>{}(drawItem.renderObject.value);
-        dependencyHash ^=
-            value + kHashCombineConstant + (dependencyHash << 6U) + (dependencyHash >> 2U);
-    }
-    return {
-        .drawItems = arena.drawItems_,
-        .dependencyHash = dependencyHash,
-    };
+    return SceneSnapshot{catalog, std::move(storage)};
 }
 
 const std::vector<std::unique_ptr<SceneNode>>& Scene::roots() const noexcept

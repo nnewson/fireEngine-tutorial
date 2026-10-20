@@ -12,7 +12,7 @@ namespace fire_engine
 /* --- Forward declarations --- */
 
 class RenderAssets;
-struct SceneDrawList;
+class SceneSnapshot;
 
 /* --- POD structs --- */
 
@@ -34,24 +34,26 @@ struct RenderPreparationPlan
     std::vector<TextureId> textures;   ///< Distinct required textures in stable ID order.
     std::vector<MaterialId> materials; ///< Distinct required materials in stable ID order.
     std::vector<PreparedRenderObject> renderObjects; ///< Required relationships by ID.
-    PipelineDescription pipeline;   ///< Pipeline requirements proved compatible with every draw.
-    std::size_t assetRevision = 0;  ///< Asset revision represented by this plan.
-    std::size_t dependencyHash = 0; ///< Transform-independent draw dependency hash.
+    PipelineDescription pipeline; ///< Pipeline requirements proved compatible with every draw.
+    RenderAssetsStamp assets;     ///< Catalog identity and revision this plan was built from.
 };
 
 /* --- Classes --- */
 
 /**
- * @brief Validates render descriptions and caches compilation of a scene draw list.
+ * @brief Validates render descriptions and caches compilation of a scene snapshot's draws.
  *
- * Asset validation is repeated only when the RenderAssets instance or revision
- * changes. Plan compilation is repeated only when that asset state or the exact
- * ordered RenderObjectId dependencies change. World transforms never invalidate
- * the plan because they are consumed later during command recording.
+ * Asset validation is repeated only when the catalog's identity or revision
+ * changes. A cached plan is reused only for the exact catalog identity and
+ * revision it was built from, the same pipeline, and the same ordered
+ * RenderObjectId dependencies. The two are keyed separately because a build
+ * can validate a catalog and then reject its draws, leaving the cached plan
+ * from an earlier catalog. World transforms never invalidate the plan because
+ * they are consumed later during command recording. The ordered dependencies
+ * are copied, so no reference to a snapshot outlives build().
  *
- * Collection identity is represented by its address and revision. As with any
- * address-based cache, destroying a collection and constructing another at the
- * same address with the same revision requires a fresh RenderPreparation.
+ * Catalog identities follow content and are never reused, so a catalog
+ * destroyed and replaced at the same address cannot match an earlier plan.
  */
 class RenderPreparation final
 {
@@ -69,13 +71,14 @@ public:
     /**
      * @brief Returns a cached plan or compiles one for the supplied dependencies.
      * @param assets Complete catalog of Vulkan-free render descriptions.
-     * @param drawList Current scene instances and dependency hash.
+     * @param snapshot Current scene draws, read only during this call.
      * @param pipeline Vulkan-free requirements selected for the compiled draw packets.
      * @return Reference valid until the next build() call that changes the plan.
-     * @throws std::invalid_argument if an asset or draw dependency is invalid.
+     * @throws std::invalid_argument if the snapshot was not built from @p assets, or an asset
+     * or draw dependency is invalid.
      */
     [[nodiscard]] const RenderPreparationPlan&
-    build(const RenderAssets& assets, const SceneDrawList& drawList, PipelineDescription pipeline);
+    build(const RenderAssets& assets, const SceneSnapshot& snapshot, PipelineDescription pipeline);
 
     /**
      * @brief Returns how many distinct plans this compiler has produced.
@@ -84,9 +87,8 @@ public:
     [[nodiscard]] std::size_t generation() const noexcept;
 
 private:
-    const RenderAssets* validatedAssets_ = nullptr;     ///< Collection associated with validation.
-    std::optional<std::size_t> validatedRevision_;      ///< Last fully validated asset revision.
-    std::vector<RenderObjectId> cachedDependencies_;    ///< Exact collision-proof plan key.
+    std::optional<RenderAssetsStamp> validatedAssets_;  ///< Last fully validated catalog state.
+    std::vector<RenderObjectId> cachedDependencies_;    ///< Exact ordered draw dependencies.
     std::optional<PipelineDescription> cachedPipeline_; ///< Pipeline requirement in the plan key.
     std::optional<RenderPreparationPlan> cachedPlan_;   ///< Most recently compiled subset.
     std::size_t generation_ = 0; ///< Number of cache misses compiled by build().

@@ -2,8 +2,10 @@
 
 #include <fire_engine/graphics/detail/asset_validation.hpp>
 #include <fire_engine/graphics/render_assets.hpp>
-#include <fire_engine/scene/scene_draw_list.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
+#include <cassert>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -16,32 +18,42 @@ namespace
 /* --- File-local function declarations --- */
 
 /**
- * @brief Extracts the exact ordered dependency key retained beside its hash.
- * @param drawList Draw items whose render-object references form the key.
+ * @brief Extracts the exact ordered dependency key.
+ * @param snapshot Draws whose render-object references form the key.
  * @return Render-object IDs in draw order, including repeated references.
  */
-[[nodiscard]] std::vector<RenderObjectId> dependencies(const SceneDrawList& drawList);
+[[nodiscard]] std::vector<RenderObjectId> dependencies(const SceneSnapshot& snapshot);
 /** @endcond */
 } // namespace
 
 /* --- Public member functions --- */
 
 const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets,
-                                                      const SceneDrawList& drawList,
+                                                      const SceneSnapshot& snapshot,
                                                       PipelineDescription pipeline)
 {
-    const bool assetsChanged = validatedAssets_ != &assets || !validatedRevision_.has_value() ||
-                               *validatedRevision_ != assets.revision();
-    if (assetsChanged)
+    // Checked before validation, so a rejected pair changes nothing cached.
+    const std::optional<RenderAssetsStamp> built = snapshot.catalog();
+    if (!built.has_value() || built->catalog != assets.id())
+    {
+        throw std::invalid_argument("A scene snapshot was not built from these render assets");
+    }
+    // Identity follows content, so a snapshot can be older than its catalog but
+    // never newer.
+    assert(built->revision <= assets.revision());
+
+    const RenderAssetsStamp stamp = assets.stamp();
+    if (validatedAssets_ != stamp)
     {
         detail::validateAssets(assets);
-        validatedAssets_ = &assets;
-        validatedRevision_ = assets.revision();
+        validatedAssets_ = stamp;
     }
 
-    std::vector<RenderObjectId> currentDependencies = dependencies(drawList);
-    if (!assetsChanged && cachedPlan_.has_value() && cachedPipeline_ == pipeline &&
-        cachedPlan_->dependencyHash == drawList.dependencyHash &&
+    // Validation can succeed for a catalog whose draws are then rejected
+    // below, so it never vouches for the cached plan. Only the plan's own
+    // stamp proves which catalog state it describes.
+    std::vector<RenderObjectId> currentDependencies = dependencies(snapshot);
+    if (cachedPlan_.has_value() && cachedPlan_->assets == stamp && cachedPipeline_ == pipeline &&
         cachedDependencies_ == currentDependencies)
     {
         return *cachedPlan_;
@@ -59,8 +71,7 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
 
     RenderPreparationPlan plan;
     plan.pipeline = pipeline;
-    plan.assetRevision = assets.revision();
-    plan.dependencyHash = drawList.dependencyHash;
+    plan.assets = stamp;
     std::vector<bool> usedMeshes(assets.meshes().size(), false);
     std::vector<bool> usedImages(assets.images().size(), false);
     std::vector<bool> usedTextures(assets.textures().size(), false);
@@ -143,11 +154,11 @@ namespace
 /** @cond INTERNAL */
 /* --- File-local functions --- */
 
-std::vector<RenderObjectId> dependencies(const SceneDrawList& drawList)
+std::vector<RenderObjectId> dependencies(const SceneSnapshot& snapshot)
 {
     std::vector<RenderObjectId> result;
-    result.reserve(drawList.drawItems.size());
-    for (const DrawItem& drawItem : drawList.drawItems)
+    result.reserve(snapshot.drawItems().size());
+    for (const DrawItem& drawItem : snapshot.drawItems())
     {
         result.push_back(drawItem.renderObject);
     }

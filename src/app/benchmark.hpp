@@ -46,7 +46,7 @@ public:
      * @brief Accepts or discards one attempted frame's timings.
      * @param result Presentation result for this attempt.
      * @param transformUpdate Time spent resolving world transforms.
-     * @param drawListBuild Time spent replacing the arena-backed draw-list snapshot.
+     * @param drawListBuild Time spent building the scene snapshot into recycled storage.
      * @param renderer Timings measured inside Renderer::drawFrame().
      */
     void record(RenderResult result, std::chrono::nanoseconds transformUpdate,
@@ -64,7 +64,7 @@ private:
     struct Sample
     {
         std::chrono::nanoseconds transformUpdate{}; ///< Serial world-transform resolution.
-        std::chrono::nanoseconds drawListBuild{};   ///< Serial arena-backed snapshot build.
+        std::chrono::nanoseconds drawListBuild{};   ///< Serial scene-snapshot build.
         RendererCpuTimings renderer{};              ///< Renderer-owned host phases.
     };
 

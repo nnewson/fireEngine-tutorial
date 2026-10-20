@@ -1,7 +1,8 @@
 #include <fire_engine/render/detail/frame_recording_input.hpp>
 
-#include <fire_engine/scene/scene_draw_list.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
+#include <format>
 #include <optional>
 #include <stdexcept>
 
@@ -69,7 +70,7 @@ const ForwardRecordingInput& FrameRecordingInput::forward() const noexcept
     return forwardInput_;
 }
 
-FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneDrawList& drawList,
+FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneSnapshot& snapshot,
                                                          CompiledResourcesView resources,
                                                          FrameUniforms frameUniforms,
                                                          ShadowRecordingState shadowState,
@@ -81,15 +82,39 @@ FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneDrawList& dr
             "Shadow and forward recording pipelines use different vertex layouts");
     }
 
+    // Numeric IDs mean something only within one catalog. Revisions are only
+    // reported: within one catalog every covered entry is the same at any
+    // revision, so coverage below decides the rest.
+    const std::optional<RenderAssetsStamp> built = snapshot.catalog();
+    const std::optional<RenderAssetsStamp> prepared = resources.catalog();
+    if (!prepared.has_value())
+    {
+        throw std::logic_error("No compiled resources have been prepared");
+    }
+    if (!built.has_value())
+    {
+        throw std::logic_error("Scene snapshot has no catalog");
+    }
+    if (built->catalog != prepared->catalog)
+    {
+        throw std::logic_error(std::format(
+            "Scene snapshot was built from catalog {} at revision {}, but the prepared "
+            "resources describe catalog {} at revision {}",
+            built->catalog.value, built->revision, prepared->catalog.value, prepared->revision));
+    }
+
     shadowDraws_.clear();
     forwardDraws_.clear();
-    for (const DrawItem& item : drawList.drawItems)
+    for (const DrawItem& item : snapshot.drawItems())
     {
         const std::optional<CompiledRenderObject> compiledObject =
             resources.find(item.renderObject);
         if (!compiledObject.has_value())
         {
-            throw std::logic_error("Scene refers to an object not compiled by prepare");
+            throw std::logic_error(
+                std::format("Scene refers to an object not compiled by prepare (snapshot "
+                            "revision {}, prepared revision {})",
+                            built->revision, prepared->revision));
         }
         const CompiledRenderObject& object = compiledObject.value();
         if (object.geometry.vertexLayout != forwardState.vertexLayout)

@@ -28,7 +28,7 @@
 #include <fire_engine/render/detail/shadow_recorder.hpp>
 #include <fire_engine/render/detail/submission_serials.hpp>
 #include <fire_engine/render/detail/swapchain.hpp>
-#include <fire_engine/scene/scene_draw_list.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
 #include <array>
 #include <cassert>
@@ -115,18 +115,18 @@ public:
     /**
      * @brief Compiles the asset subset referenced by the current scene.
      * @param assets Complete Vulkan-free asset catalog.
-     * @param drawList Frozen draw dependencies selecting the compiled subset.
+     * @param snapshot Draw dependencies selecting the compiled subset.
      */
-    void prepare(const RenderAssets& assets, const SceneDrawList& drawList);
+    void prepare(const RenderAssets& assets, const SceneSnapshot& snapshot);
 
     /**
      * @brief Records, submits, and presents the current scene once.
-     * @param drawList Frozen draw items and transforms valid until this call returns.
+     * @param snapshot Draw items and transforms, read only during this call.
      * @param frameDescription Application-owned camera and shadow values sampled for this frame.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Presentation outcome for the acquired swapchain image.
      */
-    [[nodiscard]] RenderResult drawFrame(const SceneDrawList& drawList,
+    [[nodiscard]] RenderResult drawFrame(const SceneSnapshot& snapshot,
                                          const FrameDescription& frameDescription,
                                          RendererCpuTimings* timings);
 
@@ -262,16 +262,16 @@ Renderer::Renderer(const Glfw& glfw, const Window& window, const std::string& ap
 
 Renderer::~Renderer() noexcept = default;
 
-void Renderer::prepare(const RenderAssets& assets, const SceneDrawList& drawList)
+void Renderer::prepare(const RenderAssets& assets, const SceneSnapshot& snapshot)
 {
-    implementation_->prepare(assets, drawList);
+    implementation_->prepare(assets, snapshot);
 }
 
-RenderResult Renderer::drawFrame(const SceneDrawList& drawList,
+RenderResult Renderer::drawFrame(const SceneSnapshot& snapshot,
                                  const FrameDescription& frameDescription,
                                  RendererCpuTimings* timings)
 {
-    return implementation_->drawFrame(drawList, frameDescription, timings);
+    return implementation_->drawFrame(snapshot, frameDescription, timings);
 }
 
 bool Renderer::recreatePresentation(FramebufferExtent framebufferExtent)
@@ -411,13 +411,13 @@ Renderer::Impl::~Impl() noexcept
     }
 }
 
-void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& drawList)
+void Renderer::Impl::prepare(const RenderAssets& assets, const SceneSnapshot& snapshot)
 {
     assert(forwardRecorder_.idle());
     // Planning validates every CPU relationship before the first Vulkan
     // allocation, keeping malformed input failures deterministic and cheap.
     const RenderPreparationPlan& plan =
-        renderPreparation_.build(assets, drawList, kPipelineDescription);
+        renderPreparation_.build(assets, snapshot, kPipelineDescription);
     if (compiledGeneration_.has_value() && *compiledGeneration_ == renderPreparation_.generation())
     {
         return;
@@ -446,7 +446,7 @@ void Renderer::Impl::prepare(const RenderAssets& assets, const SceneDrawList& dr
     compiledGeneration_ = renderPreparation_.generation();
 }
 
-RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
+RenderResult Renderer::Impl::drawFrame(const SceneSnapshot& snapshot,
                                        const FrameDescription& frameDescription,
                                        RendererCpuTimings* timings)
 {
@@ -501,7 +501,7 @@ RenderResult Renderer::Impl::drawFrame(const SceneDrawList& drawList,
             .depthAttachmentFormat = presentation_->depthBuffer(frameSlotIndex).format(),
             .vertexLayout = kPipelineDescription.vertexLayout,
         };
-        return frameRecordingInputCompiler_.compile(drawList, compiledResources_.view(),
+        return frameRecordingInputCompiler_.compile(snapshot, compiledResources_.view(),
                                                     frameUniforms, shadowRecordingState,
                                                     forwardRecordingState);
     }();

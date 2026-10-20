@@ -116,8 +116,10 @@ const vk::raii::Sampler& CompiledTexture::sampler() const noexcept
 /* --- Public member functions --- */
 
 CompiledResourcesView::CompiledResourcesView(
-    std::span<const std::optional<CompiledRenderObject>> objects) noexcept
-    : objects_{objects}
+    std::span<const std::optional<CompiledRenderObject>> objects,
+    std::optional<RenderAssetsStamp> catalog) noexcept
+    : objects_{objects},
+      catalog_{catalog}
 {
 }
 
@@ -130,6 +132,11 @@ std::optional<CompiledRenderObject> CompiledResourcesView::find(RenderObjectId i
     return objects_[id.value];
 }
 
+std::optional<RenderAssetsStamp> CompiledResourcesView::catalog() const noexcept
+{
+    return catalog_;
+}
+
 CompiledResources::CompiledResources()
     : graph_{std::make_unique<CompiledResourceGraph>()}
 {
@@ -139,7 +146,7 @@ CompiledResources::~CompiledResources() = default;
 
 CompiledResourcesView CompiledResources::view() const noexcept
 {
-    return CompiledResourcesView{graph_->objects};
+    return CompiledResourcesView{graph_->objects, graph_->catalog};
 }
 
 const CompiledResourceGraph& CompiledResources::graph() const noexcept

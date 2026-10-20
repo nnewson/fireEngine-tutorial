@@ -248,17 +248,15 @@ TEST_CASE("Animation changes transforms without invalidating render preparation"
     scene.updateWorldTransforms();
 
     RenderPreparation preparation;
-    fire_engine::SceneDrawListArena drawListArena;
-    static_cast<void>(preparation.build(assets, scene.buildDrawItems(drawListArena),
-                                        fire_engine::PipelineDescription{}));
+    static_cast<void>(
+        preparation.build(assets, scene.buildSnapshot(assets), fire_engine::PipelineDescription{}));
     REQUIRE(preparation.generation() == 1);
 
     fire_engine::advanceAnimations(scene, animations, 0.5f);
     scene.updateWorldTransforms();
-    static_cast<void>(preparation.build(assets, scene.buildDrawItems(drawListArena),
-                                        fire_engine::PipelineDescription{}));
+    static_cast<void>(
+        preparation.build(assets, scene.buildSnapshot(assets), fire_engine::PipelineDescription{}));
 
     REQUIRE(preparation.generation() == 1);
-    REQUIRE(scene.buildDrawItems(drawListArena).drawItems.front().world !=
-            fire_engine::Mat4::identity());
+    REQUIRE(scene.buildSnapshot(assets).drawItems().front().world != fire_engine::Mat4::identity());
 }

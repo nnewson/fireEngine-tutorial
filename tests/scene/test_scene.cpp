@@ -1,5 +1,7 @@
 #include "fire_engine/scene/scene.hpp"
 
+#include "fire_engine/graphics/render_assets.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
@@ -17,18 +19,14 @@ using fire_engine::AnimationId;
 using fire_engine::AnimationTargetPath;
 using fire_engine::Animator;
 using fire_engine::DrawItem;
+using fire_engine::RenderAssets;
 using fire_engine::RenderObjectId;
 using fire_engine::Scene;
-using fire_engine::SceneDrawListArena;
 using fire_engine::SceneNode;
 using fire_engine::SceneNodeId;
+using fire_engine::SceneSnapshot;
 using fire_engine::Transform;
 using fire_engine::Vec3;
-
-static_assert(!std::is_copy_constructible_v<SceneDrawListArena>);
-static_assert(!std::is_copy_assignable_v<SceneDrawListArena>);
-static_assert(!std::is_move_constructible_v<SceneDrawListArena>);
-static_assert(!std::is_move_assignable_v<SceneDrawListArena>);
 
 // clang-tidy cannot see that a failed REQUIRE() throws, so accesses go through
 // an explicit guard rather than relying on a preceding has_value() assertion.
@@ -74,22 +72,27 @@ TEST_CASE("Scene resolves transforms and emits draw items depth first")
     REQUIRE(childReference.worldTransform()[0, 3] == 1.0f);
     REQUIRE(childReference.worldTransform()[1, 3] == 2.0f);
 
-    SceneDrawListArena drawListArena;
-    const auto drawList = scene.buildDrawItems(drawListArena);
-    static_assert(std::is_const_v<std::remove_reference_t<decltype(drawList.drawItems.front())>>);
-    REQUIRE(drawList.drawItems.size() == 2);
-    REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
-    REQUIRE(drawList.drawItems[1].renderObject == RenderObjectId{.value = 1});
-    REQUIRE(drawList.drawItems[1].world == childReference.worldTransform());
+    const RenderAssets catalog;
+    SceneSnapshot snapshot = scene.buildSnapshot(catalog);
+    static_assert(std::is_const_v<std::remove_reference_t<decltype(snapshot.drawItems().front())>>);
+    REQUIRE(snapshot.catalog() == catalog.stamp());
+    REQUIRE(snapshot.drawItems().size() == 2);
+    REQUIRE(snapshot.drawItems()[0].renderObject == RenderObjectId{.value = 0});
+    REQUIRE(snapshot.drawItems()[1].renderObject == RenderObjectId{.value = 1});
+    REQUIRE(snapshot.drawItems()[1].world == childReference.worldTransform());
 
-    const DrawItem* const firstStorage = drawList.drawItems.data();
+    // Rebuilding into the released storage reuses its buffer when the draw
+    // count does not grow, so steady-state frames allocate nothing.
+    const DrawItem* const firstStorage = snapshot.drawItems().data();
     childReference.localTransform(Transform{
         .translation = {.x = 4.0f, .y = 2.0f, .z = 0.0f},
     });
     scene.updateWorldTransforms();
-    const auto rebuiltDrawList = scene.buildDrawItems(drawListArena);
-    REQUIRE(rebuiltDrawList.drawItems.data() == firstStorage);
-    REQUIRE(rebuiltDrawList.drawItems[1].world == childReference.worldTransform());
+    const SceneSnapshot rebuilt =
+        scene.buildSnapshot(catalog, std::move(snapshot).releaseStorage());
+    REQUIRE(rebuilt.drawItems().data() == firstStorage);
+    REQUIRE(rebuilt.drawItems().size() == 2);
+    REQUIRE(rebuilt.drawItems()[1].world == childReference.worldTransform());
 }
 
 TEST_CASE("Scene registers attached subtrees immediately and preserves stable IDs")
@@ -159,11 +162,11 @@ TEST_CASE("Scene supports several roots in stable insertion order")
     second.component(RenderObjectId{.value = 1});
     scene.updateWorldTransforms();
 
-    SceneDrawListArena drawListArena;
-    const auto drawList = scene.buildDrawItems(drawListArena);
-    REQUIRE(drawList.drawItems.size() == 2);
-    REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
-    REQUIRE(drawList.drawItems[1].renderObject == RenderObjectId{.value = 1});
+    const RenderAssets catalog;
+    const SceneSnapshot snapshot = scene.buildSnapshot(catalog);
+    REQUIRE(snapshot.drawItems().size() == 2);
+    REQUIRE(snapshot.drawItems()[0].renderObject == RenderObjectId{.value = 0});
+    REQUIRE(snapshot.drawItems()[1].renderObject == RenderObjectId{.value = 1});
 }
 
 TEST_CASE("Scene components separate animation behavior from renderable children")
@@ -199,12 +202,12 @@ TEST_CASE("Scene components separate animation behavior from renderable children
     REQUIRE(std::holds_alternative<std::monostate>(transformOnly.component()));
 
     scene.updateWorldTransforms();
-    SceneDrawListArena drawListArena;
-    const auto drawList = scene.buildDrawItems(drawListArena);
-    REQUIRE(drawList.drawItems.size() == 2);
-    REQUIRE(drawList.drawItems[0].renderObject == RenderObjectId{.value = 0});
-    REQUIRE(drawList.drawItems[0].world[0, 3] == 3.0f);
-    REQUIRE(drawList.drawItems[1].renderObject == RenderObjectId{.value = 1});
+    const RenderAssets catalog;
+    const SceneSnapshot snapshot = scene.buildSnapshot(catalog);
+    REQUIRE(snapshot.drawItems().size() == 2);
+    REQUIRE(snapshot.drawItems()[0].renderObject == RenderObjectId{.value = 0});
+    REQUIRE(snapshot.drawItems()[0].world[0, 3] == 3.0f);
+    REQUIRE(snapshot.drawItems()[1].renderObject == RenderObjectId{.value = 1});
 }
 
 TEST_CASE("Scene rejects null nodes")

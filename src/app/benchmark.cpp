@@ -15,8 +15,8 @@
 #include <fire_engine/graphics/render_ids.hpp>
 #include <fire_engine/math/transform.hpp>
 #include <fire_engine/scene/scene.hpp>
-#include <fire_engine/scene/scene_draw_list.hpp>
 #include <fire_engine/scene/scene_node.hpp>
+#include <fire_engine/scene/scene_snapshot.hpp>
 
 namespace fire_engine::tutorial
 {
@@ -121,10 +121,9 @@ BenchmarkRun::BenchmarkRun(SceneContent& content, std::size_t instanceCount)
     }
     rootId_ = *registeredRootId;
     scene.updateWorldTransforms();
-    SceneDrawListArena drawListArena;
-    const SceneDrawList drawList = scene.buildDrawItems(drawListArena);
+    const SceneSnapshot snapshot = scene.buildSnapshot(content.assets);
     nodeCount_ = countNodes(scene);
-    drawCount_ = drawList.drawItems.size();
+    drawCount_ = snapshot.drawItems().size();
     if (nodeCount_ != instanceCount_ + 1 || drawCount_ != instanceCount_)
     {
         throw std::logic_error(

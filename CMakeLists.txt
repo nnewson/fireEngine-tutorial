@@ -97,6 +97,7 @@ add_library(fireEngineTutorialEngine STATIC
     src/render/swapchain_selection.cpp
     src/scene/scene.cpp
     src/scene/scene_node.cpp
+    src/scene/scene_snapshot.cpp
 )
 
 target_include_directories(fireEngineTutorialEngine PUBLIC include)
@@ -135,6 +136,7 @@ endif()
 add_library(fireEngineTutorialAppSupport STATIC
     src/app/procedural_shadow_receiver.cpp
     src/app/shadow_caster_replacement.cpp
+    src/app/snapshot_acceptance.cpp
     src/app/tutorial_frame_descriptions.cpp
 )
 target_include_directories(fireEngineTutorialAppSupport PUBLIC src/app)
@@ -325,11 +327,13 @@ add_executable(fireEngineTutorialTests
     tests/animation/test_animation_validation.cpp
     tests/app/test_procedural_shadow_receiver.cpp
     tests/app/test_shadow_caster_replacement.cpp
+    tests/app/test_snapshot_acceptance.cpp
     tests/app/test_tutorial_frame_descriptions.cpp
     tests/content/test_scene_content_validation.cpp
     tests/gltf/test_gltf_loader.cpp
     tests/graphics/test_asset_validation.cpp
     tests/graphics/test_frame_capture.cpp
+    tests/graphics/test_render_assets.cpp
     tests/graphics/test_render_preparation.cpp
     tests/math/test_mat4.cpp
     tests/render/test_camera.cpp
@@ -348,6 +352,7 @@ add_executable(fireEngineTutorialTests
     tests/render/test_submission_serials.cpp
     tests/render/test_swapchain_selection.cpp
     tests/scene/test_scene.cpp
+    tests/scene/test_scene_snapshot.cpp
 )
 target_compile_definitions(fireEngineTutorialTests PRIVATE
     FIRE_ENGINE_TEST_ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets"
@@ -545,6 +550,40 @@ fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowPrepareTwiceSy
     SCENARIO shadow-prepare-twice FRAMES 8 PARTICIPANTS automatic SYNC)
 fire_engine_add_shadow_receiver_test(NAME fireEngineTutorialShadowPrepareTwiceForwardSplitSyncValidation
     SCENARIO shadow-prepare-twice FRAMES 8 PARTICIPANTS 2 SYNC)
+
+# The app matches every expected rejection by type and message, and counts
+# them. Validation is what shows that no rejected attempt acquired an image:
+# one that had would leave its slot's acquisition semaphore signaled.
+set(FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_REPORT
+    "Snapshot acceptance: 8 presented frames, 4 rejected draws, 1 rejected preparation, 2 preparations[.][^|]*Presented 8 frames[.]"
+)
+add_test(NAME fireEngineTutorialSnapshotAcceptanceSmoke
+    COMMAND fireEngineTutorial --smoke snapshot-acceptance
+)
+set(FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_TESTS fireEngineTutorialSnapshotAcceptanceSmoke)
+if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_SYNC_CONFIGURATIONS)
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_SYNC_CONFIGURATIONS CONFIGURATIONS Debug)
+    endif()
+    add_test(NAME fireEngineTutorialSnapshotAcceptanceSyncValidation
+        COMMAND fireEngineTutorial --smoke snapshot-acceptance
+        ${FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_SYNC_CONFIGURATIONS}
+    )
+    set_tests_properties(fireEngineTutorialSnapshotAcceptanceSyncValidation PROPERTIES
+        ENVIRONMENT "${FIRE_ENGINE_SYNC_VALIDATION_ENVIRONMENT}"
+    )
+    list(APPEND FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_TESTS
+        fireEngineTutorialSnapshotAcceptanceSyncValidation
+    )
+endif()
+set_tests_properties(${FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_TESTS} PROPERTIES
+    PASS_REGULAR_EXPRESSION "${FIRE_ENGINE_SNAPSHOT_ACCEPTANCE_REPORT}"
+    FAIL_REGULAR_EXPRESSION "Vulkan validation error:"
+    LABELS vulkan-device
+    RESOURCE_LOCK fireEngineTutorialVulkan
+    TIMEOUT 30
+)
 
 # Keep capture registration and its Vulkan-device properties together. A new
 # scenario must not be able to omit validation rejection, serialization, or its

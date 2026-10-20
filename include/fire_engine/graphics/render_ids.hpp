@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 
 namespace fire_engine
@@ -80,5 +81,35 @@ struct RenderObjectId
 
     /** @brief Compares two render-object IDs by their dense index. @return True when equal. */
     [[nodiscard]] constexpr bool operator==(const RenderObjectId&) const noexcept = default;
+};
+
+/**
+ * @brief Process-unique identity of one RenderAssets content history.
+ *
+ * The identity follows content: moving a catalog moves its identity, and the
+ * moved-from catalog starts a new one. No value is ever issued twice.
+ */
+struct RenderAssetsId
+{
+    std::uint64_t value = 0; ///< Issued identity; zero means none.
+
+    /** @brief Returns whether this ID was issued to a catalog. @return True if valid. */
+    [[nodiscard]] constexpr bool valid() const noexcept
+    {
+        return value != 0;
+    }
+
+    /** @brief Compares two catalog identities. @return True when equal. */
+    [[nodiscard]] constexpr bool operator==(const RenderAssetsId&) const noexcept = default;
+};
+
+/** @brief Catalog identity and revision that a plan or scene snapshot was built from. */
+struct RenderAssetsStamp
+{
+    RenderAssetsId catalog;   ///< Content history the descriptions belong to.
+    std::size_t revision = 0; ///< Insertions into that history when stamped.
+
+    /** @brief Compares identity and revision. @return True when both are equal. */
+    [[nodiscard]] constexpr bool operator==(const RenderAssetsStamp&) const noexcept = default;
 };
 } // namespace fire_engine

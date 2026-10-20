@@ -9,6 +9,7 @@
 
 #include <fire_engine/graphics/mesh.hpp>
 #include <fire_engine/graphics/pipeline_description.hpp>
+#include <fire_engine/graphics/render_ids.hpp>
 #include <fire_engine/render/detail/buffer.hpp>
 #include <fire_engine/render/detail/compiled_render_object.hpp>
 #include <fire_engine/render/detail/image.hpp>
@@ -155,6 +156,9 @@ struct CompiledResourceGraph
     std::vector<std::unique_ptr<CompiledMesh>> meshes;      ///< Dense MeshId lookup.
     /// Dense RenderObjectId lookup containing geometry and forward material state.
     std::vector<std::optional<CompiledRenderObject>> objects;
+    /// Catalog identity and revision the graph was compiled from; none for the empty graph.
+    /// It is a member, so installing the graph installs its stamp in the same step.
+    std::optional<RenderAssetsStamp> catalog;
 };
 /** @endcond */
 } // namespace detail

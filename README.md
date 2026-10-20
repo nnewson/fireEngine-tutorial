@@ -67,22 +67,27 @@ Capture does not shorten the requested run and cannot be combined with a
 performance benchmark.
 
 CTest runs the Vulkan-free Catch2 suite plus bounded device scenarios covering
-normal AnimatedCube animation, replacement after changed preparation inputs,
-an untextured fallback draw, repeated swapchain recreation, frame capture, and
-benchmark recording controls. The seven smoke paths can be selected directly
-with `--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`,
-`--smoke resize`, `--smoke shadow`, `--smoke shadow-reuse`, or
-`--smoke shadow-prepare-twice`.
-The `shadow-reuse` scenario reuses the receiver scene for 32 presented frames
-without forced recreation or repeated preparation; `shadow` retains its
-five-frame capture contract. The `shadow-prepare-twice` scenario presents two
-original frames, replaces the active caster with narrowed, untextured geometry,
-then presents six replacement frames. It preserves the receiver and animation,
-and exercises preparation without an app-side idle wait or a replacement image
-upload that could mask a missing retirement wait. All three receiver scenarios
-check packet and actual recording-participant counts on every presented frame,
-including when `--forward-recording-participants 2` forces the helper's secondary
-command buffer to participate.
+normal AnimatedCube animation, replacement after changed preparation inputs, an
+untextured fallback draw, repeated swapchain recreation, frame capture,
+benchmark recording controls, and snapshot acceptance. The eight smoke paths can
+be selected directly with `--smoke basic`, `--smoke prepare-twice`,
+`--smoke untextured`, `--smoke resize`, `--smoke shadow`,
+`--smoke shadow-reuse`, `--smoke shadow-prepare-twice`, or
+`--smoke snapshot-acceptance`. The `shadow-reuse` scenario reuses the receiver
+scene for 32 presented frames without forced recreation or repeated preparation;
+`shadow` retains its five-frame capture contract. The `shadow-prepare-twice`
+scenario presents two original frames, replaces the active caster with narrowed,
+untextured geometry, then presents six replacement frames. It preserves the
+receiver and animation, and exercises preparation without an app-side idle wait
+or a replacement image upload that could mask a missing retirement wait. All
+three receiver scenarios check packet and actual recording-participant counts on
+every presented frame, including when `--forward-recording-participants 2`
+forces the helper's secondary command buffer to participate. The
+`snapshot-acceptance` scenario scripts the catalog contract on the receiver
+scene: a snapshot from a newer revision, or with reordered and repeated draws,
+presents without preparing; an unprepared object, a same-shaped catalog with
+identical numeric IDs, and the replaced catalog's snapshots are rejected; and a
+replaced catalog presents only after `prepare()`.
 
 Options belonging to the same mode may be supplied in any order.
 
@@ -153,17 +158,17 @@ form:
 
 After 16 warm-up frames it measures 64 cleanly presented frames and reports
 mean, median, and 95th-percentile CPU durations for transform resolution,
-draw-list construction, shared frame-input compilation and uniform updates,
-shadow pool reset and primary recording, forward coordinator and participant
-pool resets, forward primary and secondary recording, submission, and
-presentation waits. Every synthetic instance casts, so each measured frame
-records the reported draw count in both passes. These two-pass active-work
-figures have a larger workload and denominator than the historical one-pass
-baselines. The direct-primary control changes only forward recording.
-The per-participant report attributes reset and recording work. Its overlapping
-durations are detail, not extra terms to add to the active-work total. Two Vulkan
-submission slots are cycled independently of the driver-selected swapchain
-image. Frames affected by out-of-date or suboptimal
+scene-snapshot construction (reported as draw-list build), shared frame-input
+compilation and uniform updates, shadow pool reset and primary recording,
+forward coordinator and participant pool resets, forward primary and secondary
+recording, submission, and presentation waits. Every synthetic instance casts,
+so each measured frame records the reported draw count in both passes. These
+two-pass active-work figures have a larger workload and denominator than the
+historical one-pass baselines. The direct-primary control changes only forward
+recording. The per-participant report attributes reset and recording work. Its
+overlapping durations are detail, not extra terms to add to the active-work
+total. Two Vulkan submission slots are cycled independently of the
+driver-selected swapchain image. Frames affected by out-of-date or suboptimal
 presentation are excluded from the measured sample set.
 
 Use a Release build for performance results. Values are comparable only for
@@ -221,19 +226,28 @@ stores reusable rotation channels. Imported LINEAR rotations use shortest-arc
 SLERP. The committed sample and its CC0 attribution live under `assets/AnimatedCube`;
 once dependencies are installed, builds and tests need no asset downloads.
 
-`Renderer::prepare()` validates those relationships through a cached
-`RenderPreparation` compiler and uploads only the resources selected by the
-current `SceneDrawList`. The internal `CompiledResources` subsystem owns mesh
-buffers, sampled images, samplers, and the persistent white fallback texture,
-and records the last frame submission that used them. A changed `prepare()`
-compiles the replacement first, then waits only for that submission before
-destroying the old resources; it does not wait for presentation. The separate
-internal `ResourceCompiler` owns mutable compilation, staging, and its dedicated
-setup-time upload command pool and fence. Scene traversal hashes only ordered
-render-object dependencies, so animation-only transform changes reuse the same
-preparation plan while `Renderer::drawFrame()` records current transforms.
-Device, allocator, resource compiler, compiled resources, presentation state,
-and frame resources remain hidden behind the renderer facade.
+`Scene::buildSnapshot()` writes the current draws into a `SceneSnapshot`, which
+owns them and records the identity and revision of the `RenderAssets` catalog
+they refer to. Applications recycle one draw buffer by releasing each snapshot's
+storage into the next build. `Renderer::prepare()` validates the catalog's
+relationships through a cached `RenderPreparation` compiler and uploads only the
+resources the snapshot selects. The internal `CompiledResources` subsystem owns
+mesh buffers, sampled images, samplers, and the persistent white fallback
+texture, and records the last frame submission that used them. A changed
+`prepare()` compiles the replacement first, then waits only for that submission
+before destroying the old resources; it does not wait for presentation. The
+separate internal `ResourceCompiler` owns mutable compilation, staging, and its
+dedicated setup-time upload command pool and fence. The preparation cache keys
+on the catalog's identity and revision and the exact ordered render-object
+references, never transforms, so animation-only changes reuse the same plan
+while `Renderer::drawFrame()` records current transforms. Neither call keeps a
+reference to the snapshot after it returns. `drawFrame()` accepts a snapshot
+only from the catalog the installed resources were compiled from, at any
+revision whose draws they cover, and rejects anything else before acquiring an
+image; `prepare()` rejects a snapshot built from another catalog. Catalog
+identity follows content through moves and is never reused. Device, allocator,
+resource compiler, compiled resources, presentation state, and frame resources
+remain hidden behind the renderer facade.
 
 Mathematical coordinates use `Vec3` and `Vec4`, while graphics colors use the
 separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain
@@ -249,7 +263,7 @@ presentation, and the KHR or equivalent EXT swapchain-maintenance path used for
 presentation fences. The pipelines read compiled `shadow.spv` and `forward.spv`
 directly through maintenance5, so no `VkShaderModule` is created.
 
-One frame-input compiler walks the frozen draw list once. Each resource lookup
+One frame-input compiler walks the snapshot's draws once. Each resource lookup
 emits a forward packet and, only for a caster, a geometry-only shadow packet.
 The two restricted, borrowed views expose no resource owners to their recorders.
 Both passes use camera/light matrices from one frame-slot uniform buffer;
