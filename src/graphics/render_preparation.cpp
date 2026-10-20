@@ -4,6 +4,8 @@
 #include <fire_engine/graphics/render_assets.hpp>
 #include <fire_engine/scene/scene_snapshot.hpp>
 
+#include <cassert>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -30,6 +32,16 @@ const RenderPreparationPlan& RenderPreparation::build(const RenderAssets& assets
                                                       const SceneSnapshot& snapshot,
                                                       PipelineDescription pipeline)
 {
+    // Checked before validation, so a rejected pair changes nothing cached.
+    const std::optional<RenderAssetsStamp> built = snapshot.catalog();
+    if (!built.has_value() || built->catalog != assets.id())
+    {
+        throw std::invalid_argument("A scene snapshot was not built from these render assets");
+    }
+    // Identity follows content, so a snapshot can be older than its catalog but
+    // never newer.
+    assert(built->revision <= assets.revision());
+
     const RenderAssetsStamp stamp = assets.stamp();
     if (validatedAssets_ != stamp)
     {

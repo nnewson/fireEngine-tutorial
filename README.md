@@ -67,22 +67,27 @@ Capture does not shorten the requested run and cannot be combined with a
 performance benchmark.
 
 CTest runs the Vulkan-free Catch2 suite plus bounded device scenarios covering
-normal AnimatedCube animation, replacement after changed preparation inputs,
-an untextured fallback draw, repeated swapchain recreation, frame capture, and
-benchmark recording controls. The seven smoke paths can be selected directly
-with `--smoke basic`, `--smoke prepare-twice`, `--smoke untextured`,
-`--smoke resize`, `--smoke shadow`, `--smoke shadow-reuse`, or
-`--smoke shadow-prepare-twice`.
-The `shadow-reuse` scenario reuses the receiver scene for 32 presented frames
-without forced recreation or repeated preparation; `shadow` retains its
-five-frame capture contract. The `shadow-prepare-twice` scenario presents two
-original frames, replaces the active caster with narrowed, untextured geometry,
-then presents six replacement frames. It preserves the receiver and animation,
-and exercises preparation without an app-side idle wait or a replacement image
-upload that could mask a missing retirement wait. All three receiver scenarios
-check packet and actual recording-participant counts on every presented frame,
-including when `--forward-recording-participants 2` forces the helper's secondary
-command buffer to participate.
+normal AnimatedCube animation, replacement after changed preparation inputs, an
+untextured fallback draw, repeated swapchain recreation, frame capture,
+benchmark recording controls, and snapshot acceptance. The eight smoke paths can
+be selected directly with `--smoke basic`, `--smoke prepare-twice`,
+`--smoke untextured`, `--smoke resize`, `--smoke shadow`,
+`--smoke shadow-reuse`, `--smoke shadow-prepare-twice`, or
+`--smoke snapshot-acceptance`. The `shadow-reuse` scenario reuses the receiver
+scene for 32 presented frames without forced recreation or repeated preparation;
+`shadow` retains its five-frame capture contract. The `shadow-prepare-twice`
+scenario presents two original frames, replaces the active caster with narrowed,
+untextured geometry, then presents six replacement frames. It preserves the
+receiver and animation, and exercises preparation without an app-side idle wait
+or a replacement image upload that could mask a missing retirement wait. All
+three receiver scenarios check packet and actual recording-participant counts on
+every presented frame, including when `--forward-recording-participants 2`
+forces the helper's secondary command buffer to participate. The
+`snapshot-acceptance` scenario scripts the catalog contract on the receiver
+scene: a snapshot from a newer revision, or with reordered and repeated draws,
+presents without preparing; an unprepared object, a same-shaped catalog with
+identical numeric IDs, and the replaced catalog's snapshots are rejected; and a
+replaced catalog presents only after `prepare()`.
 
 Options belonging to the same mode may be supplied in any order.
 
@@ -236,9 +241,13 @@ dedicated setup-time upload command pool and fence. The preparation cache keys
 on the catalog's identity and revision and the exact ordered render-object
 references, never transforms, so animation-only changes reuse the same plan
 while `Renderer::drawFrame()` records current transforms. Neither call keeps a
-reference to the snapshot after it returns. Device, allocator, resource
-compiler, compiled resources, presentation state, and frame resources remain
-hidden behind the renderer facade.
+reference to the snapshot after it returns. `drawFrame()` accepts a snapshot
+only from the catalog the installed resources were compiled from, at any
+revision whose draws they cover, and rejects anything else before acquiring an
+image; `prepare()` rejects a snapshot built from another catalog. Catalog
+identity follows content through moves and is never reused. Device, allocator,
+resource compiler, compiled resources, presentation state, and frame resources
+remain hidden behind the renderer facade.
 
 Mathematical coordinates use `Vec3` and `Vec4`, while graphics colors use the
 separate `Color4` aggregate with `r`, `g`, `b`, and `a` components. Both retain

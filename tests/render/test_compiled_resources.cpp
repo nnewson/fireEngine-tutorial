@@ -1,5 +1,6 @@
 #include <fire_engine/render/detail/compiled_resources.hpp>
 
+#include <fire_engine/graphics/render_assets.hpp>
 #include <fire_engine/render/detail/compiled_resource_graph.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -58,4 +59,18 @@ TEST_CASE("Replacing compiled resources installs a graph no submission has used"
     // The replacement's first submission starts its own tag.
     resources.markUsed(kFirstUse + 2);
     REQUIRE(resources.lastUse() == std::optional<std::uint64_t>{kFirstUse + 2});
+}
+
+TEST_CASE("Compiled resources install a graph together with its catalog stamp")
+{
+    CompiledResources resources;
+    REQUIRE_FALSE(resources.view().catalog().has_value());
+
+    const fire_engine::RenderAssets catalog;
+    auto replacement = std::make_unique<CompiledResourceGraph>();
+    replacement->catalog = catalog.stamp();
+    resources.replace(std::move(replacement));
+
+    REQUIRE(resources.view().catalog() == catalog.stamp());
+    REQUIRE(resources.graph().catalog == catalog.stamp());
 }

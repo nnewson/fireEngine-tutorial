@@ -189,6 +189,9 @@ ResourceCompiler::compile(const RenderAssets& assets, const RenderPreparationPla
         };
     }
 
+    // The plan was built from these assets during the same preparation.
+    assert(plan.assets == assets.stamp());
+    candidate->catalog = plan.assets;
     return candidate;
 }
 /** @endcond */

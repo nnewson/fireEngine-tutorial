@@ -201,8 +201,9 @@ public:
      * @param shadowState Current frame-slot shadow recording state.
      * @param forwardState Current presentation and frame-slot forward recording state.
      * @return Immutable input valid until this compiler is used again.
-     * @throws std::logic_error if pass requirements disagree or a draw was not prepared or is
-     * pipeline-incompatible.
+     * @throws std::logic_error if pass requirements disagree, nothing has been prepared, the
+     * snapshot has no catalog or one other than the prepared catalog, or a draw was not
+     * prepared or is pipeline-incompatible.
      * @pre The previous input returned by this compiler has no remaining CPU consumers.
      */
     [[nodiscard]] FrameRecordingInput compile(const SceneSnapshot& snapshot,

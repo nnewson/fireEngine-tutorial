@@ -548,3 +548,41 @@ TEST_CASE("Render preparation keeps no reference to the snapshot it was built fr
     REQUIRE(preparation.generation() == 1);
     REQUIRE(&reused == &plan);
 }
+
+TEST_CASE("Render preparation rejects a snapshot from another catalog without changing its cache")
+{
+    const RenderAssets assets = makeTriangleAssets(true);
+    const RenderAssets other = makeTriangleAssets(true);
+    Scene scene;
+    scene.addRoot("triangle").component(RenderObjectId{.value = 0});
+
+    RenderPreparation preparation;
+    const RenderPreparationPlan& plan =
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{});
+
+    // Same entries, numeric IDs and revision: only the catalog differs.
+    REQUIRE_THROWS_AS(preparation.build(assets, scene.buildSnapshot(other), PipelineDescription{}),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(preparation.build(assets, SceneSnapshot{}, PipelineDescription{}),
+                      std::invalid_argument);
+
+    const RenderPreparationPlan& reused =
+        preparation.build(assets, scene.buildSnapshot(assets), PipelineDescription{});
+    REQUIRE(preparation.generation() == 1);
+    REQUIRE(&reused == &plan);
+}
+
+TEST_CASE("Render preparation accepts a snapshot from an earlier revision of its catalog")
+{
+    RenderAssets assets = makeTriangleAssets(true);
+    Scene scene;
+    scene.addRoot("triangle").component(RenderObjectId{.value = 0});
+    const SceneSnapshot earlier = scene.buildSnapshot(assets);
+    static_cast<void>(assets.addMaterial(Material{}));
+
+    RenderPreparation preparation;
+    const RenderPreparationPlan& plan = preparation.build(assets, earlier, PipelineDescription{});
+    // The plan describes the catalog as it is now; the older draws are covered by it.
+    REQUIRE(plan.assets == assets.stamp());
+    REQUIRE(plan.renderObjects.size() == 1);
+}

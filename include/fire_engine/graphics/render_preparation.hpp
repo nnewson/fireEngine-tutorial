@@ -74,7 +74,8 @@ public:
      * @param snapshot Current scene draws, read only during this call.
      * @param pipeline Vulkan-free requirements selected for the compiled draw packets.
      * @return Reference valid until the next build() call that changes the plan.
-     * @throws std::invalid_argument if an asset or draw dependency is invalid.
+     * @throws std::invalid_argument if the snapshot was not built from @p assets, or an asset
+     * or draw dependency is invalid.
      */
     [[nodiscard]] const RenderPreparationPlan&
     build(const RenderAssets& assets, const SceneSnapshot& snapshot, PipelineDescription pipeline);

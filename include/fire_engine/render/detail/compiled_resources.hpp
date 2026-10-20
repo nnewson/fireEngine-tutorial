@@ -25,17 +25,25 @@ public:
      */
     [[nodiscard]] std::optional<CompiledRenderObject> find(RenderObjectId id) const noexcept;
 
+    /**
+     * @brief Returns the catalog the viewed graph was compiled from.
+     * @return Identity and revision, or nullopt before any graph has been prepared.
+     */
+    [[nodiscard]] std::optional<RenderAssetsStamp> catalog() const noexcept;
+
 private:
     friend class CompiledResources;
 
     /**
      * @brief Creates a restricted view of one stable render-object table.
      * @param objects Borrowed dense RenderObjectId lookup.
+     * @param catalog Catalog stamp of the graph that owns the table.
      */
-    explicit CompiledResourcesView(
-        std::span<const std::optional<CompiledRenderObject>> objects) noexcept;
+    CompiledResourcesView(std::span<const std::optional<CompiledRenderObject>> objects,
+                          std::optional<RenderAssetsStamp> catalog) noexcept;
 
     std::span<const std::optional<CompiledRenderObject>> objects_; ///< Borrowed lookup capability.
+    std::optional<RenderAssetsStamp> catalog_; ///< Catalog the viewed graph describes.
 };
 
 /**

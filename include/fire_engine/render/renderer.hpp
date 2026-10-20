@@ -220,7 +220,8 @@ public:
      * frames that used the old one; they do not wait for presentation or for
      * the device to become idle.
      *
-     * @throws std::invalid_argument if assets or draw references are invalid.
+     * @throws std::invalid_argument if the snapshot was not built from @p assets,
+     * or assets or draw references are invalid.
      * @throws std::runtime_error if a GPU allocation, upload, or wait for the
      * old subset's frames fails.
      */
@@ -232,7 +233,9 @@ public:
      * @param frameDescription Vulkan-free camera and shadow values sampled for this frame.
      * @param timings Optional output populated with host timings for this attempt.
      * @return Whether an image was presented and whether the swapchain remains suitable.
-     * @throws std::logic_error if prepare() has not run or a draw reference was not prepared.
+     * @throws std::logic_error if prepare() has not run, the snapshot comes from a
+     * catalog other than the prepared one, or a draw reference was not prepared.
+     * Each is rejected before an image is acquired, so the call can be retried.
      * @throws std::invalid_argument if the camera or directional-shadow view is invalid.
      * @throws vk::SystemError internally if an unexpected Vulkan operation fails.
      */

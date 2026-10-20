@@ -11,7 +11,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -72,6 +74,32 @@ compiledRenderObject(std::uintptr_t firstHandle, fire_engine::Color4 baseColor,
             },
         .castsShadow = castsShadow,
     };
+}
+
+/** @brief Installs a two-object graph with only the listed objects compiled. */
+void installGraph(fire_engine::detail::CompiledResources& resources,
+                  std::optional<fire_engine::RenderAssetsStamp> catalog, bool compileSecond)
+{
+    auto graph = std::make_unique<fire_engine::detail::CompiledResourceGraph>();
+    graph->objects.resize(2);
+    graph->objects[0] = compiledRenderObject(1, {});
+    if (compileSecond)
+    {
+        graph->objects[1] = compiledRenderObject(10, {});
+    }
+    graph->catalog = catalog;
+    resources.replace(std::move(graph));
+}
+
+/** @brief Returns draws of the listed render objects, in order. */
+[[nodiscard]] std::vector<fire_engine::DrawItem> drawsOf(std::initializer_list<std::size_t> objects)
+{
+    std::vector<fire_engine::DrawItem> draws;
+    for (const std::size_t object : objects)
+    {
+        draws.push_back({.renderObject = fire_engine::RenderObjectId{.value = object}});
+    }
+    return draws;
 }
 
 [[nodiscard]] fire_engine::detail::FrameUniforms frameUniforms()
@@ -162,10 +190,12 @@ TEST_CASE("Frame recording input resolves both pass sequences and reuses its are
     using fire_engine::detail::FrameRecordingInputCompiler;
 
     CompiledResources resources;
+    const fire_engine::RenderAssets catalog;
     auto graph = std::make_unique<CompiledResourceGraph>();
     graph->objects.resize(2);
     graph->objects[0] = compiledRenderObject(1, {.r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f});
     graph->objects[1] = compiledRenderObject(10, {.r = 0.0f, .g = 1.0f, .b = 0.0f, .a = 1.0f});
+    graph->catalog = catalog.stamp();
     resources.replace(std::move(graph));
 
     const std::array drawItems{
@@ -182,7 +212,6 @@ TEST_CASE("Frame recording input resolves both pass sequences and reuses its are
                     .matrix(),
         },
     };
-    const fire_engine::RenderAssets catalog;
     const SceneSnapshot snapshot = snapshotOf(catalog, drawItems);
     FrameRecordingInputCompiler compiler;
 
@@ -270,6 +299,7 @@ TEST_CASE("Frame recording input filters only the ordered shadow sequence")
         compiledRenderObject(10, {.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f}, false);
     graph->objects[secondCaster.value] =
         compiledRenderObject(20, {.r = 0.0f, .g = 0.0f, .b = 1.0f, .a = 1.0f});
+    graph->catalog = catalog.stamp();
     resources.replace(std::move(graph));
 
     const std::array drawItems{
@@ -336,6 +366,7 @@ TEST_CASE("Frame recording input rejects mismatched, unresolved, and incompatibl
     auto incompatible = compiledRenderObject(10, {});
     incompatible.geometry.vertexLayout = static_cast<fire_engine::VertexLayoutKey>(255);
     graph->objects[1] = incompatible;
+    graph->catalog = catalog.stamp();
     resources.replace(std::move(graph));
 
     FrameRecordingInputCompiler compiler;
@@ -348,10 +379,10 @@ TEST_CASE("Frame recording input rejects mismatched, unresolved, and incompatibl
                                          forwardRecordingState()),
                         "Shadow and forward recording pipelines use different vertex layouts");
 
-    REQUIRE_THROWS_WITH(compiler.compile(snapshotOf(catalog, missingItems), resources.view(),
-                                         frameUniforms(), shadowRecordingState(),
-                                         forwardRecordingState()),
-                        "Scene refers to an object not compiled by prepare");
+    REQUIRE_THROWS_WITH(
+        compiler.compile(snapshotOf(catalog, missingItems), resources.view(), frameUniforms(),
+                         shadowRecordingState(), forwardRecordingState()),
+        Catch::Matchers::ContainsSubstring("Scene refers to an object not compiled by prepare"));
 
     const std::array incompatibleItems{DrawItem{.renderObject = RenderObjectId{.value = 1}}};
     REQUIRE_THROWS_WITH(compiler.compile(snapshotOf(catalog, incompatibleItems), resources.view(),
@@ -370,11 +401,12 @@ TEST_CASE("Frame recording input copies its draws out of the scene snapshot")
     using fire_engine::detail::FrameRecordingInputCompiler;
 
     CompiledResources resources;
+    const fire_engine::RenderAssets catalog;
     auto graph = std::make_unique<CompiledResourceGraph>();
     graph->objects.resize(1);
     graph->objects[0] = compiledRenderObject(1, {});
+    graph->catalog = catalog.stamp();
     resources.replace(std::move(graph));
-    const fire_engine::RenderAssets catalog;
     const fire_engine::Mat4 world = fire_engine::Transform{.translation = {.x = 1.0f}}.matrix();
     SceneSnapshot snapshot{catalog,
                            {DrawItem{.renderObject = RenderObjectId{.value = 0}, .world = world}}};
@@ -390,4 +422,103 @@ TEST_CASE("Frame recording input copies its draws out of the scene snapshot")
 
     REQUIRE(input.shadow().draws().front().constants.model == world);
     REQUIRE(input.forward().draws().front().constants.model == world);
+}
+
+TEST_CASE("Frame recording input accepts covered snapshots from any revision of the prepared "
+          "catalog")
+{
+    using fire_engine::Material;
+    using fire_engine::RenderAssets;
+    using fire_engine::SceneSnapshot;
+    using fire_engine::detail::CompiledResources;
+    using fire_engine::detail::FrameRecordingInputCompiler;
+
+    RenderAssets catalog;
+    const SceneSnapshot older{catalog, drawsOf({0, 1})};
+    static_cast<void>(catalog.addMaterial(Material{}));
+    CompiledResources resources;
+    installGraph(resources, catalog.stamp(), true);
+    const std::size_t preparedRevision = catalog.revision();
+    static_cast<void>(catalog.addMaterial(Material{}));
+    // Reordered and repeated, at a revision the graph was never prepared for.
+    const SceneSnapshot newer{catalog, drawsOf({1, 0, 0})};
+    const SceneSnapshot subset{catalog, drawsOf({1})};
+    REQUIRE(older.catalog() != resources.view().catalog());
+    REQUIRE(newer.catalog() != resources.view().catalog());
+    REQUIRE(catalog.revision() > preparedRevision);
+
+    FrameRecordingInputCompiler compiler;
+    const auto compile = [&](const SceneSnapshot& snapshot)
+    {
+        return compiler
+            .compile(snapshot, resources.view(), frameUniforms(), shadowRecordingState(),
+                     forwardRecordingState())
+            .forward()
+            .draws()
+            .size();
+    };
+    REQUIRE(compile(older) == 2);
+    REQUIRE(compile(subset) == 1);
+    {
+        const auto input = compiler.compile(newer, resources.view(), frameUniforms(),
+                                            shadowRecordingState(), forwardRecordingState());
+        const auto second = requireCompiledObject(resources.view(), {.value = 1});
+        REQUIRE(input.forward().draws().size() == 3);
+        REQUIRE(input.forward().draws()[0].vertexBuffer == second.geometry.vertexBuffer);
+        REQUIRE(input.shadow().draws().size() == 3);
+    }
+}
+
+TEST_CASE("Frame recording input rejects an older snapshot that a newer graph no longer covers")
+{
+    using fire_engine::Material;
+    using fire_engine::RenderAssets;
+    using fire_engine::SceneSnapshot;
+    using fire_engine::detail::CompiledResources;
+    using fire_engine::detail::FrameRecordingInputCompiler;
+
+    RenderAssets catalog;
+    const SceneSnapshot older{catalog, drawsOf({0, 1})};
+    static_cast<void>(catalog.addMaterial(Material{}));
+    CompiledResources resources;
+    installGraph(resources, catalog.stamp(), false);
+
+    FrameRecordingInputCompiler compiler;
+    REQUIRE_THROWS_WITH(compiler.compile(older, resources.view(), frameUniforms(),
+                                         shadowRecordingState(), forwardRecordingState()),
+                        Catch::Matchers::ContainsSubstring(
+                            "not compiled by prepare (snapshot revision 0, prepared revision 1)"));
+}
+
+TEST_CASE("Frame recording input rejects snapshots without the prepared catalog")
+{
+    using fire_engine::Material;
+    using fire_engine::RenderAssets;
+    using fire_engine::SceneSnapshot;
+    using fire_engine::detail::CompiledResources;
+    using fire_engine::detail::FrameRecordingInputCompiler;
+
+    // Same entries, so the numeric IDs and revisions coincide; only identity differs.
+    RenderAssets prepared;
+    RenderAssets other;
+    static_cast<void>(prepared.addMaterial(Material{}));
+    static_cast<void>(other.addMaterial(Material{}));
+    REQUIRE(prepared.revision() == other.revision());
+    CompiledResources resources;
+    installGraph(resources, prepared.stamp(), true);
+
+    FrameRecordingInputCompiler compiler;
+    const auto compile = [&](const SceneSnapshot& snapshot, const CompiledResources& graph)
+    {
+        static_cast<void>(compiler.compile(snapshot, graph.view(), frameUniforms(),
+                                           shadowRecordingState(), forwardRecordingState()));
+    };
+    REQUIRE_NOTHROW(compile(SceneSnapshot{prepared, drawsOf({0, 1})}, resources));
+    REQUIRE_THROWS_WITH(compile(SceneSnapshot{other, drawsOf({0, 1})}, resources),
+                        Catch::Matchers::ContainsSubstring("was built from catalog"));
+    REQUIRE_THROWS_WITH(compile(SceneSnapshot{}, resources), "Scene snapshot has no catalog");
+
+    const CompiledResources unprepared;
+    REQUIRE_THROWS_WITH(compile(SceneSnapshot{prepared, drawsOf({0})}, unprepared),
+                        "No compiled resources have been prepared");
 }

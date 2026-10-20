@@ -2,6 +2,7 @@
 
 #include <fire_engine/scene/scene_snapshot.hpp>
 
+#include <format>
 #include <optional>
 #include <stdexcept>
 
@@ -81,6 +82,27 @@ FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneSnapshot& sn
             "Shadow and forward recording pipelines use different vertex layouts");
     }
 
+    // Numeric IDs mean something only within one catalog. Revisions are only
+    // reported: within one catalog every covered entry is the same at any
+    // revision, so coverage below decides the rest.
+    const std::optional<RenderAssetsStamp> built = snapshot.catalog();
+    const std::optional<RenderAssetsStamp> prepared = resources.catalog();
+    if (!prepared.has_value())
+    {
+        throw std::logic_error("No compiled resources have been prepared");
+    }
+    if (!built.has_value())
+    {
+        throw std::logic_error("Scene snapshot has no catalog");
+    }
+    if (built->catalog != prepared->catalog)
+    {
+        throw std::logic_error(std::format(
+            "Scene snapshot was built from catalog {} at revision {}, but the prepared "
+            "resources describe catalog {} at revision {}",
+            built->catalog.value, built->revision, prepared->catalog.value, prepared->revision));
+    }
+
     shadowDraws_.clear();
     forwardDraws_.clear();
     for (const DrawItem& item : snapshot.drawItems())
@@ -89,7 +111,10 @@ FrameRecordingInput FrameRecordingInputCompiler::compile(const SceneSnapshot& sn
             resources.find(item.renderObject);
         if (!compiledObject.has_value())
         {
-            throw std::logic_error("Scene refers to an object not compiled by prepare");
+            throw std::logic_error(
+                std::format("Scene refers to an object not compiled by prepare (snapshot "
+                            "revision {}, prepared revision {})",
+                            built->revision, prepared->revision));
         }
         const CompiledRenderObject& object = compiledObject.value();
         if (object.geometry.vertexLayout != forwardState.vertexLayout)
